@@ -70,7 +70,7 @@
     "@vdcs/oid4vp-client": "^0.1.8",
     "expo-crypto": "^14.1.5",
     "expo-secure-store": "^14.2.3",
-    "uuid": "^11.1.0",
+    "uuid": "^14.0.0",
     "react-native-base64": "^0.2.1"
   },
   "peerDependencies": {

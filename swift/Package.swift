@@ -46,7 +46,7 @@ let package = Package(
         .systemLibrary(name: "CZlib", path: "Sources/CZlib"),
         .target(
             name: "StatusList",
-            dependencies: ["WalletAPI", "SdJwt", "CZlib"]
+            dependencies: ["WalletAPI", "SdJwt", "CborCose", "CZlib"]
         ),
         .target(
             name: "Trust",

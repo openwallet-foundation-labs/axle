@@ -65,6 +65,11 @@ public struct StatusList {
         guard let sl = payload["status_list"] else { throw StatusListError("missing status_list") }
         guard case let .numInt(bits)? = sl["bits"] else { throw StatusListError("missing bits") }
         guard case let .str(lst)? = sl["lst"] else { throw StatusListError("missing lst") }
-        return try StatusList(bits: Int(bits), unpacked: try Zlib.inflate(Base64Url.decode(lst)))
+        return try fromBitsAndCompressed(bits: Int(bits), compressedLst: Base64Url.decode(lst))
+    }
+
+    /// Builds a status list from `bits` and the zlib-compressed `lst` bytes (JWT or CWT).
+    public static func fromBitsAndCompressed(bits: Int, compressedLst: [UInt8]) throws -> StatusList {
+        try StatusList(bits: bits, unpacked: try Zlib.inflate(compressedLst))
     }
 }

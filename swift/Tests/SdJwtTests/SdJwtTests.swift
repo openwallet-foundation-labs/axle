@@ -200,6 +200,27 @@ final class SdJwtE2eTests: XCTestCase {
         )
     }
 
+    func testDecoysAndX5cHeader() async throws {
+        let area = SoftwareSecureArea()
+        let k = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let signer = SecureAreaJwsSigner(area: area, key: k.handle, algorithm: .es256)
+
+        let issued = try await SdJwtIssuer(saltProvider: fixedSalts()).issue(signer: signer, decoysPerSdStruct: 3) { b in
+            b.sd("given_name", "John")
+        }
+        let v = try SdJwtVerifier.verify(issued, issuerKey: k.publicKey, algorithm: .es256)
+        XCTAssertEqual(JsonValue.str("John"), v.claims["given_name"])
+        guard case let .arr(sd)? = v.payload["_sd"] else { return XCTFail("no _sd") }
+        XCTAssertEqual(4, sd.count, "1 real + 3 decoy digests")
+
+        let cert: [UInt8] = [0x30, 0x01, 0x02]
+        let header = JsonValue.obj([
+            ("alg", JsonValue.str("ES256")),
+            ("x5c", JsonValue.arr([JsonValue.str(Data(cert).base64EncodedString())])),
+        ])
+        XCTAssertEqual([cert], Jws(header: header, headerB64: "h", payloadB64: "p", signature: []).x5c)
+    }
+
     func testJsonSerializerBasics() throws {
         let obj = JsonValue.obj([
             ("b", JsonValue.str("q\"\\\n")),

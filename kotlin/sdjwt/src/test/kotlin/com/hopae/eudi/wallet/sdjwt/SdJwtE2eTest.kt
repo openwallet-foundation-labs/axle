@@ -178,6 +178,29 @@ class SdJwtE2eTest {
     }
 
     @Test
+    fun decoysAndX5cHeader() = runBlocking {
+        val area = SoftwareSecureArea()
+        val k = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val signer = SecureAreaJwsSigner(area, k.handle, SigningAlgorithm.ES256)
+
+        val issued = SdJwtIssuer(fixedSalts()).issue(signer = signer, decoysPerSdStruct = 3) {
+            sd("given_name", "John")
+        }
+        val v = SdJwtVerifier.verify(issued, k.publicKey, SigningAlgorithm.ES256)
+        assertEquals(JsonValue.Str("John"), v.claims["given_name"])
+        assertEquals(4, (v.payload["_sd"] as JsonValue.Arr).items.size, "1 real + 3 decoy digests")
+
+        val certBytes = byteArrayOf(0x30, 0x01, 0x02)
+        val header = JsonValue.Obj(
+            listOf(
+                "alg" to JsonValue.Str("ES256"),
+                "x5c" to JsonValue.Arr(listOf(JsonValue.Str(java.util.Base64.getEncoder().encodeToString(certBytes)))),
+            )
+        )
+        assertEquals(certBytes.toList(), Jws(header, "h", "p", ByteArray(0)).x5c!!.single().toList())
+    }
+
+    @Test
     fun jsonSerializerBasics() {
         val obj = JsonValue.Obj(
             listOf(

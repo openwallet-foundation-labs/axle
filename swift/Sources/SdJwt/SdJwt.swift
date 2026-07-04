@@ -405,7 +405,7 @@ public final class SdObjectBuilder {
         parts.append(.arr(name, elements))
     }
 
-    func build(salt: () -> String, out: inout [Disclosure]) throws -> JsonValue {
+    func build(salt: () -> String, out: inout [Disclosure], decoys: Int = 0) throws -> JsonValue {
         var entries: [(String, JsonValue)] = []
         var sdDigests: [String] = []
 
@@ -422,9 +422,9 @@ public final class SdObjectBuilder {
             case let .sd(name, value):
                 try disclose(name, value)
             case let .plainObj(name, builder):
-                entries.append((name, try builder.build(salt: salt, out: &out)))
+                entries.append((name, try builder.build(salt: salt, out: &out, decoys: decoys)))
             case let .sdObj(name, builder):
-                try disclose(name, try builder.build(salt: salt, out: &out))
+                try disclose(name, try builder.build(salt: salt, out: &out, decoys: decoys))
             case let .arr(name, elements):
                 var items: [JsonValue] = []
                 for element in elements {
@@ -437,6 +437,12 @@ public final class SdObjectBuilder {
                     }
                 }
                 entries.append((name, .arr(items)))
+            }
+        }
+        // decoy digests (RFC 9901 §4.2.5): hash of fresh salt — indistinguishable from real ones
+        if !sdDigests.isEmpty && decoys > 0 {
+            for _ in 0..<decoys {
+                sdDigests.append(Base64Url.encode(sha256([UInt8](salt().utf8))))
             }
         }
         // sorted for determinism (RFC allows any order; production may shuffle via Rng later)
@@ -462,12 +468,13 @@ public struct SdJwtIssuer {
         signer: any JwsSigner,
         holderKey: EcPublicKey? = nil,
         typ: String = "dc+sd-jwt",
+        decoysPerSdStruct: Int = 0,
         _ block: (SdObjectBuilder) -> Void
     ) async throws -> SdJwt {
         var disclosures: [Disclosure] = []
         let builder = SdObjectBuilder()
         block(builder)
-        let body = try builder.build(salt: saltProvider, out: &disclosures)
+        let body = try builder.build(salt: saltProvider, out: &disclosures, decoys: decoysPerSdStruct)
 
         guard case var .obj(entries) = body else { throw SdJwtError("internal: body must be object") }
         entries.append(("_sd_alg", .str("sha-256")))

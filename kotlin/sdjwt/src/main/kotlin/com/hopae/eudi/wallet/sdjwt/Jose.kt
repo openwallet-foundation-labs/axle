@@ -57,6 +57,13 @@ class Jws(
     val signature: ByteArray,
 ) {
     val payloadBytes: ByteArray get() = Base64Url.decode(payloadB64)
+
+    /** x5c header (RFC 7515 §4.1.6): DER certs, standard base64. Chain VALIDATION is the trust module's job. */
+    val x5c: List<ByteArray>?
+        get() = (header["x5c"] as? JsonValue.Arr)?.items?.map {
+            val s = (it as? JsonValue.Str)?.value ?: throw JoseException("x5c entries must be strings")
+            Base64.getDecoder().decode(s)
+        }
     val signingInput: ByteArray get() = "$headerB64.$payloadB64".encodeToByteArray()
 
     fun compact(): String = "$headerB64.$payloadB64.${Base64Url.encode(signature)}"

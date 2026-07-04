@@ -331,7 +331,7 @@ class SdObjectBuilder internal constructor() {
     fun sdObj(name: String, block: SdObjectBuilder.() -> Unit) { parts.add(SdObj(name, SdObjectBuilder().apply(block))) }
     fun arr(name: String, elements: List<SdArrayElement>) { parts.add(ArrPart(name, elements)) }
 
-    internal fun build(salt: () -> String, out: MutableList<Disclosure>): JsonValue.Obj {
+    internal fun build(salt: () -> String, out: MutableList<Disclosure>, decoys: Int = 0): JsonValue.Obj {
         val entries = mutableListOf<Pair<String, JsonValue>>()
         val sdDigests = mutableListOf<String>()
 
@@ -345,8 +345,8 @@ class SdObjectBuilder internal constructor() {
             when (part) {
                 is Plain -> entries.add(part.name to part.value)
                 is Sd -> disclose(part.name, part.value)
-                is PlainObj -> entries.add(part.name to part.builder.build(salt, out))
-                is SdObj -> disclose(part.name, part.builder.build(salt, out))
+                is PlainObj -> entries.add(part.name to part.builder.build(salt, out, decoys))
+                is SdObj -> disclose(part.name, part.builder.build(salt, out, decoys))
                 is ArrPart -> entries.add(
                     part.name to JsonValue.Arr(
                         part.elements.map { element ->
@@ -359,6 +359,10 @@ class SdObjectBuilder internal constructor() {
                     )
                 )
             }
+        }
+        // decoy digests (RFC 9901 §4.2.5): hash of fresh salt — indistinguishable from real ones
+        if (sdDigests.isNotEmpty() && decoys > 0) {
+            repeat(decoys) { sdDigests.add(Base64Url.encode(sha256(salt().encodeToByteArray()))) }
         }
         // sorted for determinism (RFC allows any order; production may shuffle via Rng later)
         if (sdDigests.isNotEmpty()) {
@@ -379,10 +383,11 @@ class SdJwtIssuer(private val saltProvider: () -> String) {
         signer: JwsSigner,
         holderKey: EcPublicKey? = null,
         typ: String = "dc+sd-jwt",
+        decoysPerSdStruct: Int = 0,
         block: SdObjectBuilder.() -> Unit,
     ): SdJwt {
         val disclosures = mutableListOf<Disclosure>()
-        val body = SdObjectBuilder().apply(block).build(saltProvider, disclosures)
+        val body = SdObjectBuilder().apply(block).build(saltProvider, disclosures, decoysPerSdStruct)
 
         val entries = body.entries.toMutableList()
         entries.add("_sd_alg" to JsonValue.Str("sha-256"))

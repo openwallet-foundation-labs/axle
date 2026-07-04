@@ -95,6 +95,17 @@ public struct Jws {
         (try? Base64Url.decode(payloadB64)) ?? []
     }
 
+    /// x5c header (RFC 7515 §4.1.6): DER certs, standard base64. Chain VALIDATION is the trust module's job.
+    public var x5c: [[UInt8]]? {
+        guard case let .arr(items)? = header["x5c"] else { return nil }
+        var out: [[UInt8]] = []
+        for item in items {
+            guard case let .str(s) = item, let data = Data(base64Encoded: s) else { return nil }
+            out.append([UInt8](data))
+        }
+        return out
+    }
+
     public var signingInput: [UInt8] {
         [UInt8]("\(headerB64).\(payloadB64)".utf8)
     }

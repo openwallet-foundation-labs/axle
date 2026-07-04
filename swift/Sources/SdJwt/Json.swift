@@ -167,6 +167,10 @@ private struct JsonParser {
             skipWs()
             guard try peek() == "\"" else { throw JsonError("expected object key at \(pos)") }
             let key = try parseString()
+            // security posture: duplicate keys enable claim smuggling in JWT payloads
+            guard !entries.contains(where: { $0.0 == key }) else {
+                throw JsonError("duplicate object key '\(key)'")
+            }
             skipWs()
             guard try peek() == ":" else { throw JsonError("expected ':' at \(pos)") }
             pos += 1

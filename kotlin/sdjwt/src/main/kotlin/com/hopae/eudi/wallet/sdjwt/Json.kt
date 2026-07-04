@@ -126,6 +126,8 @@ private class JsonParser(private val text: String) {
             skipWs()
             if (peek() != '"') throw JsonException("expected object key at $pos")
             val key = parseString()
+            // security posture: duplicate keys enable claim smuggling in JWT payloads
+            if (entries.any { it.first == key }) throw JsonException("duplicate object key '$key'")
             skipWs()
             if (peek() != ':') throw JsonException("expected ':' at $pos")
             pos++

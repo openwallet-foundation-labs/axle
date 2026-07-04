@@ -191,6 +191,7 @@ class SdJwtE2eTest {
         assertEquals(obj, JsonValue.parse(text), "parse(serialize()) must be identity")
         assertEquals(JsonValue.Str("😀ü水"), JsonValue.parse("\"\\ud83d\\ude00ü水\""))
         assertFailsWith<JsonException> { JsonValue.parse("{} trailing") }
+        assertFailsWith<JsonException> { JsonValue.parse("{\"a\":1,\"a\":2}") }
         assertFailsWith<JsonException> { JsonValue.parse("{\"a\":}") }
         assertTrue(JsonValue.parse("9007199254740993") is JsonValue.NumInt, "big integers stay exact")
     }

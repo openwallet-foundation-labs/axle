@@ -63,6 +63,7 @@ class Jws(
 
     /** Header `alg` must equal [expected] — no algorithm negotiation from attacker input. */
     fun verify(key: EcPublicKey, expected: SigningAlgorithm): Boolean {
+        if (header["crit"] != null) return false // RFC 7515 §4.1.11: unknown crit extensions MUST be rejected
         val alg = (header["alg"] as? JsonValue.Str)?.value ?: return false
         if (alg != expected.jwsName) return false
         return Ecdsa.verify(key, expected.coseAlgorithm, signingInput, signature)

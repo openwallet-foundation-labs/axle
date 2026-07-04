@@ -105,6 +105,7 @@ public struct Jws {
 
     /// Header `alg` must equal `expected` — no algorithm negotiation from attacker input.
     public func verify(key: EcPublicKey, expected: SigningAlgorithm) -> Bool {
+        guard header["crit"] == nil else { return false } // RFC 7515 §4.1.11: unknown crit extensions MUST be rejected
         guard case let .str(alg)? = header["alg"], alg == expected.jwsName else { return false }
         return Ecdsa.verify(key: key, algorithm: expected.coseAlgorithm, data: signingInput, rawSignature: signature)
     }

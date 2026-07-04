@@ -211,6 +211,7 @@ final class SdJwtE2eTests: XCTestCase {
         XCTAssertEqual(obj, try JsonValue.parse(text), "parse(serialize()) must be identity")
         XCTAssertEqual(JsonValue.str("😀ü水"), try JsonValue.parse("\"\\ud83d\\ude00ü水\""))
         XCTAssertThrowsError(try JsonValue.parse("{} trailing"))
+        XCTAssertThrowsError(try JsonValue.parse("{\"a\":1,\"a\":2}"))
         XCTAssertThrowsError(try JsonValue.parse("{\"a\":}"))
         XCTAssertEqual(JsonValue.numInt(9_007_199_254_740_993), try JsonValue.parse("9007199254740993"), "big integers stay exact")
     }

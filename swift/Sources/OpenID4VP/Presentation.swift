@@ -9,9 +9,11 @@ public struct PresentationContext {
     public let transactionData: [String]?
     /// RFC 7638 thumbprint of the verifier's encryption key, for the mdoc OpenID4VP handover (nil if unencrypted).
     public let verifierJwkThumbprint: [UInt8]?
+    /// Caller web origin for a Digital Credentials API presentation; non-nil selects the DC API handover.
+    public let origin: String?
 
     public init(disclosedPaths: [[String]], clientId: String, nonce: String, responseUri: String?,
-                issuedAt: Int64, transactionData: [String]?, verifierJwkThumbprint: [UInt8]?) {
+                issuedAt: Int64, transactionData: [String]?, verifierJwkThumbprint: [UInt8]?, origin: String? = nil) {
         self.disclosedPaths = disclosedPaths
         self.clientId = clientId
         self.nonce = nonce
@@ -19,6 +21,7 @@ public struct PresentationContext {
         self.issuedAt = issuedAt
         self.transactionData = transactionData
         self.verifierJwkThumbprint = verifierJwkThumbprint
+        self.origin = origin
     }
 }
 

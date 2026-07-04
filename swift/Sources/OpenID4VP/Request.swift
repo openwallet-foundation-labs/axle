@@ -39,6 +39,16 @@ public struct ResolvedRequest {
     public let clientMetadata: JsonValue?
     public let transactionData: [String]?
     public let verifier: VerifierInfo
+    /// Caller web origin for a Digital Credentials API request (nil for the URL/QR flow).
+    public let origin: String?
+
+    public init(clientId: String, nonce: String, state: String?, responseMode: String, responseUri: String?,
+                redirectUri: String?, dcqlQuery: DcqlQuery, clientMetadata: JsonValue?, transactionData: [String]?,
+                verifier: VerifierInfo, origin: String? = nil) {
+        self.clientId = clientId; self.nonce = nonce; self.state = state; self.responseMode = responseMode
+        self.responseUri = responseUri; self.redirectUri = redirectUri; self.dcqlQuery = dcqlQuery
+        self.clientMetadata = clientMetadata; self.transactionData = transactionData; self.verifier = verifier; self.origin = origin
+    }
 }
 
 /// Resolves an OpenID4VP authorization request (OpenID4VP §5): parses the request URI and
@@ -77,14 +87,36 @@ public struct AuthorizationRequestResolver {
         return try build(claims, clientId, scheme, verifier)
     }
 
-    private func build(_ claims: JsonValue, _ clientId: String, _ scheme: String, _ verifier: VerifierInfo) throws -> ResolvedRequest {
+    /// Resolves an OpenID4VP request delivered over the W3C Digital Credentials API. The request
+    /// object (unsigned JSON or a signed JWS) has no `response_uri`; `origin` is supplied by the
+    /// platform and binds the presentation. Uses `dc_api` / `dc_api.jwt` response modes.
+    public func resolveDcApi(_ requestObject: String, origin: String) async throws -> ResolvedRequest {
+        let trimmed = requestObject.trimmingCharacters(in: .whitespacesAndNewlines)
+        let claims: JsonValue
+        let verifier: VerifierInfo
+        if trimmed.hasPrefix("{") {
+            claims = try JsonValue.parse(trimmed)
+            var clientId = origin
+            if case let .str(c)? = claims["client_id"] { clientId = c }
+            verifier = VerifierInfo(clientId: clientId, clientIdScheme: "web-origin", certificateChainDer: nil, commonName: nil, trusted: false)
+        } else {
+            let (c, v) = try await parseSignedRequest(trimmed, origin, "x509_san_dns")
+            claims = c
+            var clientId = origin
+            if case let .str(cid)? = c["client_id"] { clientId = cid }
+            verifier = VerifierInfo(clientId: clientId, clientIdScheme: v.clientIdScheme, certificateChainDer: v.certificateChainDer, commonName: v.commonName, trusted: v.trusted)
+        }
+        return try build(claims, verifier.clientId, verifier.clientIdScheme, verifier, origin: origin)
+    }
+
+    private func build(_ claims: JsonValue, _ clientId: String, _ scheme: String, _ verifier: VerifierInfo, origin: String? = nil) throws -> ResolvedRequest {
         guard case let .str(nonce)? = claims["nonce"] else { throw VpError.invalidRequest("missing nonce") }
         guard let dcqlObj = claims["dcql_query"], case .obj = dcqlObj else {
             throw VpError.invalidRequest("missing dcql_query (only DCQL is supported)")
         }
-        var responseMode = "direct_post"
+        var responseMode = origin != nil ? "dc_api" : "direct_post"
         if case let .str(m)? = claims["response_mode"] { responseMode = m }
-        guard responseMode == "direct_post" || responseMode == "direct_post.jwt" else {
+        guard ["direct_post", "direct_post.jwt", "dc_api", "dc_api.jwt"].contains(responseMode) else {
             throw VpError.unsupported("response_mode '\(responseMode)'")
         }
         var txData: [String]?
@@ -96,7 +128,7 @@ public struct AuthorizationRequestResolver {
             clientId: clientId, nonce: nonce, state: str("state"),
             responseMode: responseMode, responseUri: str("response_uri"), redirectUri: str("redirect_uri"),
             dcqlQuery: try DcqlQuery.parse(dcqlObj), clientMetadata: claims["client_metadata"],
-            transactionData: txData, verifier: verifier
+            transactionData: txData, verifier: verifier, origin: origin
         )
     }
 

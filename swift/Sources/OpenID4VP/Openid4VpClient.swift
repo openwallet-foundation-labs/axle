@@ -43,6 +43,11 @@ public struct Openid4VpClient {
         try await resolver.resolve(requestUri)
     }
 
+    /// Resolves an OpenID4VP request delivered over the Digital Credentials API (with the caller `origin`).
+    public func resolveDcApiRequest(_ requestObject: String, origin: String) async throws -> ResolvedRequest {
+        try await resolver.resolveDcApi(requestObject, origin: origin)
+    }
+
     public func match(_ request: ResolvedRequest, held: [any PresentableCredential]) -> DcqlMatchResult {
         DcqlEngine.match(request.dcqlQuery, held: held)
     }
@@ -53,14 +58,52 @@ public struct Openid4VpClient {
         selection: PresentationSelection,
         held: [any PresentableCredential]
     ) async throws -> SubmitResult {
+        let vpToken = try await buildVpToken(request: request, matches: matches, selection: selection, held: held)
+        switch request.responseMode {
+        case "direct_post": return try await submitDirectPost(request, vpToken)
+        case "direct_post.jwt": return try await submitDirectPostJwt(request, vpToken)
+        default: throw VpError.unsupported("response_mode \(request.responseMode)")
+        }
+    }
+
+    /// Builds the presentations for a Digital Credentials API request and returns the response object
+    /// to hand back to the platform (no HTTP POST): `{vp_token}` for `dc_api`, `{response: <JWE>}` for
+    /// `dc_api.jwt`. mdoc presentations bind the caller origin via the DC API handover.
+    public func respondDcApi(
+        request: ResolvedRequest,
+        matches: DcqlMatchResult,
+        selection: PresentationSelection,
+        held: [any PresentableCredential]
+    ) async throws -> JsonValue {
+        let vpToken = try await buildVpToken(request: request, matches: matches, selection: selection, held: held)
+        switch request.responseMode {
+        case "dc_api":
+            return .obj([("vp_token", vpToken)])
+        case "dc_api.jwt":
+            guard let recipient = verifierEncryptionKey(request) else {
+                throw VpError.invalidRequest("dc_api.jwt but no verifier encryption key in client_metadata")
+            }
+            let jwe = try Jwe.encryptEcdhEs(plaintext: [UInt8](JsonValue.obj([("vp_token", vpToken)]).serialize().utf8), recipient: recipient, enc: encValue(request))
+            return .obj([("response", .str(jwe))])
+        default:
+            throw VpError.unsupported("respondDcApi requires a dc_api response_mode, got \(request.responseMode)")
+        }
+    }
+
+    private func buildVpToken(
+        request: ResolvedRequest,
+        matches: DcqlMatchResult,
+        selection: PresentationSelection,
+        held: [any PresentableCredential]
+    ) async throws -> JsonValue {
         let missing = matches.requiredQueryIds.filter { selection.chosen[$0] == nil }
         if !missing.isEmpty { throw VpError.queryNotSatisfiable(missing: Set(missing)) }
 
         var heldById: [String: any PresentableCredential] = [:]
         for h in held { heldById[h.credentialId] = h }
         let iat = clock()
-        // For encrypted responses the mdoc OpenID4VP handover binds the verifier's encryption key.
-        let jwkThumbprint: [UInt8]? = request.responseMode == "direct_post.jwt"
+        // Encrypted responses (direct_post.jwt / dc_api.jwt) bind the verifier's encryption key in the mdoc handover.
+        let jwkThumbprint: [UInt8]? = request.responseMode.hasSuffix(".jwt")
             ? verifierEncryptionKey(request).map { ecJwkThumbprint($0) } : nil
 
         var vpEntries: [(String, JsonValue)] = []
@@ -74,17 +117,11 @@ public struct Openid4VpClient {
             let presentation = try await cred.present(PresentationContext(
                 disclosedPaths: candidate.disclosedPaths,
                 clientId: request.clientId, nonce: request.nonce, responseUri: request.responseUri,
-                issuedAt: iat, transactionData: request.transactionData, verifierJwkThumbprint: jwkThumbprint
+                issuedAt: iat, transactionData: request.transactionData, verifierJwkThumbprint: jwkThumbprint, origin: request.origin
             ))
             vpEntries.append((queryId, .arr([.str(presentation)])))
         }
-        let vpToken = JsonValue.obj(vpEntries)
-
-        switch request.responseMode {
-        case "direct_post": return try await submitDirectPost(request, vpToken)
-        case "direct_post.jwt": return try await submitDirectPostJwt(request, vpToken)
-        default: throw VpError.unsupported("response_mode \(request.responseMode)")
-        }
+        return .obj(vpEntries)
     }
 
     private func submitDirectPost(_ request: ResolvedRequest, _ vpToken: JsonValue) async throws -> SubmitResult {

@@ -34,8 +34,14 @@ public struct HeldMdoc: PresentableCredential {
         guard let signer = deviceSigner else { throw VpError.unsupported("mdoc presentation requires a device signer") }
         var disclosed: [String: [String]] = [:]
         for path in ctx.disclosedPaths where path.count >= 2 { disclosed[path[0], default: []].append(path[1]) }
-        let sessionTranscript = try Oid4vpSessionTranscript.build(
-            clientId: ctx.clientId, responseUri: ctx.responseUri, nonce: ctx.nonce, verifierJwkThumbprint: ctx.verifierJwkThumbprint)
+        // DC API presentations bind the caller origin; the URL/QR flow binds client_id + response_uri.
+        let sessionTranscript: Cbor
+        if let origin = ctx.origin {
+            sessionTranscript = try Oid4vpSessionTranscript.dcApi(origin: origin, nonce: ctx.nonce, verifierJwkThumbprint: ctx.verifierJwkThumbprint)
+        } else {
+            sessionTranscript = try Oid4vpSessionTranscript.build(
+                clientId: ctx.clientId, responseUri: ctx.responseUri, nonce: ctx.nonce, verifierJwkThumbprint: ctx.verifierJwkThumbprint)
+        }
         let deviceResponse = try await MdocPresenter.deviceResponse(
             issuerSigned: issuerSigned, docType: docType ?? "", disclosed: disclosed,
             sessionTranscript: sessionTranscript, deviceSigner: signer, deviceSignAlgorithm: deviceSignAlgorithm)

@@ -16,9 +16,30 @@ public enum Oid4vpSessionTranscript {
             verifierJwkThumbprint.map { Cbor.bytes($0) } ?? .null,
             .text(responseUri ?? ""),
         ])
+        return try sessionTranscript("OpenID4VPHandover", handoverInfo)
+    }
+
+    /// SessionTranscript for OpenID4VP over the W3C Digital Credentials API (OpenID4VP 1.0 DC API
+    /// profile): the handover binds the caller `origin` instead of a response_uri —
+    /// `OpenID4VPDCAPIHandover = ["OpenID4VPDCAPIHandover", SHA-256(CBOR([origin, nonce, jwk_thumbprint]))]`.
+    public static func dcApi(origin: String, nonce: String, verifierJwkThumbprint: [UInt8]?) throws -> Cbor {
+        let handoverInfo = Cbor.array([
+            .text(origin),
+            .text(nonce),
+            verifierJwkThumbprint.map { Cbor.bytes($0) } ?? .null,
+        ])
+        return try sessionTranscript("OpenID4VPDCAPIHandover", handoverInfo)
+    }
+
+    /// SessionTranscript for the ISO `org-iso-mdoc` DC API protocol (ISO/IEC TS 18013-7:2025 Annex C):
+    /// `["dcapi", SHA-256(CBOR([base64url(EncryptionInfo), origin]))]`.
+    public static func dcApiIsoMdoc(encryptionInfoBase64: String, origin: String) throws -> Cbor {
+        try sessionTranscript("dcapi", .array([.text(encryptionInfoBase64), .text(origin)]))
+    }
+
+    private static func sessionTranscript(_ handoverType: String, _ handoverInfo: Cbor) throws -> Cbor {
         let hash = [UInt8](SHA256.hash(data: Data(try CborEncoder.encode(handoverInfo))))
-        let handover = Cbor.array([.text("OpenID4VPHandover"), .bytes(hash)])
-        return .array([.null, .null, handover])
+        return .array([.null, .null, .array([.text(handoverType), .bytes(hash)])])
     }
 }
 

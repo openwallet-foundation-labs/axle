@@ -12,6 +12,7 @@ repositories {
 dependencies {
     api(project(":openid4vp"))
     api(project(":sdjwt"))
+    api(project(":mdoc"))
     testImplementation(kotlin("test"))
     // test-only: generate certificate hierarchies with SAN for deterministic chain-validation tests
     testImplementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")

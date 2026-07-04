@@ -17,6 +17,10 @@
  *       and write the resulting pre-authorized `haip-vci://…` offer plus its transaction
  *       code (PIN). Redeem headlessly with no authorization endpoint / browser.
  *
+ *   node drive.js verifier <out-request-file>
+ *       Drive verifier.eudiw.dev to request PID (dc+sd-jwt, family_name + given_name) over
+ *       OpenID4VP and write the `openid4vp://…` request URL the wallet consumes.
+ *
  * Requires a local Chrome; set CHROME_PATH to override /usr/bin/google-chrome.
  */
 const fs = require('fs');
@@ -121,6 +125,95 @@ async function getPreAuthOffer(outOfferFile, outTxCodeFile, data) {
   }
 }
 
+async function getVerifierRequest(outFile) {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const browser = await launch();
+    try {
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1400, height: 1000 });
+        await page.goto('https://verifier.eudiw.dev/home', { waitUntil: 'networkidle2', timeout: 60000 });
+        await sleep(1500);
+
+        // 1. select PID, then Specific attributes + dc+sd-jwt format
+        await page.evaluate(() => {
+            const el = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === 'Person Identification Data (PID)');
+            if (el) el.click();
+        });
+        await sleep(1000);
+        await selectMatOption(page, 0, 'Specific attributes');
+        await selectMatOption(page, 1, 'dc+sd-jwt');
+        await clickEnabled(page, (t) => t === 'Next');
+        await sleep(1200);
+
+        // 2. Select Attributes -> Given name + Family name -> Select
+        await clickEnabled(page, (t) => /Select Attributes/.test(t));
+        await sleep(1000);
+        await page.evaluate(() => {
+            const c = document.querySelector('mat-dialog-container');
+            for (const label of ['Given name', 'Family name']) {
+                const cb = [...c.querySelectorAll('mat-checkbox')].find((x) => x.textContent.trim() === label);
+                if (cb) (cb.querySelector('label') || cb).click();
+            }
+        });
+        await sleep(600);
+        await page.evaluate(() => {
+            const c = document.querySelector('mat-dialog-container');
+            const b = [...c.querySelectorAll('button')].find((x) => /^Select \d/.test(x.textContent.trim()));
+            if (b) b.click();
+        });
+        await sleep(1000);
+        await clickEnabled(page, (t) => t === 'Next');
+        await sleep(1200);
+
+        // 3. OpenID4VP + GET, then Submit
+        await clickToggle(page, 'OpenID4VP');
+        await sleep(400);
+        await clickToggle(page, 'GET');
+        await sleep(400);
+        await clickEnabled(page, (t) => t === 'Submit');
+        await sleep(5000);
+
+        const url = await page.evaluate(() => {
+            const a = [...document.querySelectorAll('a')].find((x) => /^openid4vp:\/\//.test(x.href));
+            return a ? a.href : null;
+        });
+        if (!url) throw new Error('no openid4vp request URL on the verifier QR page');
+        fs.writeFileSync(outFile, url);
+        console.log('verifier request written to', outFile);
+    } finally {
+        await browser.close();
+    }
+}
+
+async function selectMatOption(page, index, text) {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    await page.evaluate((i) => document.querySelectorAll('mat-select')[i].click(), index);
+    await sleep(600);
+    await page.evaluate((t) => {
+        const o = [...document.querySelectorAll('mat-option')].find((x) => x.textContent.trim() === t);
+        if (o) o.click();
+    }, text);
+    await sleep(500);
+}
+
+async function clickEnabled(page, predSrc) {
+    const pred = predSrc.toString();
+    return page.evaluate((predStr) => {
+        const pred = eval('(' + predStr + ')');
+        const b = [...document.querySelectorAll('button')].find((x) => pred(x.textContent.trim()) && !x.disabled);
+        if (b) { b.click(); return true; }
+        return false;
+    }, pred);
+}
+
+async function clickToggle(page, label) {
+    return page.evaluate((label) => {
+        const t = [...document.querySelectorAll('mat-button-toggle')].find((x) => x.textContent.trim() === label);
+        if (t) { (t.querySelector('button') || t).click(); return true; }
+        return false;
+    }, label);
+}
+
 async function driveAuth(authUrlFile, outRedirectFile, data) {
   const url = fs.readFileSync(authUrlFile, 'utf8').trim();
   const browser = await launch();
@@ -202,8 +295,10 @@ async function driveAuth(authUrlFile, outRedirectFile, data) {
     await driveAuth(rest[0], rest[1], data);
   } else if (cmd === 'preauth') {
     await getPreAuthOffer(rest[0], rest[1], data);
+  } else if (cmd === 'verifier') {
+    await getVerifierRequest(rest[0]);
   } else {
-    console.error('usage: node drive.js offer <out> | auth <authurl> <out-redirect> | preauth <out-offer> <out-txcode> [--data f.json]');
+    console.error('usage: node drive.js offer <out> | auth <authurl> <out-redirect> | preauth <out-offer> <out-txcode> | verifier <out-request> [--data f.json]');
     process.exit(2);
   }
 })().catch((e) => { console.error('ERROR:', e.message); process.exit(1); });

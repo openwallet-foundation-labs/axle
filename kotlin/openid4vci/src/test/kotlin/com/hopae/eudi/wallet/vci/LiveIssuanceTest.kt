@@ -129,7 +129,10 @@ class LiveIssuanceTest {
         println("credentials received: ${response.credentials.size}")
         val credential = response.credentials.first().credential
         File(System.getProperty("java.io.tmpdir"), "eudi-credential.txt").writeText(credential)
-        println("credential saved (${credential.length} chars) — verify with VerifySavedPidTest")
+        // Persist the holder (proof) key — its public key is the credential's cnf, so it can
+        // later sign the KB-JWT for an OpenID4VP presentation.
+        File(System.getProperty("java.io.tmpdir"), "eudi-holder-key.json").writeText(proof.toJson().serialize())
+        println("credential + holder key saved — verify with VerifySavedPidTest, present with VpPresentTest")
     }
 
     @Test

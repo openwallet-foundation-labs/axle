@@ -122,6 +122,32 @@ The live issuer signs with **x5c**, not the `.well-known/jwt-vc-issuer` metadata
 (`X5cLeafKeyResolver`) and runs the full `SdJwtVcVerifier`. This confirms: issuer signature,
 disclosure digest resolution, `typ=dc+sd-jwt`, `vct`, time claims, and `cnf` holder binding.
 
+## Presenting to the live verifier — `run-vp.sh`
+
+The reverse direction: present the issued PID to the reference **verifier** (verifier.eudiw.dev)
+over OpenID4VP, fully headless.
+
+```sh
+cd tools/headless-interop && ./run-vp.sh
+```
+
+Pipeline: issue a PID (pre-auth, persisting the holder key) → Chrome drives the verifier wizard
+(pick PID, `dc+sd-jwt`, Specific attributes → Given/Family name, OpenID4VP + GET, Submit) and
+grabs the `openid4vp://…` request from "Open with your wallet" (`drive.js verifier`) → Kotlin
+`VpPresentTest` resolves the request (fetches the signed request object via `request_uri`),
+DCQL-matches the PID, builds the `vp_token` + KB-JWT (bound to the verifier `client_id` + nonce),
+**encrypts it as a JWE** (`direct_post.jwt`) to the verifier's key from `client_metadata.jwks`,
+and POSTs to `response_uri`.
+
+Observed live request: `response_mode=direct_post.jwt`, `client_id=x509_hash:…`, DCQL
+`{query_0: dc+sd-jwt, vct urn:eudi:pid:1, [family_name, given_name]}`. The verifier **accepts the
+encrypted response (HTTP 200)** — the JWE decrypts with its key and the SD-JWT + KB-JWT verify.
+
+Notes: the verifier uses `client_id_scheme = x509_hash` (not `x509_san_dns`); we parse the request
+and present, but full request-signature/chain trust (x509_hash + chain to IACA) is the trust
+module's job (M3, tracked in `SPEC-MATRIX.md`). The holder key must come from the same issuance
+(its public key is the credential's `cnf`); `preAuthIssue` persists it to `eudi-holder-key.json`.
+
 ## Known gaps this exercise surfaced
 
 - **x5c issuer-key resolution is production-needed, not just metadata.** The real issuer uses

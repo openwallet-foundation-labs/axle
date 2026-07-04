@@ -24,7 +24,7 @@ echo "== 2/3 redeem pre-authorized_code at token endpoint (Kotlin, no browser)"
     | grep -E 'pre-auth offer|credentials received|credential saved|PASSED|FAILED' )
 
 echo "== 3/3 verify captured PID via x5c leaf key (Kotlin)"
-( cd "$KOTLIN" && ./gradlew :openid4vci:test --tests '*VerifySavedPidTest*' --console=plain --rerun-tasks 2>&1 \
-    | grep -E 'VERIFIED REAL|vct:|given_name|family_name|birthdate|holder-bound|PASSED|FAILED' )
+( cd "$KOTLIN" && ./gradlew :trust:test --tests '*LiveTrustE2eTest.verifyRealPidWithChain' --console=plain --rerun-tasks 2>&1 \
+    | grep -E 'REAL PID VERIFIED|vct:|given_name|family_name|birthdate|holder-bound|PASSED|FAILED' )
 
 echo "== done. credential at $TMP/eudi-credential.txt"

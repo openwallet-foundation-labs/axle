@@ -1,0 +1,160 @@
+package com.hopae.eudi.wallet.trust
+
+import com.hopae.eudi.wallet.cbor.cose.Der
+import com.hopae.eudi.wallet.sdjwt.Base64Url
+import com.hopae.eudi.wallet.sdjwt.JsonValue
+import com.hopae.eudi.wallet.sdjwt.Jws
+import com.hopae.eudi.wallet.sdjwt.JwsSigner
+import com.hopae.eudi.wallet.spi.SigningAlgorithm
+import com.hopae.eudi.wallet.vp.VpException
+import kotlinx.coroutines.runBlocking
+import java.security.PrivateKey
+import java.security.Signature
+import java.util.Base64
+import java.util.Date
+import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+
+class X509TrustTest {
+
+    private val validAt = { Date(1_700_000_000_000L) }
+
+    private fun leafSigner(priv: PrivateKey): JwsSigner = object : JwsSigner {
+        override val algorithm = SigningAlgorithm.ES256
+        override suspend fun sign(signingInput: ByteArray): ByteArray =
+            Signature.getInstance("SHA256withECDSA").run { initSign(priv); update(signingInput); Der.derSignatureToRaw(sign(), 32) }
+    }
+
+    private fun signedRequest(leaf: TestCerts.Cert, payload: String): Jws = runBlocking {
+        val header = JsonValue.Obj(
+            listOf(
+                "alg" to JsonValue.Str("ES256"),
+                "typ" to JsonValue.Str("oauth-authz-req+jwt"),
+                "x5c" to JsonValue.Arr(listOf(JsonValue.Str(Base64.getEncoder().encodeToString(leaf.der)))),
+            )
+        )
+        Jws.sign(header, payload.encodeToByteArray(), leafSigner(leaf.keyPair.private))
+    }
+
+    // ---- chain validation ----
+
+    @Test
+    fun chainValidatesToAnchor() {
+        val ca = TestCerts.makeCa()
+        val leaf = TestCerts.makeLeaf(ca, "Leaf")
+        val validator = X509ChainValidator(TrustAnchors(listOf(ca.certificate)), at = validAt)
+        val chain = validator.validate(listOf(leaf.der))
+        assertEquals(leaf.certificate, chain.first())
+    }
+
+    @Test
+    fun untrustedCaRejected() {
+        val ca = TestCerts.makeCa("Real CA")
+        val otherCa = TestCerts.makeCa("Rogue CA")
+        val leaf = TestCerts.makeLeaf(ca, "Leaf")
+        val validator = X509ChainValidator(TrustAnchors(listOf(otherCa.certificate)), at = validAt)
+        assertFailsWith<TrustException> { validator.validate(listOf(leaf.der)) }
+    }
+
+    @Test
+    fun expiredLeafRejected() {
+        val ca = TestCerts.makeCa()
+        val leaf = TestCerts.makeLeaf(ca, "Leaf", notAfter = 1_700_000_000_000L - 1000L) // already expired at validAt
+        val validator = X509ChainValidator(TrustAnchors(listOf(ca.certificate)), at = validAt)
+        assertFailsWith<TrustException> { validator.validate(listOf(leaf.der)) }
+    }
+
+    // ---- OpenID4VP request verification ----
+
+    @Test
+    fun x509SanDnsRequestTrusted() {
+        val ca = TestCerts.makeCa()
+        val leaf = TestCerts.makeLeaf(ca, "Verifier", dnsName = "verifier.example.com")
+        val verifier = X509RequestVerifier(X509ChainValidator(TrustAnchors(listOf(ca.certificate)), at = validAt))
+        val jws = signedRequest(leaf, """{"nonce":"n"}""")
+        val info = verifier.verifyRequestObject(jws, "x509_san_dns:verifier.example.com", "x509_san_dns")
+        assertTrue(info.trusted)
+        assertEquals("Verifier", info.commonName)
+    }
+
+    @Test
+    fun x509SanDnsMismatchRejected() {
+        val ca = TestCerts.makeCa()
+        val leaf = TestCerts.makeLeaf(ca, "Verifier", dnsName = "verifier.example.com")
+        val verifier = X509RequestVerifier(X509ChainValidator(TrustAnchors(listOf(ca.certificate)), at = validAt))
+        val jws = signedRequest(leaf, """{"nonce":"n"}""")
+        assertFailsWith<VpException.VerifierNotTrusted> {
+            verifier.verifyRequestObject(jws, "x509_san_dns:evil.example.com", "x509_san_dns")
+        }
+    }
+
+    @Test
+    fun x509HashRequestTrusted() {
+        val ca = TestCerts.makeCa()
+        val leaf = TestCerts.makeLeaf(ca, "Verifier")
+        val validator = X509ChainValidator(TrustAnchors(listOf(ca.certificate)), at = validAt)
+        val thumbprint = X509Support.sha256Thumbprint(leaf.certificate)
+        val jws = signedRequest(leaf, """{"nonce":"n"}""")
+        val info = X509RequestVerifier(validator).verifyRequestObject(jws, "x509_hash:$thumbprint", "x509_hash")
+        assertTrue(info.trusted)
+    }
+
+    @Test
+    fun x509HashMismatchRejected() {
+        val ca = TestCerts.makeCa()
+        val leaf = TestCerts.makeLeaf(ca, "Verifier")
+        val validator = X509ChainValidator(TrustAnchors(listOf(ca.certificate)), at = validAt)
+        val jws = signedRequest(leaf, """{"nonce":"n"}""")
+        assertFailsWith<VpException.VerifierNotTrusted> {
+            X509RequestVerifier(validator).verifyRequestObject(jws, "x509_hash:WRONGHASH", "x509_hash")
+        }
+    }
+
+    @Test
+    fun tamperedRequestSignatureRejected() {
+        val ca = TestCerts.makeCa()
+        val leaf = TestCerts.makeLeaf(ca, "Verifier", dnsName = "verifier.example.com")
+        val validator = X509ChainValidator(TrustAnchors(listOf(ca.certificate)), at = validAt)
+        val jws = signedRequest(leaf, """{"nonce":"n"}""")
+        val tampered = Jws(jws.header, jws.headerB64, Base64Url.encode("""{"nonce":"evil"}"""), jws.signature)
+        assertFailsWith<VpException.VerifierNotTrusted> {
+            X509RequestVerifier(validator).verifyRequestObject(tampered, "x509_san_dns:verifier.example.com", "x509_san_dns")
+        }
+    }
+
+    // ---- issuer key resolution ----
+
+    @Test
+    fun x5cIssuerKeyResolves() = runBlocking {
+        val ca = TestCerts.makeCa()
+        val leaf = TestCerts.makeLeaf(ca, "PID DS")
+        val resolver = X5cIssuerKeyResolver(X509ChainValidator(TrustAnchors(listOf(ca.certificate)), at = validAt))
+        val header = JsonValue.Obj(listOf("x5c" to JsonValue.Arr(listOf(JsonValue.Str(Base64.getEncoder().encodeToString(leaf.der))))))
+        val key = resolver.resolve("https://issuer.example", header)
+        assertContentEquals(X509Support.ecPublicKey(leaf.certificate).x, key.publicKey.x)
+    }
+
+    @Test
+    fun x5cIssuerUntrustedRejected(): Unit = runBlocking {
+        val ca = TestCerts.makeCa()
+        val rogue = TestCerts.makeCa("Rogue")
+        val leaf = TestCerts.makeLeaf(ca, "PID DS")
+        val resolver = X5cIssuerKeyResolver(X509ChainValidator(TrustAnchors(listOf(rogue.certificate)), at = validAt))
+        val header = JsonValue.Obj(listOf("x5c" to JsonValue.Arr(listOf(JsonValue.Str(Base64.getEncoder().encodeToString(leaf.der))))))
+        assertFailsWith<TrustException> { resolver.resolve("https://issuer.example", header) }
+    }
+
+    // ---- real EUDI trust anchor ----
+
+    @Test
+    fun realEudiCaLoadsAsSelfSignedAnchor() {
+        val der = X509TrustTest::class.java.getResourceAsStream("/pid_issuer_ca_ut_02.der")!!.readBytes()
+        val ca = X509Support.parse(der)
+        assertEquals(ca.subjectX500Principal, ca.issuerX500Principal, "IACA is a self-signed root")
+        assertTrue(ca.basicConstraints >= 0, "must be a CA certificate")
+        assertContentEquals(der, ca.encoded)
+    }
+}

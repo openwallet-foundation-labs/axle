@@ -25,7 +25,7 @@ echo "request: $(cut -c1-90 "$TMP/eudi-vp-request.txt")..."
 
 echo "== 3/4 present the PID to the verifier (resolve -> DCQL match -> vp_token/JWE -> submit)"
 ( cd "$KOTLIN" && EUDI_VP=1 EUDI_VP_REQUEST="$(cat "$TMP/eudi-vp-request.txt")" \
-    ./gradlew :openid4vp:test --tests '*VpPresentTest*' --console=plain --rerun-tasks 2>&1 \
-    | grep -E 'verifier client_id|response_mode|dcql queries|satisfiable|candidate|PRESENTATION ACCEPTED|redirect_uri|PASSED|FAILED|VpException|Exception' )
+    ./gradlew :trust:test --tests '*LiveTrustE2eTest.presentWithTrust' --console=plain --rerun-tasks 2>&1 \
+    | grep -E 'verifier:|response_mode|dcql queries|satisfiable|candidate|PRESENTED TO TRUSTED|redirect_uri|PASSED|FAILED|VpException|Exception' )
 
 echo "== 4/4 done"

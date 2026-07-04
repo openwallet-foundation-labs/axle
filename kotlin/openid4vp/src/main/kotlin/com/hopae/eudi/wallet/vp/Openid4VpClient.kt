@@ -34,8 +34,10 @@ class Openid4VpClient(
     private val http: HttpTransport,
     /** epoch seconds; injectable for deterministic tests. */
     private val clock: () -> Long,
+    /** Trust verifier for signed request objects (from the `trust` module); null = parse untrusted. */
+    trust: RequestTrustVerifier? = null,
 ) {
-    private val resolver = AuthorizationRequestResolver(http)
+    private val resolver = AuthorizationRequestResolver(http, trust)
 
     suspend fun resolveRequest(requestUri: String): ResolvedRequest = resolver.resolve(requestUri)
 

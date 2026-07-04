@@ -1,30 +1,31 @@
 package com.hopae.eudi.wallet.vp
 
-import com.hopae.eudi.wallet.cbor.cose.EcCurve
-import com.hopae.eudi.wallet.cbor.cose.EcPublicKey
 import com.hopae.eudi.wallet.sdjwt.JsonValue
 import com.hopae.eudi.wallet.sdjwt.Jws
-import com.hopae.eudi.wallet.sdjwt.signingAlgorithmFromJwsName
 import com.hopae.eudi.wallet.spi.HttpMethod
 import com.hopae.eudi.wallet.spi.HttpRequest
 import com.hopae.eudi.wallet.spi.HttpTransport
-import java.io.ByteArrayInputStream
-import java.math.BigInteger
 import java.net.URLDecoder
-import java.security.cert.CertificateFactory
-import java.security.cert.X509Certificate
-import java.security.interfaces.ECPublicKey
 
 /** What the wallet shows on the consent screen about the verifier and its trust status. */
 class VerifierInfo(
     val clientId: String,
     val clientIdScheme: String,
-    /** X.509 chain from the request signature, leaf first (null for unsigned requests). */
-    val certificateChain: List<X509Certificate>?,
+    /** X.509 chain from the request signature, leaf-first DER (null for unsigned requests). */
+    val certificateChainDer: List<ByteArray>?,
     val commonName: String?,
-    /** Signature verified against the leaf key and (for x509_san_dns) SAN matched client_id. */
-    val signatureValid: Boolean,
+    /** True only when the trust verifier confirmed signature + scheme + chain to a trust anchor. */
+    val trusted: Boolean,
 )
+
+/**
+ * Verifies an OpenID4VP signed request object: the JWS signature, the client_id scheme
+ * (x509_san_dns / x509_hash), and the certificate chain to a trust anchor. Implemented by
+ * the `trust` module (X.509 lives there); the resolver stays platform-neutral.
+ */
+interface RequestTrustVerifier {
+    fun verifyRequestObject(jws: Jws, clientId: String, scheme: String): VerifierInfo
+}
 
 class ResolvedRequest(
     val clientId: String,
@@ -40,14 +41,14 @@ class ResolvedRequest(
 )
 
 /**
- * Resolves an OpenID4VP authorization request (OpenID4VP §5): parses the request URI, follows
- * JAR (`request_uri`/`request`), and for `x509_san_dns` verifies the request-object signature
- * with the leaf certificate and matches its SAN dNSName to the client_id.
- *
- * Chain validation to a trust anchor is the trust module's job (M3); `signatureValid` here
- * means "signed by the presented leaf whose SAN matches the client_id".
+ * Resolves an OpenID4VP authorization request (OpenID4VP §5): parses the request URI and
+ * follows JAR (`request_uri`/`request`). Signed request objects are verified through the
+ * injected [RequestTrustVerifier]; without one, the request is parsed but reported untrusted.
  */
-class AuthorizationRequestResolver(private val http: HttpTransport) {
+class AuthorizationRequestResolver(
+    private val http: HttpTransport,
+    private val trust: RequestTrustVerifier? = null,
+) {
 
     suspend fun resolve(requestUri: String): ResolvedRequest {
         val params = parseQuery(requestUri)
@@ -55,14 +56,10 @@ class AuthorizationRequestResolver(private val http: HttpTransport) {
         val scheme = clientIdScheme(clientId, params["client_id_scheme"])
 
         val (claims, verifier) = when {
-            params["request_uri"] != null -> {
-                val jwt = fetchRequestObject(params["request_uri"]!!)
-                verifySignedRequest(jwt, clientId, scheme)
-            }
-            params["request"] != null -> verifySignedRequest(params["request"]!!, clientId, scheme)
-            else -> unsignedRequest(params) to VerifierInfo(clientId, scheme, null, null, signatureValid = false)
+            params["request_uri"] != null -> verifySigned(fetchRequestObject(params["request_uri"]!!), clientId, scheme)
+            params["request"] != null -> verifySigned(params["request"]!!, clientId, scheme)
+            else -> unsignedRequest(params) to VerifierInfo(clientId, scheme, null, null, trusted = false)
         }
-
         return build(claims, clientId, scheme, verifier)
     }
 
@@ -89,44 +86,23 @@ class AuthorizationRequestResolver(private val http: HttpTransport) {
         )
     }
 
-    private fun unsignedRequest(params: Map<String, String>): JsonValue.Obj {
-        // Query-param requests carry dcql_query / client_metadata / transaction_data as JSON strings.
-        val entries = params.map { (k, v) ->
-            k to when (k) {
-                "dcql_query", "client_metadata" -> JsonValue.parse(v)
-                "transaction_data" -> JsonValue.parse(v)
-                else -> JsonValue.Str(v)
-            }
-        }
-        return JsonValue.Obj(entries)
-    }
-
-    private fun verifySignedRequest(jwt: String, clientId: String, scheme: String): Pair<JsonValue.Obj, VerifierInfo> {
+    private fun verifySigned(jwt: String, clientId: String, scheme: String): Pair<JsonValue.Obj, VerifierInfo> {
         val jws = Jws.parse(jwt)
         val claims = JsonValue.parse(jws.payloadBytes.decodeToString()) as? JsonValue.Obj
             ?: throw VpException.InvalidRequest("request object payload must be JSON")
-
-        if (scheme != "x509_san_dns") {
-            // redirect_uri / other schemes: no signature to verify here.
-            return claims to VerifierInfo(clientId, scheme, null, null, signatureValid = false)
-        }
-
-        val x5c = jws.x5c ?: throw VpException.VerifierNotTrusted("x509_san_dns request without x5c")
-        val chain = x5c.map { der ->
-            CertificateFactory.getInstance("X.509").generateCertificate(ByteArrayInputStream(der)) as X509Certificate
-        }
-        val leaf = chain.first()
-        val alg = signingAlgorithmFromJwsName((jws.header["alg"] as? JsonValue.Str)?.value ?: "")
-            ?: throw VpException.InvalidRequest("unsupported request alg")
-        if (!jws.verify(leafKey(leaf), alg)) throw VpException.VerifierNotTrusted("request signature invalid")
-
-        val expectedDns = clientId.substringAfter("x509_san_dns:", clientId)
-        if (dnsNames(leaf).none { it.equals(expectedDns, ignoreCase = true) }) {
-            throw VpException.VerifierNotTrusted("client_id '$expectedDns' not in certificate SAN dNSName")
-        }
-        val cn = commonName(leaf)
-        return claims to VerifierInfo(clientId, scheme, chain, cn, signatureValid = true)
+        val verifier = trust?.verifyRequestObject(jws, clientId, scheme)
+            ?: VerifierInfo(clientId, scheme, jws.x5c, null, trusted = false)
+        return claims to verifier
     }
+
+    private fun unsignedRequest(params: Map<String, String>): JsonValue.Obj = JsonValue.Obj(
+        params.map { (k, v) ->
+            k to when (k) {
+                "dcql_query", "client_metadata", "transaction_data" -> JsonValue.parse(v)
+                else -> JsonValue.Str(v)
+            }
+        }
+    )
 
     private suspend fun fetchRequestObject(url: String): String {
         val resp = http.execute(HttpRequest(HttpMethod.GET, url, listOf("Accept" to "application/oauth-authz-req+jwt")))
@@ -140,33 +116,11 @@ class AuthorizationRequestResolver(private val http: HttpTransport) {
         else -> "redirect_uri"
     }
 
-    private fun leafKey(cert: X509Certificate): EcPublicKey {
-        val pub = cert.publicKey as? ECPublicKey ?: throw VpException.VerifierNotTrusted("verifier key is not EC")
-        val size = (pub.params.curve.field.fieldSize + 7) / 8
-        val curve = when (size) {
-            32 -> EcCurve.P256; 48 -> EcCurve.P384; 66 -> EcCurve.P521
-            else -> throw VpException.VerifierNotTrusted("unsupported curve")
-        }
-        fun fixed(b: BigInteger): ByteArray {
-            val s = b.toByteArray().dropWhile { it == 0.toByte() }.toByteArray()
-            return ByteArray(size - s.size) + s
-        }
-        return EcPublicKey(curve, fixed(pub.w.affineX), fixed(pub.w.affineY))
-    }
-
-    private fun dnsNames(cert: X509Certificate): List<String> =
-        cert.subjectAlternativeNames?.filter { it[0] == 2 }?.mapNotNull { it[1] as? String } ?: emptyList()
-
-    private fun commonName(cert: X509Certificate): String? =
-        Regex("CN=([^,]+)").find(cert.subjectX500Principal.name)?.groupValues?.get(1)
-
     private fun parseQuery(uri: String): Map<String, String> {
         val query = uri.substringAfter('?', "")
         if (query.isEmpty()) throw VpException.InvalidRequest("no query parameters in request")
         return query.split('&').filter { it.isNotEmpty() }.associate {
-            val k = it.substringBefore('=')
-            val v = it.substringAfter('=', "")
-            URLDecoder.decode(k, "UTF-8") to URLDecoder.decode(v, "UTF-8")
+            URLDecoder.decode(it.substringBefore('='), "UTF-8") to URLDecoder.decode(it.substringAfter('=', ""), "UTF-8")
         }
     }
 

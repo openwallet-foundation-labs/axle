@@ -1,0 +1,121 @@
+package com.hopae.eudi.wallet.trust
+
+import com.hopae.eudi.wallet.cbor.cose.Der
+import com.hopae.eudi.wallet.cbor.cose.EcCurve
+import com.hopae.eudi.wallet.cbor.cose.EcPublicKey
+import com.hopae.eudi.wallet.sdjwt.Base64Url
+import com.hopae.eudi.wallet.sdjwt.JsonValue
+import com.hopae.eudi.wallet.sdjwt.JwsSigner
+import com.hopae.eudi.wallet.sdjwt.JwtTimeValidator
+import com.hopae.eudi.wallet.sdjwt.SdJwt
+import com.hopae.eudi.wallet.sdjwt.SdJwtVcVerifier
+import com.hopae.eudi.wallet.spi.HttpMethod
+import com.hopae.eudi.wallet.spi.HttpRequest
+import com.hopae.eudi.wallet.spi.HttpResponse
+import com.hopae.eudi.wallet.spi.HttpTransport
+import com.hopae.eudi.wallet.spi.SigningAlgorithm
+import com.hopae.eudi.wallet.vp.HeldSdJwtVc
+import com.hopae.eudi.wallet.vp.Openid4VpClient
+import com.hopae.eudi.wallet.vp.PresentationSelection
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import java.io.File
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest as JdkRequest
+import java.net.http.HttpResponse as JdkResponse
+import java.security.KeyFactory
+import java.security.Signature
+import java.security.spec.PKCS8EncodedKeySpec
+import java.time.Duration
+import java.time.Instant
+import java.util.Base64
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/**
+ * Live trust e2e against the real EUDI infrastructure, using the production trust module
+ * (X.509 chain validation to the bundled EUDI IACA `PID Issuer CA - UT 02`).
+ *   - verifyRealPidWithChain: EUDI_LIVE=x — verify the captured PID's issuer x5c chains to the anchor.
+ *   - presentWithTrust: EUDI_VP=1, EUDI_VP_REQUEST=<url> — verify the verifier request (x509_hash)
+ *     against the anchor, then present.
+ */
+class LiveTrustE2eTest {
+
+    private fun anchor(): TrustAnchors {
+        val der = javaClass.getResourceAsStream("/pid_issuer_ca_ut_02.der")!!.readBytes()
+        return TrustAnchors(listOf(X509Support.parse(der)))
+    }
+
+    @Test
+    fun verifyRealPidWithChain() = runBlocking {
+        assumeTrue(System.getenv("EUDI_LIVE") == "x", "set EUDI_LIVE=x with a captured credential")
+        val credential = File(System.getProperty("java.io.tmpdir"), "eudi-credential.txt").readText().trim()
+
+        val verifier = SdJwtVcVerifier(
+            issuerKeyResolver = X5cIssuerKeyResolver(X509ChainValidator(anchor())),
+            timeValidator = JwtTimeValidator(now = { Instant.now() }),
+        )
+        val verified = verifier.verify(SdJwt.parse(credential))
+        println("\n*** REAL PID VERIFIED WITH FULL X.509 CHAIN TO EUDI IACA ***")
+        println("vct: ${verified.vct}, issuer: ${verified.issuer}, holder-bound: ${verified.holderKey != null}")
+        verified.claims.entries.forEach { (k, v) -> println("  $k = ${v.serialize()}") }
+        assertEquals("urn:eudi:pid:1", verified.vct)
+    }
+
+    @Test
+    fun presentWithTrust() = runBlocking {
+        assumeTrue(System.getenv("EUDI_VP") == "1", "set EUDI_VP=1 and EUDI_VP_REQUEST")
+        val requestUrl = System.getenv("EUDI_VP_REQUEST") ?: error("set EUDI_VP_REQUEST")
+        val tmp = System.getProperty("java.io.tmpdir")
+        val credential = File(tmp, "eudi-credential.txt").readText().trim()
+        val holder = LoadedKey.fromJson(JsonValue.parse(File(tmp, "eudi-holder-key.json").readText()) as JsonValue.Obj)
+
+        val transport = JdkHttp()
+        val held = HeldSdJwtVc("pid", SdJwt.parse(credential), holder.signer())
+        val client = Openid4VpClient(
+            transport, clock = { System.currentTimeMillis() / 1000 },
+            trust = X509RequestVerifier(X509ChainValidator(anchor())),
+        )
+
+        val request = client.resolveRequest(requestUrl)
+        println("verifier: client_id=${request.clientId} scheme=${request.verifier.clientIdScheme} trusted=${request.verifier.trusted} cn=${request.verifier.commonName}")
+        assertTrue(request.verifier.trusted, "verifier request must chain to the EUDI IACA")
+
+        val matches = client.match(request, listOf(held))
+        assertTrue(matches.isSatisfiable())
+        val result = client.respond(request, matches, PresentationSelection.auto(matches), listOf(held))
+        println("*** PRESENTED TO TRUSTED VERIFIER — redirect_uri: ${result.redirectUri} ***")
+    }
+
+    private class JdkHttp : HttpTransport {
+        private val client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).connectTimeout(Duration.ofSeconds(15)).build()
+        override suspend fun execute(request: HttpRequest): HttpResponse {
+            val builder = JdkRequest.newBuilder(URI.create(request.url)).timeout(Duration.ofSeconds(20))
+            val body = request.body?.let { JdkRequest.BodyPublishers.ofByteArray(it) } ?: JdkRequest.BodyPublishers.noBody()
+            when (request.method) {
+                HttpMethod.GET -> builder.GET(); HttpMethod.POST -> builder.POST(body)
+                HttpMethod.PUT -> builder.PUT(body); HttpMethod.PATCH -> builder.method("PATCH", body); HttpMethod.DELETE -> builder.DELETE()
+            }
+            request.headers.forEach { (k, v) -> builder.header(k, v) }
+            val resp = client.send(builder.build(), JdkResponse.BodyHandlers.ofByteArray())
+            return HttpResponse(resp.statusCode(), resp.headers().map().entries.flatMap { (k, vs) -> vs.map { k to it } }, resp.body())
+        }
+    }
+
+    private class LoadedKey(private val pkcs8: ByteArray, val publicKey: EcPublicKey) {
+        fun signer(): JwsSigner = object : JwsSigner {
+            override val algorithm = SigningAlgorithm.ES256
+            private val priv = KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(pkcs8))
+            override suspend fun sign(signingInput: ByteArray): ByteArray =
+                Signature.getInstance("SHA256withECDSA").run { initSign(priv); update(signingInput); Der.derSignatureToRaw(sign(), 32) }
+        }
+        companion object {
+            fun fromJson(o: JsonValue.Obj) = LoadedKey(
+                Base64.getDecoder().decode((o["pkcs8"] as JsonValue.Str).value),
+                EcPublicKey(EcCurve.P256, Base64Url.decode((o["x"] as JsonValue.Str).value), Base64Url.decode((o["y"] as JsonValue.Str).value)),
+            )
+        }
+    }
+}

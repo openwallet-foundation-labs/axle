@@ -18,6 +18,7 @@
 | Token Status List | IETF 최종 단계 — M6 시작 시 RFC 여부 재확인 | ⬜ M6 |
 | ISO/IEC 18013-5 | :2021 (+ 18013-7 / DC API Handover) | ⬜ M4–M5 |
 | W3C Digital Credentials API | Android CredMan / iOS 26 IdentityDocumentServices | ⬜ M5b (어댑터) |
+| Trust (X.509) | RFC 5280 PKIX 체인 검증, SD-JWT VC issuer x5c, OpenID4VP x509_san_dns/x509_hash | 🔶 **Kotlin `trust` 모듈 완료** — PKIX 체인 검증(JCA), X5cIssuerKeyResolver, X509RequestVerifier(san_dns+hash). **실물 EUDI IACA(PID Issuer CA-UT 02)에 이슈어 PID + verifier 요청 둘 다 체인 검증 통과.** Swift는 swift-certificates 미러 예정. LOTL 자동 소비·CRL은 잔여 |
 | ARF | 2.7.x 추적 | 문서 단계 |
 
 미결 인터롭 포인트 (구현은 양쪽 다 있음, 핀만 남음):
@@ -28,8 +29,9 @@
 | 갭 | 필요 시점 | 상태 |
 |---|---|---|
 | **JWE** (ECDH-ES + A128/256GCM — VP 응답 암호화 direct_post.jwt) | **M3 필수 경로** | 계획됨 |
-| x5c **이슈어 키 해석 + 체인 검증** (실제 EUDI 이슈어가 x5c로 서명 — 메타데이터 아님) | M3 (trust 모듈과) | 리프 키 추출은 테스트 헬퍼(X5cLeafKeyResolver, JVM)로 실증 ✅ / **production 리졸버(양 언어)+체인 검증은 M3** (Swift는 swift-certificates 필요) |
-| VP 요청 **x509_san_dns 검증** (verifier 요청 서명·SAN 매칭) | trust 모듈 (M3 계속) | Kotlin은 JCA로 구현 ✅ / **Swift는 swift-certificates 필요**. unsigned/비-x509 요청은 양 언어 지원 |
+| x5c 이슈어 키 해석 + 체인 검증, VP 요청 x509_san_dns/x509_hash | trust 모듈 | **Kotlin 완료 (2026-07-04)** — trust 모듈, 실물 EUDI IACA 체인 검증. **Swift 미러(swift-certificates)만 잔여** |
+| Swift trust 모듈 (swift-certificates) | trust 모듈 계속 | 계획됨 — Kotlin trust와 동일 API(TrustAnchors, X509ChainValidator, X5cIssuerKeyResolver, X509RequestVerifier) |
+| Trust list(LOTL/ETSI TS 119 612) 자동 소비, CRL/OCSP 실효성 검사 | M6 하드닝 | 계획됨 (현재는 신뢰앵커를 호스트가 주입, 체인 검증만) |
 | **mdoc DCQL claim path 규칙** (M4) | M4 (mdoc 포맷과) | 계획됨. mso_mdoc claim path는 **앞 두 요소가 반드시 문자열**(namespace + element_id). base 스펙은 정확히 2, 그러나 **Lukas의 릴렉스(`>=2`, upstream iOS 머지)를 채택** — 세 번째부터는 element의 구조화된 값 안으로 들어가는 index/**null 와일드카드**/values 허용(null-match 기능의 본질). `intent_to_retain`은 mdoc 전용. 현행 DcqlEngine 경로 해석기는 이미 >=2·와일드카드를 지원하므로, M4에선 mso_mdoc 쿼리에 "앞 둘=문자열" 검증만 추가하면 됨 |
 | VCI deferred(transaction_id 폴링), batch(>1 proof), notification 엔드포인트 | 실전 심화 | 계획됨 (auth code·PAR·PKCE·DPoP는 ✅ 라이브 검증) |
 | VCI 전체 발급까지 라이브 E2E (브라우저 인증 필요) | 실기기/앱 통합 | 헤드리스 불가 — 실 PAR 왕복까지 검증, 이후 단계는 하네스 앱에서 |

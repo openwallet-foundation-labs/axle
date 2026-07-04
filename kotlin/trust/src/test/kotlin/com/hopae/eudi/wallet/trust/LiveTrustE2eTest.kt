@@ -1,8 +1,11 @@
 package com.hopae.eudi.wallet.trust
 
+import com.hopae.eudi.wallet.cbor.cose.CoseSigner
 import com.hopae.eudi.wallet.cbor.cose.Der
 import com.hopae.eudi.wallet.cbor.cose.EcCurve
 import com.hopae.eudi.wallet.cbor.cose.EcPublicKey
+import com.hopae.eudi.wallet.mdoc.IssuerSigned
+import com.hopae.eudi.wallet.mdoc.MdocVerifier
 import com.hopae.eudi.wallet.sdjwt.Base64Url
 import com.hopae.eudi.wallet.sdjwt.JsonValue
 import com.hopae.eudi.wallet.sdjwt.JwsSigner
@@ -14,6 +17,8 @@ import com.hopae.eudi.wallet.spi.HttpRequest
 import com.hopae.eudi.wallet.spi.HttpResponse
 import com.hopae.eudi.wallet.spi.HttpTransport
 import com.hopae.eudi.wallet.spi.SigningAlgorithm
+import com.hopae.eudi.wallet.spi.coseAlgorithm
+import com.hopae.eudi.wallet.vp.HeldMdoc
 import com.hopae.eudi.wallet.vp.HeldSdJwtVc
 import com.hopae.eudi.wallet.vp.Openid4VpClient
 import com.hopae.eudi.wallet.vp.PresentationSelection
@@ -89,6 +94,44 @@ class LiveTrustE2eTest {
         println("*** PRESENTED TO TRUSTED VERIFIER — redirect_uri: ${result.redirectUri} ***")
     }
 
+    @Test
+    fun verifyRealMdocWithChain() = runBlocking {
+        assumeTrue(System.getenv("EUDI_MDOC") == "verify", "set EUDI_MDOC=verify with a captured mdoc credential")
+        val credential = File(System.getProperty("java.io.tmpdir"), "eudi-credential.txt").readText().trim()
+        val issuerSigned = IssuerSigned.decode(Base64Url.decode(credential))
+
+        val verified = MdocVerifier(X5cMdocIssuerTrust(X509ChainValidator(anchor()))).verify(issuerSigned)
+        println("\n*** REAL mdoc PID VERIFIED WITH FULL X.509 CHAIN TO EUDI IACA ***")
+        println("docType: ${verified.docType}, holder-bound: true, valid ${verified.validFrom}..${verified.validUntil}")
+        verified.elements.forEach { (ns, els) -> els.forEach { (k, v) -> println("  $ns / $k = $v") } }
+        assertEquals("eu.europa.ec.eudi.pid.1", verified.docType)
+    }
+
+    @Test
+    fun presentMdocWithTrust() = runBlocking {
+        assumeTrue(System.getenv("EUDI_MDOC") == "present", "set EUDI_MDOC=present and EUDI_VP_REQUEST")
+        val requestUrl = System.getenv("EUDI_VP_REQUEST") ?: error("set EUDI_VP_REQUEST")
+        val tmp = System.getProperty("java.io.tmpdir")
+        val credential = File(tmp, "eudi-credential.txt").readText().trim()
+        val holder = LoadedKey.fromJson(JsonValue.parse(File(tmp, "eudi-holder-key.json").readText()) as JsonValue.Obj)
+
+        val held = HeldMdoc("pid-mdoc", IssuerSigned.decode(Base64Url.decode(credential)), holder.coseSigner())
+        val client = Openid4VpClient(
+            JdkHttp(), clock = { System.currentTimeMillis() / 1000 },
+            trust = X509RequestVerifier(X509ChainValidator(anchor())),
+        )
+
+        val request = client.resolveRequest(requestUrl)
+        println("verifier: client_id=${request.clientId} scheme=${request.verifier.clientIdScheme} trusted=${request.verifier.trusted}")
+        assertTrue(request.verifier.trusted, "verifier request must chain to the EUDI IACA")
+
+        val matches = client.match(request, listOf(held))
+        matches.candidatesByQuery.forEach { (q, c) -> println("  $q -> ${c.size} candidate(s), disclose ${c.firstOrNull()?.disclosedPaths}") }
+        assertTrue(matches.isSatisfiable())
+        val result = client.respond(request, matches, PresentationSelection.auto(matches), listOf(held))
+        println("*** mdoc DeviceResponse PRESENTED TO TRUSTED VERIFIER — redirect_uri: ${result.redirectUri} ***")
+    }
+
     private class JdkHttp : HttpTransport {
         private val client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).connectTimeout(Duration.ofSeconds(15)).build()
         override suspend fun execute(request: HttpRequest): HttpResponse {
@@ -105,11 +148,19 @@ class LiveTrustE2eTest {
     }
 
     private class LoadedKey(private val pkcs8: ByteArray, val publicKey: EcPublicKey) {
+        private val priv = KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(pkcs8))
+        private fun rawSign(bytes: ByteArray): ByteArray =
+            Signature.getInstance("SHA256withECDSA").run { initSign(priv); update(bytes); Der.derSignatureToRaw(sign(), 32) }
+
         fun signer(): JwsSigner = object : JwsSigner {
             override val algorithm = SigningAlgorithm.ES256
-            private val priv = KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(pkcs8))
-            override suspend fun sign(signingInput: ByteArray): ByteArray =
-                Signature.getInstance("SHA256withECDSA").run { initSign(priv); update(signingInput); Der.derSignatureToRaw(sign(), 32) }
+            override suspend fun sign(signingInput: ByteArray): ByteArray = rawSign(signingInput)
+        }
+
+        /** COSE signer over the same device key, for the mdoc DeviceResponse `deviceSignature`. */
+        fun coseSigner(): CoseSigner = object : CoseSigner {
+            override val algorithm = SigningAlgorithm.ES256.coseAlgorithm
+            override suspend fun sign(toBeSigned: ByteArray): ByteArray = rawSign(toBeSigned)
         }
         companion object {
             fun fromJson(o: JsonValue.Obj) = LoadedKey(

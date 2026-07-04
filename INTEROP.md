@@ -148,6 +148,29 @@ and present, but full request-signature/chain trust (x509_hash + chain to IACA) 
 module's job (M3, tracked in `SPEC-MATRIX.md`). The holder key must come from the same issuance
 (its public key is the credential's `cnf`); `preAuthIssue` persists it to `eudi-holder-key.json`.
 
+## mdoc (ISO 18013-5) — same three flows
+
+Every flow works headless for **both** `dc+sd-jwt` and `mso_mdoc` PID (3 flows × 2 formats = 6 e2e):
+
+| Flow | SD-JWT VC | mdoc |
+| --- | --- | --- |
+| VCI authorization code | `run.sh` | `run-mdoc.sh` |
+| VCI pre-authorized code | `run-preauth.sh` | `run-preauth-mdoc.sh` |
+| OpenID4VP presentation | `run-vp.sh` | `run-vp-mdoc.sh` |
+
+The driver takes `--config <credential_configuration_id>` (issuer checkbox, default `…pid_vc_sd_jwt`;
+mdoc is `eu.europa.ec.eudi.pid_mdoc`) and `--format <dc+sd-jwt|mso_mdoc>` (verifier). The issuance
+path is shared: pre-auth uses the offer's config id, auth-code takes `EUDI_CONFIG_ID`. mdoc
+credentials come back as base64url CBOR `IssuerSigned`; verify with `verifyRealMdocWithChain`
+(issuerAuth + valueDigests + chain to the EUDI IACA) and present with `presentMdocWithTrust`
+(DeviceResponse + DeviceSigned over the OpenID4VP-handover SessionTranscript, JWE to response_uri).
+
+Observed mdoc request: `mso_mdoc`, `doctype_value=eu.europa.ec.eudi.pid.1`, claims
+`[eu.europa.ec.eudi.pid.1, family_name]` / `[…, given_name]` — the verifier **accepts the
+encrypted DeviceResponse (HTTP 200)**, i.e. our DeviceSigned verifies over the handover it
+reconstructs. Note the two PID forms use different field names (mdoc `birth_date` +
+`nationality[…]`, SD-JWT `birthdate` + `nationalities[…]`); `DEFAULT_DATA` fills a superset.
+
 ## Known gaps this exercise surfaced
 
 - **x5c issuer-key resolution is production-needed, not just metadata.** The real issuer uses

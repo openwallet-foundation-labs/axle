@@ -40,7 +40,8 @@ import kotlin.test.Test
 class LiveIssuanceTest {
 
     private val issuer = "https://issuer.eudiw.dev"
-    private val configId = "eu.europa.ec.eudi.pid_vc_sd_jwt"
+    // Credential to request in the authorization-code flow; override for mdoc (eu.europa.ec.eudi.pid_mdoc).
+    private val configId = System.getenv("EUDI_CONFIG_ID") ?: "eu.europa.ec.eudi.pid_vc_sd_jwt"
     private val redirectUri = "https://example.org/cb"
     private val stateFile = File(System.getProperty("java.io.tmpdir"), "eudi-live-issuance.json")
 
@@ -182,6 +183,13 @@ class LiveIssuanceTest {
         val credFile = File(System.getProperty("java.io.tmpdir"), "eudi-credential.txt")
         credFile.writeText(credential)
         println("credential saved to ${credFile.absolutePath} (${credential.length} chars)")
+
+        // mdoc credentials are base64url CBOR, not SD-JWT — verify those with verifyRealMdocWithChain.
+        if (configId.contains("mdoc")) {
+            println("mso_mdoc credential saved — verify with LiveTrustE2eTest.verifyRealMdocWithChain")
+            println("=====================================================\n")
+            return@runBlocking
+        }
 
         // Show the issuer JWS header + payload (unverified) for diagnostics.
         val parsed = SdJwt.parse(credential)

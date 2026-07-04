@@ -50,8 +50,16 @@ class Openid4VciClient(
     private val rng: Rng,
     /** epoch seconds; injectable for deterministic tests. */
     private val clock: () -> Long,
-    private val clientId: String = "wallet-dev",
+    clientId: String = "wallet-dev",
+    /** HAIP attestation-based client authentication (adds OAuth-Client-Attestation[-PoP] to PAR/token). */
+    private val clientAuth: WalletClientAuth? = null,
 ) {
+    /** With attestation-based client auth the client_id is the wallet instance's attestation subject. */
+    private val clientId: String = clientAuth?.clientId ?: clientId
+
+    /** Client-attestation headers bound to the authorization server (empty when not configured). */
+    private suspend fun clientAuthHeaders(asMeta: AuthorizationServerMetadata): List<Pair<String, String>> =
+        clientAuth?.headers(asMeta.issuer) ?: emptyList()
     /**
      * Resolves a credential offer from a wallet deep link / QR payload (OpenID4VCI §4.1):
      * accepts `<scheme>://…?credential_offer=<url-encoded-json>`, a `credential_offer_uri`
@@ -141,13 +149,11 @@ class Openid4VciClient(
 
         val authorizationUrl = if (asMeta.pushedAuthorizationRequestEndpoint != null) {
             val form = baseParams.joinToString("&") { "${enc(it.first)}=${enc(it.second)}" }
+            val parHeaders = listOf(
+                "Content-Type" to "application/x-www-form-urlencoded", "Accept" to "application/json",
+            ) + clientAuthHeaders(asMeta)
             val parResp = http.execute(
-                HttpRequest(
-                    HttpMethod.POST,
-                    asMeta.pushedAuthorizationRequestEndpoint,
-                    listOf("Content-Type" to "application/x-www-form-urlencoded", "Accept" to "application/json"),
-                    form.encodeToByteArray(),
-                )
+                HttpRequest(HttpMethod.POST, asMeta.pushedAuthorizationRequestEndpoint, parHeaders, form.encodeToByteArray())
             )
             checkOAuth(parResp, asMeta.pushedAuthorizationRequestEndpoint)
             val requestUri = (parseObj(parResp, "PAR response")["request_uri"] as? JsonValue.Str)?.value
@@ -216,7 +222,7 @@ class Openid4VciClient(
             append("&code_verifier=").append(enc(codeVerifier))
             append("&client_id=").append(enc(clientId))
         }
-        val tokenResp = postFormWithDpop(asMeta.tokenEndpoint, form, dpop, accessToken = null)
+        val tokenResp = postFormWithDpop(asMeta.tokenEndpoint, form, dpop, accessToken = null, extraHeaders = clientAuthHeaders(asMeta))
         return TokenResponse.fromObj(parseObj(tokenResp, "token response"))
     }
 
@@ -250,7 +256,7 @@ class Openid4VciClient(
             append("&pre-authorized_code=").append(enc(preAuthCode))
             txCode?.let { append("&tx_code=").append(enc(it)) }
         }
-        val tokenResp = postFormWithDpop(asMeta.tokenEndpoint, form, dpop, accessToken = null)
+        val tokenResp = postFormWithDpop(asMeta.tokenEndpoint, form, dpop, accessToken = null, extraHeaders = clientAuthHeaders(asMeta))
         val token = TokenResponse.fromObj(parseObj(tokenResp, "token response"))
         if (!token.tokenType.equals("DPoP", ignoreCase = true)) {
             throw VciException.ProtocolError("expected DPoP token_type, got '${token.tokenType}'")
@@ -307,17 +313,19 @@ class Openid4VciClient(
         dpop: DpopProver,
         accessToken: String?,
         nonce: String? = null,
+        extraHeaders: List<Pair<String, String>> = emptyList(),
     ): HttpResponse {
         val headers = mutableListOf(
             "Content-Type" to "application/x-www-form-urlencoded",
             "Accept" to "application/json",
             "DPoP" to dpop.proof("POST", url, accessToken, nonce),
         )
+        headers.addAll(extraHeaders)
         accessToken?.let { headers.add("Authorization" to "DPoP $it") }
         val response = http.execute(HttpRequest(HttpMethod.POST, url, headers, form.encodeToByteArray()))
 
         dpopNonceChallenge(response)?.let { serverNonce ->
-            if (nonce == null) return postFormWithDpop(url, form, dpop, accessToken, serverNonce)
+            if (nonce == null) return postFormWithDpop(url, form, dpop, accessToken, serverNonce, extraHeaders)
         }
         checkOAuth(response, url)
         return response

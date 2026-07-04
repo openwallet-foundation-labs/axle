@@ -53,14 +53,19 @@ class LiveTrustE2eTest {
         return TrustAnchors(listOf(X509Support.parse(der)))
     }
 
+    /** Validation instant: EUDI_AT (epoch seconds) overrides now — used to prove logic vs a lapsed issuer cert. */
+    private fun validationInstant(): Instant =
+        System.getenv("EUDI_AT")?.let { Instant.ofEpochSecond(it.toLong()) } ?: Instant.now()
+
     @Test
     fun verifyRealPidWithChain() = runBlocking {
         assumeTrue(System.getenv("EUDI_LIVE") == "x", "set EUDI_LIVE=x with a captured credential")
         val credential = File(System.getProperty("java.io.tmpdir"), "eudi-credential.txt").readText().trim()
 
+        val at = validationInstant()
         val verifier = SdJwtVcVerifier(
-            issuerKeyResolver = X5cIssuerKeyResolver(X509ChainValidator(anchor())),
-            timeValidator = JwtTimeValidator(now = { Instant.now() }),
+            issuerKeyResolver = X5cIssuerKeyResolver(X509ChainValidator(anchor(), at = { java.util.Date.from(at) })),
+            timeValidator = JwtTimeValidator(now = { at }),
         )
         val verified = verifier.verify(SdJwt.parse(credential))
         println("\n*** REAL PID VERIFIED WITH FULL X.509 CHAIN TO EUDI IACA ***")

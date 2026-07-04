@@ -41,6 +41,10 @@ class Openid4VpClient(
 
     suspend fun resolveRequest(requestUri: String): ResolvedRequest = resolver.resolve(requestUri)
 
+    /** Resolves an OpenID4VP request delivered over the Digital Credentials API (with the caller [origin]). */
+    suspend fun resolveDcApiRequest(requestObject: String, origin: String): ResolvedRequest =
+        resolver.resolveDcApi(requestObject, origin)
+
     fun match(request: ResolvedRequest, held: List<PresentableCredential>): DcqlMatchResult =
         DcqlEngine.match(request.dcqlQuery, held)
 
@@ -54,17 +58,55 @@ class Openid4VpClient(
         selection: PresentationSelection,
         held: List<PresentableCredential>,
     ): SubmitResult {
+        val vpToken = buildVpToken(request, matches, selection, held)
+        return when (request.responseMode) {
+            "direct_post" -> submitDirectPost(request, vpToken)
+            "direct_post.jwt" -> submitDirectPostJwt(request, vpToken)
+            else -> throw VpException.Unsupported("response_mode ${request.responseMode}")
+        }
+    }
+
+    /**
+     * Builds the presentations for a Digital Credentials API request and returns the response object
+     * to hand back to the platform (no HTTP POST): `{vp_token}` for `dc_api`, `{response: <JWE>}` for
+     * `dc_api.jwt`. mdoc presentations bind the caller origin via the DC API handover.
+     */
+    suspend fun respondDcApi(
+        request: ResolvedRequest,
+        matches: DcqlMatchResult,
+        selection: PresentationSelection,
+        held: List<PresentableCredential>,
+    ): JsonValue.Obj {
+        val vpToken = buildVpToken(request, matches, selection, held)
+        return when (request.responseMode) {
+            "dc_api" -> JsonValue.Obj(listOf("vp_token" to vpToken))
+            "dc_api.jwt" -> {
+                val recipient = verifierEncryptionKey(request)
+                    ?: throw VpException.InvalidRequest("dc_api.jwt but no verifier encryption key in client_metadata")
+                val response = JsonValue.Obj(listOf("vp_token" to vpToken))
+                val jwe = Jwe.encryptEcdhEs(response.serialize().encodeToByteArray(), recipient, encValue(request))
+                JsonValue.Obj(listOf("response" to JsonValue.Str(jwe)))
+            }
+            else -> throw VpException.Unsupported("respondDcApi requires a dc_api response_mode, got ${request.responseMode}")
+        }
+    }
+
+    private suspend fun buildVpToken(
+        request: ResolvedRequest,
+        matches: DcqlMatchResult,
+        selection: PresentationSelection,
+        held: List<PresentableCredential>,
+    ): JsonValue.Obj {
         val missing = matches.requiredQueryIds.filter { it !in selection.chosen }.toSet()
         if (missing.isNotEmpty()) throw VpException.QueryNotSatisfiable(missing)
 
         val heldById = held.associateBy { it.credentialId }
         val iat = clock()
-        // For encrypted responses the mdoc OpenID4VP handover binds the verifier's encryption key.
-        val jwkThumbprint = if (request.responseMode == "direct_post.jwt") {
+        // Encrypted responses (direct_post.jwt / dc_api.jwt) bind the verifier's encryption key in the mdoc handover.
+        val jwkThumbprint = if (request.responseMode.endsWith(".jwt")) {
             verifierEncryptionKey(request)?.let { ecJwkThumbprint(it) }
         } else null
 
-        // vp_token: query id -> [presentation string]
         val vpEntries = mutableListOf<Pair<String, JsonValue>>()
         for ((queryId, credentialId) in selection.chosen) {
             val candidate = matches.candidatesByQuery[queryId]?.firstOrNull { it.credential.credentialId == credentialId }
@@ -79,17 +121,12 @@ class Openid4VpClient(
                     issuedAt = iat,
                     transactionData = request.transactionData,
                     verifierJwkThumbprint = jwkThumbprint,
+                    origin = request.origin,
                 )
             )
             vpEntries.add(queryId to JsonValue.Arr(listOf(JsonValue.Str(presentation))))
         }
-        val vpToken = JsonValue.Obj(vpEntries)
-
-        return when (request.responseMode) {
-            "direct_post" -> submitDirectPost(request, vpToken)
-            "direct_post.jwt" -> submitDirectPostJwt(request, vpToken)
-            else -> throw VpException.Unsupported("response_mode ${request.responseMode}")
-        }
+        return JsonValue.Obj(vpEntries)
     }
 
     private suspend fun submitDirectPost(request: ResolvedRequest, vpToken: JsonValue.Obj): SubmitResult {

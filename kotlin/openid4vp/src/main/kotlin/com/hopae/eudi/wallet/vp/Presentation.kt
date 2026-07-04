@@ -11,6 +11,8 @@ class PresentationContext(
     val transactionData: List<String>?,
     /** RFC 7638 thumbprint of the verifier's encryption key, for the mdoc OpenID4VP handover (null if unencrypted). */
     val verifierJwkThumbprint: ByteArray?,
+    /** Caller web origin for a Digital Credentials API presentation; non-null selects the DC API handover. */
+    val origin: String? = null,
 )
 
 /**

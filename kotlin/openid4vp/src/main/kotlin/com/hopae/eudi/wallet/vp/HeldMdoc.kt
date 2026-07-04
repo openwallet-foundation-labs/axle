@@ -35,7 +35,12 @@ class HeldMdoc(
         val signer = deviceSigner ?: throw VpException.Unsupported("mdoc presentation requires a device signer")
         val disclosed = ctx.disclosedPaths.filter { it.size >= 2 }
             .groupBy({ it[0] }, { it[1] })
-        val sessionTranscript = Oid4vpSessionTranscript.build(ctx.clientId, ctx.responseUri, ctx.nonce, ctx.verifierJwkThumbprint)
+        // DC API presentations bind the caller origin; the URL/QR flow binds client_id + response_uri.
+        val sessionTranscript = if (ctx.origin != null) {
+            Oid4vpSessionTranscript.dcApi(ctx.origin, ctx.nonce, ctx.verifierJwkThumbprint)
+        } else {
+            Oid4vpSessionTranscript.build(ctx.clientId, ctx.responseUri, ctx.nonce, ctx.verifierJwkThumbprint)
+        }
         val deviceResponse = MdocPresenter.deviceResponse(
             issuerSigned = issuerSigned,
             docType = docType,

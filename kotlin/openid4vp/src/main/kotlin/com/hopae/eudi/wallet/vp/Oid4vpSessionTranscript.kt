@@ -24,8 +24,37 @@ object Oid4vpSessionTranscript {
                 Cbor.Text(responseUri ?: ""),
             )
         )
+        return sessionTranscript("OpenID4VPHandover", handoverInfo)
+    }
+
+    /**
+     * SessionTranscript for OpenID4VP **over the W3C Digital Credentials API** (OpenID4VP 1.0 DC API
+     * profile): the handover binds the caller [origin] instead of a response_uri —
+     * `OpenID4VPDCAPIHandover = ["OpenID4VPDCAPIHandover", SHA-256(CBOR([origin, nonce, jwk_thumbprint]))]`.
+     */
+    fun dcApi(origin: String, nonce: String, verifierJwkThumbprint: ByteArray?): Cbor {
+        val handoverInfo = Cbor.Array(
+            listOf(
+                Cbor.Text(origin),
+                Cbor.Text(nonce),
+                verifierJwkThumbprint?.let { Cbor.Bytes(it) } ?: Cbor.Null,
+            )
+        )
+        return sessionTranscript("OpenID4VPDCAPIHandover", handoverInfo)
+    }
+
+    /**
+     * SessionTranscript for the ISO `org-iso-mdoc` DC API protocol (ISO/IEC TS 18013-7:2025 Annex C):
+     * `["dcapi", SHA-256(CBOR([base64url(EncryptionInfo), origin]))]`.
+     */
+    fun dcApiIsoMdoc(encryptionInfoBase64: String, origin: String): Cbor {
+        val info = Cbor.Array(listOf(Cbor.Text(encryptionInfoBase64), Cbor.Text(origin)))
+        return sessionTranscript("dcapi", info)
+    }
+
+    private fun sessionTranscript(handoverType: String, handoverInfo: Cbor): Cbor {
         val hash = MessageDigest.getInstance("SHA-256").digest(CborEncoder.encode(handoverInfo))
-        val handover = Cbor.Array(listOf(Cbor.Text("OpenID4VPHandover"), Cbor.Bytes(hash)))
+        val handover = Cbor.Array(listOf(Cbor.Text(handoverType), Cbor.Bytes(hash)))
         return Cbor.Array(listOf(Cbor.Null, Cbor.Null, handover))
     }
 }

@@ -19,7 +19,7 @@
 | ISO/IEC 18013-5 | :2021 (+ 18013-7 / DC API Handover) | ⬜ M4–M5 |
 | W3C Digital Credentials API | Android CredMan / iOS 26 IdentityDocumentServices | ⬜ M5b (어댑터) |
 | Trust (X.509) | RFC 5280 PKIX 체인 검증, SD-JWT VC issuer x5c, OpenID4VP x509_san_dns/x509_hash | ✅ **`trust` 모듈 양 언어 완료** — 체인 검증(Kotlin JCA / Swift swift-certificates), X5cIssuerKeyResolver, X509RequestVerifier(san_dns+hash). **실물 EUDI IACA(PID Issuer CA-UT 02)에 이슈어 PID + verifier 요청 둘 다 체인 검증 통과.** LOTL 자동 소비·CRL/OCSP는 M6 |
-| mdoc (ISO/IEC 18013-5) | IssuerSigned/MSO 모델, CBOR 코덱, issuerAuth 검증, valueDigests 무결성, DCQL 매칭 | 🔶 **Phase 1+2 완료 (2026-07-04) 양 언어** — Phase 1: IssuerSigned/MSO 파싱, COSE_Sign1 issuerAuth 서명검증, 요소별 digest 매칭, deviceKey(COSE_Key) holder 바인딩, validityInfo, trust가 `MdocIssuerTrust`(x5chain) 구현. Phase 2: **DCQL 매칭** — HeldMdoc(QueryableCredential), Cbor→JSON, **mso_mdoc path 규칙**([namespace,element] 2문자열, >=2 완화). **잔여: 제시(DeviceResponse/DeviceSigned/SessionTranscript OID4VP handover), 실물 e2e** |
+| mdoc (ISO/IEC 18013-5) | IssuerSigned/MSO, issuerAuth 검증, DCQL 매칭, DeviceResponse 제시 | 🔶 **Phase 1+2+3 완료 (2026-07-04) 양 언어** — P1: IssuerSigned/MSO 파싱, COSE_Sign1 issuerAuth 검증, digest 매칭, deviceKey holder 바인딩, validityInfo, trust `MdocIssuerTrust`(x5chain). P2: **DCQL 매칭** — HeldMdoc, Cbor→JSON, mso_mdoc path 규칙([ns,element] 2문자열 >=2). P3: **제시** — DeviceResponse(선택공개 IssuerSigned + DeviceSigned/deviceSignature COSE_Sign1 detached over **OpenID4VP handover** SessionTranscript=`[null,null,["OpenID4VPHandover",SHA256(cbor([client_id,nonce,jwkThumbprint,response_uri]))]]`), `PresentableCredential`이 SD-JWT VC+mdoc 통합, RFC 7638 JWK thumbprint. **잔여: 실물 e2e(Phase 4)** |
 | ARF | 2.7.x 추적 | 문서 단계 |
 
 미결 인터롭 포인트 (구현은 양쪽 다 있음, 핀만 남음):

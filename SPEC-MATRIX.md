@@ -6,7 +6,7 @@
 |---|---|---|
 | CBOR | RFC 8949 (deterministic encoding §4.2.1) | ✅ `cbor` — Appendix A 82벡터 양 언어 통과, 8949 bytewise + 7049 length-first 키 정렬 프로파일 |
 | COSE | RFC 9052 §4.2 COSE_Sign1 · RFC 9053 ES256/384/512 · RFC 9360 x5chain | ✅ 검증(JCA/swift-crypto) + 서명(CoseSigner → SecureArea 포트 위임). cose-wg sign1 벡터 통과 |
-| OpenID4VCI | **1.0 Final** (2025-09-16) | ✅ `openid4vci` — pre-authorized **및 authorization code**(PAR) 그랜트 E2E. **실제 issuer.eudiw.dev와 라이브 인터롭 통과**(메타데이터 discovery + 실 PAR 왕복으로 request_uri 수령). deferred·batch·notification은 잔여 |
+| OpenID4VCI | **1.0 Final** (2025-09-16) | ✅ `openid4vci` — **실제 issuer.eudiw.dev에서 진짜 PID(SD-JWT VC) 발급·검증 완료 (2026-07-04)**. authorization code+PAR 그랜트, scope 선호(favorScopes), 오퍼 딥링크 해석. 절차는 `INTEROP.md`. deferred·batch·notification은 잔여 |
 | DPoP | RFC 9449 | ✅ `openid4vci` — jti/htm/htu/ath + DPoP-Nonce 재시도 |
 | PKCE | RFC 7636 (S256) | ✅ `openid4vci` |
 | OpenID4VP | **1.0 Final** (2025-07-09), DCQL | ⬜ M3 |
@@ -27,7 +27,7 @@
 | 갭 | 필요 시점 | 상태 |
 |---|---|---|
 | **JWE** (ECDH-ES + A128/256GCM — VP 응답 암호화 direct_post.jwt) | **M3 필수 경로** | 계획됨 |
-| x5c **체인 검증** (신뢰 앵커·경로 검증 — VP request, SD-JWT VC issuer) | M3 (trust 모듈과) | 계획됨 (JWS x5c **파싱**은 ✅ 2026-07-04) |
+| x5c **이슈어 키 해석 + 체인 검증** (실제 EUDI 이슈어가 x5c로 서명 — 메타데이터 아님) | M3 (trust 모듈과) | 리프 키 추출은 테스트 헬퍼(X5cLeafKeyResolver, JVM)로 실증 ✅ / **production 리졸버(양 언어)+체인 검증은 M3** (Swift는 swift-certificates 필요) |
 | VCI deferred(transaction_id 폴링), batch(>1 proof), notification 엔드포인트 | 실전 심화 | 계획됨 (auth code·PAR·PKCE·DPoP는 ✅ 라이브 검증) |
 | VCI 전체 발급까지 라이브 E2E (브라우저 인증 필요) | 실기기/앱 통합 | 헤드리스 불가 — 실 PAR 왕복까지 검증, 이후 단계는 하네스 앱에서 |
 | PAR dpop_jkt 바인딩(인가코드↔DPoP키 결속) | 하드닝 | 계획됨 |
@@ -39,4 +39,4 @@
 | `_sd_alg` sha-384/512 | — | 의도적 제외 (HAIP는 sha-256; 명시적 거부함) |
 | JSON: >2^53 비정수 정밀도(BigDecimal), JWS JSON 직렬화 변형 | — | 의도적 제외 (토큰 페이로드에 불필요) |
 
-해결된 갭 (이 레지스터가 작동한 기록, 전부 2026-07-04): JSON 중복 키 거부(claim smuggling 방어) · JWS 미지 `crit` 거부 · **decoy digests 발급 생성**(`decoysPerSdStruct`, 검증측 무해 처리는 원래부터) · **JWS x5c 헤더 파싱** · **SD-JWT VC typ에서 레거시 `vc+sd-jwt` 제거**(draft §3.1 dc+sd-jwt MUST) · **VCI authorization code + PAR 그랜트**(실 issuer.eudiw.dev 라이브 검증) — 각각 발견 즉시 수정, 테스트 포함.
+해결된 갭 (이 레지스터가 작동한 기록, 전부 2026-07-04): JSON 중복 키 거부(claim smuggling 방어) · JWS 미지 `crit` 거부 · **decoy digests 발급 생성** · **JWS x5c 헤더 파싱** · **SD-JWT VC typ에서 레거시 `vc+sd-jwt` 제거** · **VCI authorization code + PAR 그랜트** · **scope 선호 인가요청**(authorization_details는 EUDI 이슈어가 500 — favorScopes로 수정) · **오퍼 딥링크 해석**(resolveCredentialOffer) · **실제 PID 라이브 발급·검증 완료**(x5c 리프 키로 서명 검증, 클레임 추출) — 실 이슈어 인터롭에서 발견·수정, 테스트 포함.

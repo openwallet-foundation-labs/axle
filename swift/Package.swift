@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "WalletAPI", targets: ["WalletAPI"]),
         .library(name: "CredentialStore", targets: ["CredentialStore"]),
         .library(name: "SdJwt", targets: ["SdJwt"]),
+        .library(name: "OpenID4VCI", targets: ["OpenID4VCI"]),
         .library(name: "WalletTestKit", targets: ["WalletTestKit"]),
     ],
     dependencies: [
@@ -26,6 +27,10 @@ let package = Package(
             dependencies: ["WalletAPI", "CborCose", .product(name: "Crypto", package: "swift-crypto")]
         ),
         .target(
+            name: "OpenID4VCI",
+            dependencies: ["WalletAPI", "SdJwt", "CborCose", .product(name: "Crypto", package: "swift-crypto")]
+        ),
+        .target(
             name: "WalletTestKit",
             dependencies: ["WalletAPI", .product(name: "Crypto", package: "swift-crypto")]
         ),
@@ -37,5 +42,6 @@ let package = Package(
         .testTarget(name: "WalletTestKitTests", dependencies: ["WalletTestKit"]),
         .testTarget(name: "CredentialStoreTests", dependencies: ["CredentialStore", "WalletTestKit"]),
         .testTarget(name: "SdJwtTests", dependencies: ["SdJwt", "WalletTestKit"]),
+        .testTarget(name: "OpenID4VCITests", dependencies: ["OpenID4VCI", "WalletTestKit"]),
     ]
 )

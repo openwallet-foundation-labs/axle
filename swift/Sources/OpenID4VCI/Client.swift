@@ -49,12 +49,22 @@ public struct Openid4VciClient {
     private let rng: any Rng
     private let clock: () -> Int64
     private let clientId: String
+    /// HAIP attestation-based client authentication (adds OAuth-Client-Attestation[-PoP] to PAR/token).
+    private let clientAuth: WalletClientAuth?
 
-    public init(http: any HttpTransport, rng: any Rng, clock: @escaping () -> Int64, clientId: String = "wallet-dev") {
+    public init(http: any HttpTransport, rng: any Rng, clock: @escaping () -> Int64,
+                clientId: String = "wallet-dev", clientAuth: WalletClientAuth? = nil) {
         self.http = http
         self.rng = rng
         self.clock = clock
-        self.clientId = clientId
+        // With attestation-based client auth the client_id is the wallet instance's attestation subject.
+        self.clientId = clientAuth?.clientId ?? clientId
+        self.clientAuth = clientAuth
+    }
+
+    /// Client-attestation headers bound to the authorization server (empty when not configured).
+    private func clientAuthHeaders(_ asMeta: AuthorizationServerMetadata) async throws -> [(String, String)] {
+        try await clientAuth?.headers(audience: asMeta.issuer) ?? []
     }
 
     /// Resolves a credential offer from a wallet deep link / QR payload (OpenID4VCI §4.1):
@@ -144,10 +154,10 @@ public struct Openid4VciClient {
         let authorizationUrl: String
         if let parEndpoint = asMeta.pushedAuthorizationRequestEndpoint {
             let form = baseParams.map { "\(enc($0.0))=\(enc($0.1))" }.joined(separator: "&")
+            let parHeaders = [("Content-Type", "application/x-www-form-urlencoded"), ("Accept", "application/json")]
+                + (try await clientAuthHeaders(asMeta))
             let parResp = try await http.execute(HttpRequest(
-                method: .post, url: parEndpoint,
-                headers: [("Content-Type", "application/x-www-form-urlencoded"), ("Accept", "application/json")],
-                body: [UInt8](form.utf8)
+                method: .post, url: parEndpoint, headers: parHeaders, body: [UInt8](form.utf8)
             ))
             try checkOAuth(parResp, parEndpoint)
             guard case let .str(requestUri)? = try parseObj(parResp, "PAR response")["request_uri"] else {
@@ -216,7 +226,7 @@ public struct Openid4VciClient {
         form += "&redirect_uri=\(enc(redirectUri))"
         form += "&code_verifier=\(enc(codeVerifier))"
         form += "&client_id=\(enc(clientId))"
-        let tokenResp = try await postFormWithDpop(asMeta.tokenEndpoint, form: form, dpop: dpop, accessToken: nil)
+        let tokenResp = try await postFormWithDpop(asMeta.tokenEndpoint, form: form, dpop: dpop, accessToken: nil, extraHeaders: try await clientAuthHeaders(asMeta))
         return try TokenResponse.fromObj(try parseObj(tokenResp, "token response"))
     }
 
@@ -245,7 +255,7 @@ public struct Openid4VciClient {
         var form = "grant_type=\(enc(grantPreAuthorized))"
         form += "&pre-authorized_code=\(enc(preAuthCode))"
         if let txCode { form += "&tx_code=\(enc(txCode))" }
-        let tokenResp = try await postFormWithDpop(asMeta.tokenEndpoint, form: form, dpop: dpop, accessToken: nil)
+        let tokenResp = try await postFormWithDpop(asMeta.tokenEndpoint, form: form, dpop: dpop, accessToken: nil, extraHeaders: try await clientAuthHeaders(asMeta))
         let token = try TokenResponse.fromObj(try parseObj(tokenResp, "token response"))
         guard token.tokenType.lowercased() == "dpop" else {
             throw VciError.protocolError("expected DPoP token_type, got '\(token.tokenType)'")
@@ -294,18 +304,20 @@ public struct Openid4VciClient {
     }
 
     private func postFormWithDpop(
-        _ url: String, form: String, dpop: DpopProver, accessToken: String?, nonce: String? = nil
+        _ url: String, form: String, dpop: DpopProver, accessToken: String?, nonce: String? = nil,
+        extraHeaders: [(String, String)] = []
     ) async throws -> HttpResponse {
         var headers: [(String, String)] = [
             ("Content-Type", "application/x-www-form-urlencoded"),
             ("Accept", "application/json"),
             ("DPoP", try await dpop.proof(method: "POST", url: url, accessToken: accessToken, nonce: nonce)),
         ]
+        headers.append(contentsOf: extraHeaders)
         if let accessToken { headers.append(("Authorization", "DPoP \(accessToken)")) }
         let response = try await http.execute(HttpRequest(method: .post, url: url, headers: headers, body: [UInt8](form.utf8)))
 
         if nonce == nil, let serverNonce = dpopNonceChallenge(response) {
-            return try await postFormWithDpop(url, form: form, dpop: dpop, accessToken: accessToken, nonce: serverNonce)
+            return try await postFormWithDpop(url, form: form, dpop: dpop, accessToken: accessToken, nonce: serverNonce, extraHeaders: extraHeaders)
         }
         try checkOAuth(response, url)
         return response

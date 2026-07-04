@@ -8,7 +8,7 @@ func sha256(_ bytes: [UInt8]) -> [UInt8] {
     [UInt8](SHA256.hash(data: Data(bytes)))
 }
 
-private func jwsAlgName(_ alg: SigningAlgorithm) -> String {
+func jwsAlgName(_ alg: SigningAlgorithm) -> String {
     switch alg {
     case .es256: return "ES256"
     case .es384: return "ES384"

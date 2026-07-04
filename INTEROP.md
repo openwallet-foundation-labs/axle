@@ -7,14 +7,33 @@ reference issuer using only this SDK's from-scratch stack (CBOR/COSE/JOSE/SD-JWT
 SD-JWT VC with an **x5c certificate chain** (`CN=PID DS - 01`, EUDI Wallet Reference
 Implementation), `vct=urn:eudi:pid:1`, holder-bound via `cnf`, with a token-status-list ref.
 
-## Why it's a two-step manual dance
+## Fully headless (recommended) — `tools/headless-interop/run.sh`
 
-Every issuance path on issuer.eudiw.dev requires **browser authentication** (eIDAS/FormEU),
-which can't be driven headlessly. So the wallet (this SDK) does the machine parts and a human
-does the one browser step. The authorization code grant with PAR is used.
+The reference issuer's authentication is the **FormEU** test path (select country `FC`, fill a
+test-PID form, click Authorize). That's a plain web form, so headless Chrome can drive it — no
+human browser step. `tools/headless-interop/` scripts a real Chrome to do exactly the clicks a
+person would, and the Kotlin harness does the crypto/protocol parts:
 
-The harness is `kotlin/openid4vci/src/test/.../LiveIssuanceTest.kt` (+ `VerifySavedPidTest.kt`),
-env-gated so it never runs in normal CI.
+```sh
+cd tools/headless-interop
+npm install            # puppeteer-core, uses the system Chrome (CHROME_PATH to override)
+./run.sh
+```
+
+Pipeline: Chrome drives the offer portal → Kotlin PAR (`step1_prepare`) → Chrome drives FormEU
+auth and captures `…/cb?code=…` → Kotlin token+credential exchange (`step2_finish`) → x5c
+verification (`VerifySavedPidTest`). Test attributes are `drive.js`'s `DEFAULT_DATA` (override
+with `auth … --data file.json`). The issued credential lands at `$TMPDIR/eudi-credential.txt`.
+
+**Why the portal 500s under plain curl:** the checkbox page (frontend `issuer.eudiw.dev`) posts
+to the backend (`backend.issuer.eudiw.dev`), and the session cookie is host-only for the
+backend — a cross-host dance a real browser handles but curl does not. Chrome sidesteps it.
+
+## Manual variant (one human browser step)
+
+The same Kotlin harness (`kotlin/openid4vci/src/test/.../LiveIssuanceTest.kt`, env-gated so it
+never runs in normal CI) also works with a human doing the auth in a browser, per the steps
+below — useful when you don't want to script the FormEU form.
 
 ## Procedure
 

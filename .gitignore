@@ -7,3 +7,5 @@ build/
 swift/.build/
 swift/.swiftpm/
 local.properties
+node_modules/
+tools/headless-interop/package-lock.json

@@ -1,0 +1,10 @@
+{
+  "name": "eudi-headless-interop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Headless-Chrome driver for the issuer.eudiw.dev FormEU test-auth flow",
+  "type": "commonjs",
+  "dependencies": {
+    "puppeteer-core": "^23.0.0"
+  }
+}

@@ -14,6 +14,7 @@ let package = Package(
         .library(name: "Trust", targets: ["Trust"]),
         .library(name: "MDoc", targets: ["MDoc"]),
         .library(name: "StatusList", targets: ["StatusList"]),
+        .library(name: "TransactionLog", targets: ["TransactionLog"]),
         .library(name: "WalletTestKit", targets: ["WalletTestKit"]),
     ],
     dependencies: [
@@ -49,6 +50,10 @@ let package = Package(
             dependencies: ["WalletAPI", "SdJwt", "CborCose", "CZlib"]
         ),
         .target(
+            name: "TransactionLog",
+            dependencies: ["SdJwt"]
+        ),
+        .target(
             name: "Trust",
             dependencies: [
                 "OpenID4VP", "SdJwt", "CborCose", "MDoc",
@@ -72,6 +77,7 @@ let package = Package(
         .testTarget(name: "OpenID4VPTests", dependencies: ["OpenID4VP", "WalletTestKit"]),
         .testTarget(name: "MDocTests", dependencies: ["MDoc", "WalletTestKit"]),
         .testTarget(name: "StatusListTests", dependencies: ["StatusList", "WalletTestKit"]),
+        .testTarget(name: "TransactionLogTests", dependencies: ["TransactionLog"]),
         .testTarget(
             name: "TrustTests",
             dependencies: ["Trust", "WalletTestKit", .product(name: "X509", package: "swift-certificates")],

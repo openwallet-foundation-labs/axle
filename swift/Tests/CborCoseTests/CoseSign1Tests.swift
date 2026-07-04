@@ -31,10 +31,11 @@ final class CoseSign1Tests: XCTestCase {
 
     private struct SoftwareSigner: CoseSigner {
         let algorithm: CoseAlgorithm = .es256
-        let key: P256.Signing.PrivateKey
+        let d: Data // raw key bytes: P256.Signing.PrivateKey itself is not Sendable
 
         func sign(_ toBeSigned: [UInt8]) async throws -> [UInt8] {
-            [UInt8](try key.signature(for: Data(toBeSigned)).rawRepresentation)
+            let key = try P256.Signing.PrivateKey(rawRepresentation: d)
+            return [UInt8](try key.signature(for: Data(toBeSigned)).rawRepresentation)
         }
     }
 
@@ -72,7 +73,7 @@ final class CoseSign1Tests: XCTestCase {
             )
 
             // 5. our own signature (same headers/payload, software key) verifies
-            let signer = SoftwareSigner(key: try P256.Signing.PrivateKey(rawRepresentation: Data(v.d)))
+            let signer = SoftwareSigner(d: Data(v.d))
             let signed = try await CoseSign1.sign(
                 protected: try s1.protectedHeaders(),
                 unprotected: s1.unprotected,

@@ -13,8 +13,9 @@ import java.security.spec.ECPublicKeySpec
 /**
  * ECDSA verification via JCA. Core rule: only public-key operations live in core —
  * private-key signing goes through the SecureArea port (see wallet-api).
+ * Public because adapters need [publicKeyOf]/[parameterSpec] to build JCA peer keys.
  */
-internal object Ecdsa {
+object Ecdsa {
 
     fun parameterSpec(curve: EcCurve): ECParameterSpec =
         AlgorithmParameters.getInstance("EC").run {
@@ -41,8 +42,11 @@ internal object Ecdsa {
     }
 }
 
-/** Minimal DER helpers for ECDSA signature conversion (COSE raw r||s <-> JCA DER). */
-internal object Der {
+/**
+ * Minimal DER helpers for ECDSA signature conversion (COSE raw r||s <-> DER).
+ * Public because platform keystores (Android Keystore, JCA) emit DER signatures.
+ */
+object Der {
 
     fun rawSignatureToDer(raw: ByteArray): ByteArray {
         require(raw.size % 2 == 0) { "raw signature must be r||s" }

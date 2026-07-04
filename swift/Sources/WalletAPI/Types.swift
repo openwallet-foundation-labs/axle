@@ -131,3 +131,60 @@ public struct SecureAreaCapabilities: Sendable {
         self.keyAgreement = keyAgreement
     }
 }
+
+/* ---- credential model identifiers (API-CONTRACT.md §4) ---- */
+
+public struct CredentialId: Hashable, Sendable {
+    public let value: String
+
+    public init(_ value: String) {
+        self.value = value
+    }
+}
+
+public enum CredentialFormat: Hashable, Sendable {
+    case msoMdoc(docType: String)
+    case sdJwtVc(vct: String)
+}
+
+/* ---- algorithm mappings (SigningAlgorithm <-> COSE/curve) ---- */
+
+public extension SigningAlgorithm {
+    var curve: EcCurve {
+        switch self {
+        case .es256: return .p256
+        case .es384: return .p384
+        case .es512: return .p521
+        }
+    }
+
+    var coseAlgorithm: CoseAlgorithm {
+        switch self {
+        case .es256: return .es256
+        case .es384: return .es384
+        case .es512: return .es512
+        }
+    }
+}
+
+/// Bridges a `SecureArea` key into the COSE layer: `CoseSign1.sign(signer:)`.
+/// This is the production path — private keys never leave the port.
+public struct SecureAreaCoseSigner: CoseSigner {
+    private let area: any SecureArea
+    private let key: KeyHandle
+    private let signingAlgorithm: SigningAlgorithm
+    private let hint: AuthorizationHint?
+
+    public var algorithm: CoseAlgorithm { signingAlgorithm.coseAlgorithm }
+
+    public init(area: any SecureArea, key: KeyHandle, algorithm: SigningAlgorithm, hint: AuthorizationHint? = nil) {
+        self.area = area
+        self.key = key
+        self.signingAlgorithm = algorithm
+        self.hint = hint
+    }
+
+    public func sign(_ toBeSigned: [UInt8]) async throws -> [UInt8] {
+        try await area.sign(key: key, algorithm: signingAlgorithm, data: toBeSigned, hint: hint)
+    }
+}

@@ -43,7 +43,7 @@ public struct EcPublicKey: Sendable {
     }
 }
 
-extension Cbor {
+public extension Cbor {
     var asInt64: Int64? {
         switch self {
         case let .uint(u): return u <= UInt64(Int64.max) ? Int64(u) : nil

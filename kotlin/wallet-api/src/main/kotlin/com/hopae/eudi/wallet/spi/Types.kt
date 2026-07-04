@@ -61,3 +61,29 @@ data class SecureAreaCapabilities(
     val keyAttestation: Boolean,
     val keyAgreement: Boolean,
 )
+
+/* ---- credential model identifiers (API-CONTRACT.md §4) ---- */
+
+@JvmInline
+value class CredentialId(val value: String)
+
+sealed interface CredentialFormat {
+    data class MsoMdoc(val docType: String) : CredentialFormat
+    data class SdJwtVc(val vct: String) : CredentialFormat
+}
+
+/* ---- algorithm mappings (SigningAlgorithm <-> COSE/curve) ---- */
+
+val SigningAlgorithm.curve: com.hopae.eudi.wallet.cbor.cose.EcCurve
+    get() = when (this) {
+        SigningAlgorithm.ES256 -> com.hopae.eudi.wallet.cbor.cose.EcCurve.P256
+        SigningAlgorithm.ES384 -> com.hopae.eudi.wallet.cbor.cose.EcCurve.P384
+        SigningAlgorithm.ES512 -> com.hopae.eudi.wallet.cbor.cose.EcCurve.P521
+    }
+
+val SigningAlgorithm.coseAlgorithm: com.hopae.eudi.wallet.cbor.cose.CoseAlgorithm
+    get() = when (this) {
+        SigningAlgorithm.ES256 -> com.hopae.eudi.wallet.cbor.cose.CoseAlgorithm.ES256
+        SigningAlgorithm.ES384 -> com.hopae.eudi.wallet.cbor.cose.CoseAlgorithm.ES384
+        SigningAlgorithm.ES512 -> com.hopae.eudi.wallet.cbor.cose.CoseAlgorithm.ES512
+    }

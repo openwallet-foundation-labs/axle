@@ -4,9 +4,10 @@ import Foundation
 /// ECDSA verification via swift-crypto (CryptoKit-compatible; BoringSSL on Linux).
 /// Core rule: only public-key operations live in core — private-key signing goes
 /// through the SecureArea port (see WalletAPI).
-enum Ecdsa {
+/// Public so adapters and the port contract test suite can verify raw signatures.
+public enum Ecdsa {
 
-    static func verify(key: EcPublicKey, algorithm: CoseAlgorithm, data: [UInt8], rawSignature: [UInt8]) -> Bool {
+    public static func verify(key: EcPublicKey, algorithm: CoseAlgorithm, data: [UInt8], rawSignature: [UInt8]) -> Bool {
         guard rawSignature.count == 2 * key.curve.coordinateSize else { return false }
         var x963: [UInt8] = [0x04]
         x963 += leftPad(key.x, key.curve.coordinateSize)

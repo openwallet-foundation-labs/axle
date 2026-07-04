@@ -62,8 +62,12 @@ class StatusList(val bits: Int, private val unpacked: ByteArray) {
             val sl = payload["status_list"] as? JsonValue.Obj ?: throw StatusListException("missing status_list")
             val bits = (sl["bits"] as? JsonValue.NumInt)?.value?.toInt() ?: throw StatusListException("missing bits")
             val lst = (sl["lst"] as? JsonValue.Str)?.value ?: throw StatusListException("missing lst")
-            return StatusList(bits, inflate(Base64Url.decode(lst)))
+            return fromBitsAndCompressed(bits, Base64Url.decode(lst))
         }
+
+        /** Builds a status list from `bits` and the zlib-compressed `lst` bytes (JWT or CWT). */
+        fun fromBitsAndCompressed(bits: Int, compressedLst: ByteArray): StatusList =
+            StatusList(bits, inflate(compressedLst))
 
         /** Parses + returns the status list carried by a `statuslist+jwt` (signature checked separately). */
         fun fromToken(jws: Jws): StatusList {

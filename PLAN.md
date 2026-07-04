@@ -166,5 +166,6 @@ dependency가 아니므로 ~/eudi-ref 포크들의 용도 재정의:
 1. ~~API 계약 v0~~ → **완료 (2026-07-04)**: `API-CONTRACT.md` 초안 작성·커밋 — keep/change/drop 분석 + 파사드/세션/포트/에러 계약. 리뷰 후 확정. (참고: 동의는 PresentationConsent 포트가 아니라 세션 상태 머신으로 처리하기로 변경)
 2. ~~레포 부트스트랩~~ → **완료 (2026-07-04)**: `~/eudi-wallet-sdk` 생성(git, main 브랜치). 당분간 spec/문서 + 골든 벡터 홈. 플랫폼 레포(`eudi-wallet-sdk-android`/`-ios`) 분리는 코드 스캐폴드 시점에 확정.
 3. ~~cbor-cose 스파이크~~ → **완료 (2026-07-04)**: 양 언어 deterministic CBOR 코어(`kotlin/cbor`, `swift/Sources/CborCose`)가 RFC 8949 Appendix A 공식 코퍼스 통과 — 양 플랫폼 동일 수치(82 디코드 / 59 값비교 / 65 라운드트립) + deterministic 전용 테스트 12종. **리스크 판정: 낮음.** MapKeyOrder는 8949 bytewise 기본 + 7049 length-first 옵션으로 구현해둠(mdoc 인터롭 시 M4에서 핀 고정). 다음 확장: COSE(RFC 9052 Sign1) + 벡터.
-4. **COSE Sign1 서명/검증** (cbor 모듈 위에, M1 SecureArea와 함께)
-5. 팀/기간 확정 후 마일스톤 날짜 부여
+4. ~~COSE Sign1~~ → **완료 (2026-07-04)**: RFC 9052 COSE_Sign1 — 검증은 코어(JCA/swift-crypto), 서명은 `CoseSigner` 추상화(SecureArea 어댑터 자리). cose-wg 공식 벡터(sign-pass-01/02/03 + sign-fail-02) 양 언어 통과, Sig_structure 바이트 일치("Redo protected" h'A0'→h'' 정규화 포함). 포트 SPI도 코드화됨(`kotlin/wallet-api` · `swift/WalletAPI`) — 계약 v0.1 델타 반영.
+5. 다음: **M1 착수** — `SoftwareSecureArea`(testkit) + 포트 계약 테스트 스위트 → credential-store. 스펙 추적은 `SPEC-MATRIX.md`로.
+6. 팀/기간 확정 후 마일스톤 날짜 부여

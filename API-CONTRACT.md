@@ -288,9 +288,10 @@ interface CredentialStore {
 interface SecureArea {
     val id: SecureAreaId
     val capabilities: SecureAreaCapabilities   // 지원 알고리즘, 하드웨어 여부, userAuth 지원, attestation 지원
-    suspend fun createKey(spec: KeySpec): KeyHandle
+    suspend fun createKey(spec: KeySpec): KeyInfo              // handle + 공개키 (proof 작성에 항상 필요)
+    suspend fun publicKey(key: KeyHandle): EcPublicKey
     suspend fun sign(key: KeyHandle, algorithm: SigningAlgorithm, data: ByteArray, hint: AuthorizationHint?): ByteArray
-    suspend fun keyAgreement(key: KeyHandle, peerPublicKey: CoseKey, hint: AuthorizationHint?): ByteArray
+    suspend fun keyAgreement(key: KeyHandle, peerPublicKey: EcPublicKey, hint: AuthorizationHint?): ByteArray
     suspend fun attestation(key: KeyHandle, challenge: ByteArray): KeyAttestation?
     suspend fun deleteKey(key: KeyHandle)
 }
@@ -322,6 +323,8 @@ interface WalletAttestationProvider {   // 월렛 프로바이더 백엔드 (WUA
     suspend fun keyAttestation(keys: List<KeyInfo>, nonce: String?): String
 }
 ```
+
+v0.1 (2026-07-04): 포트 SPI를 코드로 확정 — `kotlin/wallet-api` · `swift/Sources/WalletAPI`. 코드화하며 두 가지 변경: `createKey`는 `KeyInfo`(handle+공개키) 반환, `publicKey(key)` 조회 추가 — proof 작성에 공개키가 항상 필요해서. peer 키 타입은 `EcPublicKey`로 통일.
 
 계약 테스트 스위트가 포트별로 제공된다 (`testkit`): 같은 스위트를 CI에선 `SoftwareSecureArea`/인메모리 구현으로, 디바이스 랩에선 실제 어댑터로 실행. **어댑터 자격 = 계약 테스트 통과.**
 

@@ -170,5 +170,6 @@ dependency가 아니므로 ~/eudi-ref 포크들의 용도 재정의:
 5. ~~M1 코어~~ → **완료 (2026-07-04)**: testkit(`SoftwareSecureArea`·`InMemoryStorageDriver`·계약 스위트) + `SecureAreaCoseSigner` E2E(3커브) + credential-store(엔벨로프 스키마 v1, 크로스언어 골든 벡터, OneTime/Rotate `consumeInstance`). 저장 암호화는 StorageDriver 어댑터 소관(코어는 평문 CBOR를 암호화 드라이버에 위임).
 6. ~~SD-JWT 코어~~ → **완료 (2026-07-04)**: `sdjwt` 모듈(Kotlin·Swift) — 자체 JsonValue(순서보존·바이트안정 직렬화), 자체 JWS(compact, alg 고정 검증), disclosure(재귀·배열 요소), 발급 DSL, 홀더 선택 제시(조상 자동 포함), KB-JWT(sd_hash), RFC 9901 예제 83벡터.
 7. ~~OpenID4VCI 코어~~ → **완료 (2026-07-04)**: `openid4vci` 모듈(양 언어) — 오퍼/메타데이터 파싱, PKCE, DPoP(RFC 9449, nonce 재시도), key proof(§8.2.1), pre-authorized code 그랜트 E2E over HttpTransport. mock issuer가 DPoP·proof 서명·ath·aud·nonce를 실제 검증하고 진짜 SD-JWT VC 발급 → SdJwtVcVerifier로 왕복 검증. + SD-JWT VC 프로파일 검증기 + JwtTimeValidator.
-8. 다음: **VCI authorization code 그랜트**(PAR + 브라우저 리다이렉트 재개) → **실제 EUDI ref issuer(issuer.eudiw.dev) 인터롭** — 이게 M2 완료이자 첫 실전. 그다음 M3(OpenID4VP + JWE).
-9. 팀/기간 확정 후 마일스톤 날짜 부여
+8. ~~VCI authorization code 그랜트 + 실전 인터롭~~ → **완료 (2026-07-04)**: PAR 기반 auth code 그랜트(prepare→브라우저→finish, PKCE+DPoP) 양 언어. **실제 issuer.eudiw.dev 라이브 인터롭 통과** — 27개 config 실물 메타데이터 파싱 + 실 PAR 왕복으로 request_uri 수령(`RealIssuerInteropTest`, EUDI_INTEROP=1 env-gated). 브라우저 인증 이후의 전체 발급은 하네스 앱 단계.
+9. 다음: **M3 착수** — OpenID4VP(DCQL 엔진, JAR, direct_post.jwt) + **JWE**(응답 암호화, M3 필수경로). VP는 M2에서 발급한 크리덴셜을 제시하므로 이제 실물로 테스트 가능.
+10. 팀/기간 확정 후 마일스톤 날짜 부여

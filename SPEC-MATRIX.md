@@ -6,7 +6,7 @@
 |---|---|---|
 | CBOR | RFC 8949 (deterministic encoding §4.2.1) | ✅ `cbor` — Appendix A 82벡터 양 언어 통과, 8949 bytewise + 7049 length-first 키 정렬 프로파일 |
 | COSE | RFC 9052 §4.2 COSE_Sign1 · RFC 9053 ES256/384/512 · RFC 9360 x5chain | ✅ 검증(JCA/swift-crypto) + 서명(CoseSigner → SecureArea 포트 위임). cose-wg sign1 벡터 통과 |
-| OpenID4VCI | **1.0 Final** (2025-09-16) | 🔶 `openid4vci` — pre-authorized code grant E2E(메타데이터·DPoP·proof jwt·토큰·credential), mock issuer 프로토콜 검증 통과. authorization code(브라우저)·deferred·batch·notification은 잔여 |
+| OpenID4VCI | **1.0 Final** (2025-09-16) | ✅ `openid4vci` — pre-authorized **및 authorization code**(PAR) 그랜트 E2E. **실제 issuer.eudiw.dev와 라이브 인터롭 통과**(메타데이터 discovery + 실 PAR 왕복으로 request_uri 수령). deferred·batch·notification은 잔여 |
 | DPoP | RFC 9449 | ✅ `openid4vci` — jti/htm/htu/ath + DPoP-Nonce 재시도 |
 | PKCE | RFC 7636 (S256) | ✅ `openid4vci` |
 | OpenID4VP | **1.0 Final** (2025-07-09), DCQL | ⬜ M3 |
@@ -28,12 +28,15 @@
 |---|---|---|
 | **JWE** (ECDH-ES + A128/256GCM — VP 응답 암호화 direct_post.jwt) | **M3 필수 경로** | 계획됨 |
 | x5c **체인 검증** (신뢰 앵커·경로 검증 — VP request, SD-JWT VC issuer) | M3 (trust 모듈과) | 계획됨 (JWS x5c **파싱**은 ✅ 2026-07-04) |
-| VCI authorization code 그랜트(PAR+브라우저 리다이렉트), deferred, batch(>1 proof), notification | M2 잔여 / 실전 인터롭 | 계획됨 (pre-auth·PKCE·DPoP 프리미티브는 ✅) |
+| VCI deferred(transaction_id 폴링), batch(>1 proof), notification 엔드포인트 | 실전 심화 | 계획됨 (auth code·PAR·PKCE·DPoP는 ✅ 라이브 검증) |
+| VCI 전체 발급까지 라이브 E2E (브라우저 인증 필요) | 실기기/앱 통합 | 헤드리스 불가 — 실 PAR 왕복까지 검증, 이후 단계는 하네스 앱에서 |
+| PAR dpop_jkt 바인딩(인가코드↔DPoP키 결속) | 하드닝 | 계획됨 |
 | vct#integrity, vct 타입 메타데이터 해석 | SD-JWT VC 심화 | 계획됨 |
 | COSE_Key 파싱, COSE_Mac0 (mdoc deviceAuth MAC) | M4 | 계획됨 |
 | Status List의 CWT 변형 | M6 검토 | 미정 |
 | RSA(RS/PS), EdDSA, HMAC 서명 | — | **의도적 제외** (HAIP/ARF 요구는 ES256 계열; 필요 시 알고리즘 레지스트리로 확장) |
+| SD-JWT VC 전환기 `vc+sd-jwt` typ 수용 | — | **의도적 제외** (draft §3.1은 dc+sd-jwt를 MUST로 지정; vc+sd-jwt는 2024-11 이전 옛 값. 전환기 수용은 스펙 권고이나 기본 미지원, 특정 이슈어 대응 필요 시 옵트인 추가) |
 | `_sd_alg` sha-384/512 | — | 의도적 제외 (HAIP는 sha-256; 명시적 거부함) |
 | JSON: >2^53 비정수 정밀도(BigDecimal), JWS JSON 직렬화 변형 | — | 의도적 제외 (토큰 페이로드에 불필요) |
 
-해결된 갭 (이 레지스터가 작동한 기록, 전부 2026-07-04): JSON 중복 키 거부(claim smuggling 방어) · JWS 미지 `crit` 거부 · **decoy digests 발급 생성**(`decoysPerSdStruct`, 검증측 무해 처리는 원래부터) · **JWS x5c 헤더 파싱** — 각각 발견 즉시 수정, 테스트 포함.
+해결된 갭 (이 레지스터가 작동한 기록, 전부 2026-07-04): JSON 중복 키 거부(claim smuggling 방어) · JWS 미지 `crit` 거부 · **decoy digests 발급 생성**(`decoysPerSdStruct`, 검증측 무해 처리는 원래부터) · **JWS x5c 헤더 파싱** · **SD-JWT VC typ에서 레거시 `vc+sd-jwt` 제거**(draft §3.1 dc+sd-jwt MUST) · **VCI authorization code + PAR 그랜트**(실 issuer.eudiw.dev 라이브 검증) — 각각 발견 즉시 수정, 테스트 포함.

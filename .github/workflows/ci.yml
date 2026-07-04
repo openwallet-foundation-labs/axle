@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '0 3 * * *' # nightly live interop
 
 jobs:
   kotlin:
@@ -23,3 +25,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: swift test --package-path swift
+
+  # External live interop against issuer.eudiw.dev — nightly only (network dependency).
+  interop:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: ./gradlew --no-daemon :openid4vci:test --tests '*RealIssuerInteropTest'
+        working-directory: kotlin
+        env:
+          EUDI_INTEROP: '1'

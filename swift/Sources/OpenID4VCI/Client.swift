@@ -57,6 +57,37 @@ public struct Openid4VciClient {
         self.clientId = clientId
     }
 
+    /// Resolves a credential offer from a wallet deep link / QR payload (OpenID4VCI §4.1):
+    /// accepts `<scheme>://…?credential_offer=<url-encoded-json>`, a `credential_offer_uri`
+    /// by reference (fetched here), or the raw offer JSON.
+    public func resolveCredentialOffer(_ input: String) async throws -> CredentialOffer {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("{") { return try CredentialOffer.parse(trimmed) }
+        if let value = queryParam(trimmed, "credential_offer") {
+            return try CredentialOffer.parse(value)
+        }
+        if let uri = queryParam(trimmed, "credential_offer_uri") {
+            let response = try await rawGet(uri)
+            try checkStatus(response, uri)
+            guard let text = String(bytes: response.body, encoding: .utf8) else {
+                throw VciError.invalidOffer("offer uri body not UTF-8")
+            }
+            return try CredentialOffer.parse(text)
+        }
+        throw VciError.invalidOffer("no credential_offer or credential_offer_uri in input")
+    }
+
+    private func queryParam(_ input: String, _ name: String) -> String? {
+        guard let q = input.split(separator: "?", maxSplits: 1).dropFirst().first else { return nil }
+        for pair in q.split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            if kv.count == 2, kv[0] == name {
+                return String(kv[1]).removingPercentEncoding ?? String(kv[1])
+            }
+        }
+        return nil
+    }
+
     public func loadIssuerMetadata(_ credentialIssuer: String) async throws -> CredentialIssuerMetadata {
         try await CredentialIssuerMetadata.fromObj(getJson(wellKnown(credentialIssuer, "openid-credential-issuer")))
     }
@@ -78,13 +109,16 @@ public struct Openid4VciClient {
         credentialIssuer: String,
         configurationId: String,
         redirectUri: String,
-        issuerState: String? = nil
+        issuerState: String? = nil,
+        /// Favor `scope` over `authorization_details` when the config advertises one (HAIP/EUDI default).
+        preferScope: Bool = true
     ) async throws -> PreparedAuthorization {
         let issuerMeta = try await loadIssuerMetadata(credentialIssuer)
         let asMeta = try await loadAuthorizationServerMetadata(issuerMeta.authorizationServers[0])
         let pkce = Pkce.create(rng: rng)
         let state = Base64Url.encode(rng.nextBytes(16))
 
+        let scope = issuerMeta.credentialConfigurationsSupported[configurationId]?.scope
         let authorizationDetails = JsonValue.arr([
             .obj([
                 ("type", .str("openid_credential")),
@@ -98,9 +132,13 @@ public struct Openid4VciClient {
             ("redirect_uri", redirectUri),
             ("code_challenge", pkce.codeChallenge),
             ("code_challenge_method", pkce.method),
-            ("authorization_details", authorizationDetails),
-            ("state", state),
         ]
+        if preferScope, let scope {
+            baseParams.append(("scope", scope))
+        } else {
+            baseParams.append(("authorization_details", authorizationDetails))
+        }
+        baseParams.append(("state", state))
         if let issuerState { baseParams.append(("issuer_state", issuerState)) }
 
         let authorizationUrl: String

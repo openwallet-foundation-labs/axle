@@ -8,6 +8,7 @@ import com.hopae.eudi.wallet.spi.HttpRequest
 import com.hopae.eudi.wallet.spi.HttpResponse
 import com.hopae.eudi.wallet.spi.HttpTransport
 import com.hopae.eudi.wallet.spi.Rng
+import java.net.URLDecoder
 import java.net.URLEncoder
 
 /** Holder key material for issuance: a key-proof (bound into the credential) and a DPoP key. */
@@ -51,6 +52,31 @@ class Openid4VciClient(
     private val clock: () -> Long,
     private val clientId: String = "wallet-dev",
 ) {
+    /**
+     * Resolves a credential offer from a wallet deep link / QR payload (OpenID4VCI §4.1):
+     * accepts `<scheme>://…?credential_offer=<url-encoded-json>`, a `credential_offer_uri`
+     * by reference (fetched here), or the raw offer JSON.
+     */
+    suspend fun resolveCredentialOffer(input: String): CredentialOffer {
+        val trimmed = input.trim()
+        if (trimmed.startsWith("{")) return CredentialOffer.parse(trimmed)
+        queryParam(trimmed, "credential_offer")?.let { return CredentialOffer.parse(it) }
+        queryParam(trimmed, "credential_offer_uri")?.let { uri ->
+            val response = rawGet(uri)
+            checkStatus(response, uri)
+            return CredentialOffer.parse(response.body.decodeToString())
+        }
+        throw VciException.InvalidOffer("no credential_offer or credential_offer_uri in input")
+    }
+
+    private fun queryParam(input: String, name: String): String? {
+        val query = input.substringAfter('?', "")
+        return query.split('&')
+            .firstOrNull { it.substringBefore('=') == name }
+            ?.substringAfter('=', "")
+            ?.let { URLDecoder.decode(it, "UTF-8") }
+    }
+
     suspend fun loadIssuerMetadata(credentialIssuer: String): CredentialIssuerMetadata {
         val url = wellKnown(credentialIssuer, "openid-credential-issuer")
         val body = getJson(url)
@@ -78,12 +104,15 @@ class Openid4VciClient(
         configurationId: String,
         redirectUri: String,
         issuerState: String? = null,
+        /** Favor `scope` over `authorization_details` when the config advertises one (HAIP/EUDI default). */
+        preferScope: Boolean = true,
     ): PreparedAuthorization {
         val issuerMeta = loadIssuerMetadata(credentialIssuer)
         val asMeta = loadAuthorizationServerMetadata(issuerMeta.authorizationServers.first())
         val pkce = Pkce.create(rng)
         val state = com.hopae.eudi.wallet.sdjwt.Base64Url.encode(rng.nextBytes(16))
 
+        val scope = issuerMeta.credentialConfigurationsSupported[configurationId]?.scope
         val authorizationDetails = JsonValue.Arr(
             listOf(
                 JsonValue.Obj(
@@ -101,7 +130,11 @@ class Openid4VciClient(
             add("redirect_uri" to redirectUri)
             add("code_challenge" to pkce.codeChallenge)
             add("code_challenge_method" to pkce.method)
-            add("authorization_details" to authorizationDetails)
+            if (preferScope && scope != null) {
+                add("scope" to scope)
+            } else {
+                add("authorization_details" to authorizationDetails)
+            }
             add("state" to state)
             issuerState?.let { add("issuer_state" to it) }
         }

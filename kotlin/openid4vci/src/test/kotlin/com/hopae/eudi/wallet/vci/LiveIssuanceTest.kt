@@ -61,15 +61,27 @@ class LiveIssuanceTest {
 
         val proof = LocalEcKey.generate()
         val dpop = LocalEcKey.generate()
+        val client = client()
 
-        val prepared = client().prepareAuthorizationCodeIssuance(
-            credentialIssuer = issuer,
-            configurationId = configId,
+        // If a credential offer (deep link) is provided, use its issuer/config/issuer_state.
+        val offerInput = System.getenv("EUDI_OFFER")
+        val offer = offerInput?.let { client.resolveCredentialOffer(it) }
+        val useIssuer = offer?.credentialIssuer ?: issuer
+        val useConfig = offer?.credentialConfigurationIds?.first() ?: configId
+        val issuerState = offer?.authorizationCodeIssuerState
+        if (offer != null) println("resolved offer: issuer=$useIssuer config=$useConfig issuer_state=$issuerState")
+
+        val prepared = client.prepareAuthorizationCodeIssuance(
+            credentialIssuer = useIssuer,
+            configurationId = useConfig,
             redirectUri = redirectUri,
+            issuerState = issuerState,
         )
 
         val state = JsonValue.Obj(
             listOf(
+                "credentialIssuer" to JsonValue.Str(useIssuer),
+                "configurationId" to JsonValue.Str(useConfig),
                 "codeVerifier" to JsonValue.Str(prepared.pkce.codeVerifier),
                 "redirectUri" to JsonValue.Str(redirectUri),
                 "proof" to proof.toJson(),
@@ -89,7 +101,18 @@ class LiveIssuanceTest {
     @Test
     fun step2_finish() = runBlocking {
         assumeTrue(System.getenv("EUDI_LIVE") == "finish", "run with EUDI_LIVE=finish")
-        val code = System.getenv("EUDI_CODE") ?: error("set EUDI_CODE=<code from redirect>")
+        // Prefer a redirect-URL file (no manual transcription): write the full redirect to
+        // /tmp/eudi-redirect.txt, we extract and URL-decode the `code` ourselves.
+        val redirectFile = File(System.getProperty("java.io.tmpdir"), "eudi-redirect.txt")
+        val code = when {
+            redirectFile.exists() -> {
+                val url = redirectFile.readText().trim()
+                val raw = url.substringAfter("code=").substringBefore('&')
+                java.net.URLDecoder.decode(raw, "UTF-8")
+            }
+            else -> System.getenv("EUDI_CODE") ?: error("write redirect to ${redirectFile.absolutePath} or set EUDI_CODE")
+        }
+        println("using authorization code (len=${code.length})")
         val transport = JdkHttpTransport()
 
         val state = JsonValue.parse(stateFile.readText()) as JsonValue.Obj
@@ -97,6 +120,8 @@ class LiveIssuanceTest {
         val dpop = LocalEcKey.fromJson(state["dpop"] as JsonValue.Obj)
         val codeVerifier = (state["codeVerifier"] as JsonValue.Str).value
         val redirect = (state["redirectUri"] as JsonValue.Str).value
+        val useIssuer = (state["credentialIssuer"] as? JsonValue.Str)?.value ?: issuer
+        val useConfig = (state["configurationId"] as? JsonValue.Str)?.value ?: configId
 
         val keys = IssuanceKeys(proof.signer(), proof.publicKey, dpop.signer(), dpop.publicKey)
 
@@ -104,8 +129,8 @@ class LiveIssuanceTest {
             transport, secureRng(), clock = { System.currentTimeMillis() / 1000 }, clientId = "wallet-dev",
         )
         val response = client.exchangeAuthorizationCode(
-            credentialIssuer = issuer,
-            configurationId = configId,
+            credentialIssuer = useIssuer,
+            configurationId = useConfig,
             authorizationCode = code,
             redirectUri = redirect,
             codeVerifier = codeVerifier,
@@ -116,16 +141,35 @@ class LiveIssuanceTest {
         println("credentials received: ${response.credentials.size}")
         val credential = response.credentials.first().credential
 
-        val verified = SdJwtVcVerifier(
-            JwtVcMetadataKeyResolver(transport),
-            JwtTimeValidator(now = { Instant.now() }),
-        ).verify(SdJwt.parse(credential))
+        // Save the real credential FIRST — never lose it to a later verification error.
+        val credFile = File(System.getProperty("java.io.tmpdir"), "eudi-credential.txt")
+        credFile.writeText(credential)
+        println("credential saved to ${credFile.absolutePath} (${credential.length} chars)")
 
-        println("vct:    ${verified.vct}")
-        println("issuer: ${verified.issuer}")
-        println("claims:")
-        (verified.claims).entries.forEach { (k, v) -> println("  $k = ${v.serialize()}") }
-        println("holder-bound: ${verified.holderKey != null}")
+        // Show the issuer JWS header + payload (unverified) for diagnostics.
+        val parsed = SdJwt.parse(credential)
+        val jws = com.hopae.eudi.wallet.sdjwt.Jws.parse(parsed.jwt)
+        println("JWS header: ${jws.header.serialize()}")
+        val payload = JsonValue.parse(jws.payloadBytes.decodeToString()) as JsonValue.Obj
+        println("payload keys: ${payload.entries.map { it.first }}")
+        println("disclosures: ${parsed.disclosures.size}")
+
+        try {
+            val verified = SdJwtVcVerifier(
+                JwtVcMetadataKeyResolver(transport),
+                JwtTimeValidator(now = { Instant.now() }),
+            ).verify(parsed)
+            println("\n*** VERIFIED SD-JWT VC ***")
+            println("vct:    ${verified.vct}")
+            println("issuer: ${verified.issuer}")
+            println("claims:")
+            verified.claims.entries.forEach { (k, v) -> println("  $k = ${v.serialize()}") }
+            println("holder-bound: ${verified.holderKey != null}")
+        } catch (e: Exception) {
+            println("\n[verification failed: ${e.message}] — credential is saved; diagnosing resolver path")
+            val x5c = jws.x5c
+            println("issuer JWS has x5c: ${x5c != null} (${x5c?.size ?: 0} certs)")
+        }
         println("=====================================================\n")
     }
 }

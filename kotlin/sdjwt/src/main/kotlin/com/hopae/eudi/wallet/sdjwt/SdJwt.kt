@@ -251,6 +251,14 @@ object SdJwtVerifier {
 
 object SdJwtHolder {
 
+    /** Processed claim tree of a held credential (disclosures resolved), without verifying the issuer signature. */
+    fun processedClaims(issued: SdJwt): JsonValue.Obj {
+        val jws = Jws.parse(issued.jwt)
+        val payload = JsonValue.parse(jws.payloadBytes.decodeToString()) as? JsonValue.Obj
+            ?: throw SdJwtException("issuer payload must be an object")
+        return SdProcessor(issued.disclosures).process(payload)
+    }
+
     /**
      * Selects disclosures by processed-claim path. Ancestors of a selected disclosure
      * (recursive disclosures) are included automatically.
@@ -281,6 +289,8 @@ object SdJwtHolder {
         nonce: String,
         issuedAt: Long,
         signer: JwsSigner,
+        /** Extra KB-JWT claims (e.g. OpenID4VP `transaction_data_hashes`). */
+        extraClaims: List<Pair<String, JsonValue>> = emptyList(),
     ): SdJwt {
         val bare = present(issued, select)
         val sdHash = Base64Url.encode(sha256(bare.presentationWithoutKb().encodeToByteArray()))
@@ -296,7 +306,7 @@ object SdJwtHolder {
                 "aud" to JsonValue.Str(audience),
                 "nonce" to JsonValue.Str(nonce),
                 "sd_hash" to JsonValue.Str(sdHash),
-            )
+            ) + extraClaims
         )
         val kb = Jws.sign(header, payload.serialize().encodeToByteArray(), signer).compact()
         return SdJwt(bare.jwt, bare.disclosures, kb)

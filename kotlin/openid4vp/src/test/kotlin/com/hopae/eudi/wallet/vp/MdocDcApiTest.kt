@@ -62,7 +62,7 @@ class MdocDcApiTest {
         assertEquals(Cbor.Text("OpenID4VPDCAPIHandover"), handover.items[0])
         assertEquals(32, (handover.items[1] as Cbor.Bytes).value.size) // SHA-256
 
-        val iso = Oid4vpSessionTranscript.dcApiIsoMdoc("ZW5j", origin) as Cbor.Array
+        val iso = com.hopae.eudi.wallet.mdoc.MdocSessionTranscript.dcApiIsoMdoc("ZW5j", origin) as Cbor.Array
         assertEquals(Cbor.Text("dcapi"), (iso.items[2] as Cbor.Array).items[0])
     }
 

@@ -43,15 +43,6 @@ object Oid4vpSessionTranscript {
         return sessionTranscript("OpenID4VPDCAPIHandover", handoverInfo)
     }
 
-    /**
-     * SessionTranscript for the ISO `org-iso-mdoc` DC API protocol (ISO/IEC TS 18013-7:2025 Annex C):
-     * `["dcapi", SHA-256(CBOR([base64url(EncryptionInfo), origin]))]`.
-     */
-    fun dcApiIsoMdoc(encryptionInfoBase64: String, origin: String): Cbor {
-        val info = Cbor.Array(listOf(Cbor.Text(encryptionInfoBase64), Cbor.Text(origin)))
-        return sessionTranscript("dcapi", info)
-    }
-
     private fun sessionTranscript(handoverType: String, handoverInfo: Cbor): Cbor {
         val hash = MessageDigest.getInstance("SHA-256").digest(CborEncoder.encode(handoverInfo))
         val handover = Cbor.Array(listOf(Cbor.Text(handoverType), Cbor.Bytes(hash)))

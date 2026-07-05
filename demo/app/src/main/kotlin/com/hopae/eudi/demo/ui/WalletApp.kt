@@ -49,6 +49,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hopae.eudi.demo.DemoWallet
 import com.hopae.eudi.demo.LogStore
 import com.hopae.eudi.demo.PortraitCaptureActivity
 import com.hopae.eudi.wallet.Credential
@@ -296,12 +297,17 @@ private fun credentialText(c: Credential): String = buildString {
 @Composable
 private fun TransactionsScreen(wallet: Wallet, refreshKey: Int) {
     var entries by remember { mutableStateOf<List<TransactionLogEntry>>(emptyList()) }
-    LaunchedEffect(refreshKey) { entries = wallet.transactions.history() }
-    val fmt = remember { SimpleDateFormat("MM-dd HH:mm:ss", Locale.US) }
+    val scope = rememberCoroutineScope()
+    suspend fun reload() { entries = wallet.transactions.history() }
+    LaunchedEffect(refreshKey) { reload() }
+    val fmt = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US) }
     Column(Modifier.padding(16.dp)) {
-        Text("Transaction Log (${entries.size})", style = MaterialTheme.typography.titleLarge)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Transaction Log (${entries.size})", style = MaterialTheme.typography.titleLarge)
+            TextButton(onClick = { scope.launch { DemoWallet.transactionStore.clear(); reload() } }) { Text("Clear") }
+        }
         Spacer(Modifier.height(8.dp))
-        if (entries.isEmpty()) Text("No presentations yet. (In-memory; resets on restart.)", style = MaterialTheme.typography.bodyMedium)
+        if (entries.isEmpty()) Text("No presentations recorded yet.", style = MaterialTheme.typography.bodyMedium)
         LazyColumn {
             items(entries) { e ->
                 Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {

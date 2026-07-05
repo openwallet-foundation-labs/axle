@@ -173,4 +173,55 @@ final class WalletPresentationTests: XCTestCase {
         XCTAssertEqual(.success, entries[0].status)
         wallet.close()
     }
+
+    func testFailedSubmissionRecordsErrorWhenEnabled() async throws {
+        let area = SoftwareSecureArea()
+        let storage = InMemoryStorageDriver()
+        let issuerPublic = try await seedPid(area, storage)
+        let verifier = MockVerifier(issuerPublic: issuerPublic)
+        await verifier.setRejectResponse(true)
+        let logStore = InMemoryTransactionLogStore()
+        let wallet = Wallet.create(
+            config: WalletConfig(transactionLog: TransactionLogConfig(recordFailures: true)),
+            ports: WalletPorts(secureAreas: [area], storage: storage, http: verifier, transactionLogStore: logStore))
+
+        let session = wallet.presentation.start(await verifier.requestUri("direct_post"))
+        var terminal: PresentationState?
+        for await state in session.states {
+            if case let .requestResolved(request) = state { session.respond(PresentationSelection.auto(request)) }
+            if state.isTerminal { terminal = state; break }
+        }
+        guard case .failed = terminal else { return XCTFail("terminal: \(String(describing: terminal))") }
+
+        // the failed final submission is recorded with .error + the attempted disclosure
+        let entries = await logStore.all()
+        XCTAssertEqual(1, entries.count)
+        XCTAssertEqual(.error, entries[0].status)
+        XCTAssertEqual("verifier.example", entries[0].relyingParty?.id)
+        XCTAssertTrue(entries[0].documents.contains { $0.type == "urn:eudi:pid:1" })
+        wallet.close()
+    }
+
+    func testFailedSubmissionNotRecordedByDefault() async throws {
+        let area = SoftwareSecureArea()
+        let storage = InMemoryStorageDriver()
+        let issuerPublic = try await seedPid(area, storage)
+        let verifier = MockVerifier(issuerPublic: issuerPublic)
+        await verifier.setRejectResponse(true)
+        let logStore = InMemoryTransactionLogStore()
+        let wallet = Wallet.create(config: WalletConfig(), ports: WalletPorts(secureAreas: [area], storage: storage, http: verifier, transactionLogStore: logStore))
+
+        let session = wallet.presentation.start(await verifier.requestUri("direct_post"))
+        var terminal: PresentationState?
+        for await state in session.states {
+            if case let .requestResolved(request) = state { session.respond(PresentationSelection.auto(request)) }
+            if state.isTerminal { terminal = state; break }
+        }
+        guard case .failed = terminal else { return XCTFail("terminal: \(String(describing: terminal))") }
+
+        // default config → failures are NOT recorded
+        let entries = await logStore.all()
+        XCTAssertTrue(entries.isEmpty, "no transaction recorded by default")
+        wallet.close()
+    }
 }

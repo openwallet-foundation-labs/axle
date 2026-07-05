@@ -8,6 +8,16 @@ class WalletConfig(
     val issuance: IssuanceConfig = IssuanceConfig(),
     val presentation: PresentationConfig = PresentationConfig(),
     val trust: TrustConfig = TrustConfig(),
+    val transactionLog: TransactionLogConfig = TransactionLogConfig(),
+)
+
+/** Audit / transaction-log behaviour. */
+class TransactionLogConfig(
+    /**
+     * Also record presentations that fail during submission, with [TransactionStatus.ERROR][com.hopae.eudi.wallet.txlog.TransactionStatus].
+     * Default false — only successful and declined presentations are logged.
+     */
+    val recordFailures: Boolean = false,
 )
 
 class IssuanceConfig(

@@ -70,8 +70,9 @@ class Wallet private constructor(
                 idGenerator = { "txn-" + Base64Url.encode(ports.rng.nextBytes(12)) },
                 clock = clockSeconds,
             )
-            val presentation = PresentationService(vp, store, txlog, ports.secureAreas, scope)
-            val proximity = ProximityService(store, txlog, ports.secureAreas, scope, readerValidator?.let { X5cMdocReaderTrust(it) })
+            val recordFailures = config.transactionLog.recordFailures
+            val presentation = PresentationService(vp, store, txlog, ports.secureAreas, scope, recordFailures)
+            val proximity = ProximityService(store, txlog, ports.secureAreas, scope, readerValidator?.let { X5cMdocReaderTrust(it) }, recordFailures)
 
             return Wallet(
                 credentials = CredentialsService(store, statusClient),

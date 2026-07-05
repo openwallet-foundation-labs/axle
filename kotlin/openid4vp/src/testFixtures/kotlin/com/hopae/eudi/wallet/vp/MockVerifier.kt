@@ -24,6 +24,8 @@ import java.security.spec.ECGenParameterSpec
 class MockVerifier(
     private val issuerPublic: EcPublicKey,
     private val dcqlQuery: String = DEFAULT_PID_QUERY,
+    /** When true, the verifier rejects the submitted response with HTTP 400 (e.g. issuer not trusted). */
+    var rejectResponse: Boolean = false,
 ) : HttpTransport {
     val clientId = "verifier.example"
     val nonce = "vp-nonce-123"
@@ -58,6 +60,7 @@ class MockVerifier(
 
     override suspend fun execute(request: HttpRequest): HttpResponse {
         if (request.url != responseUri || request.method != HttpMethod.POST) return HttpResponse(404, emptyList(), ByteArray(0))
+        if (rejectResponse) return HttpResponse(400, emptyList(), """{"error":"invalid_vp_token"}""".encodeToByteArray())
         val form = request.body!!.decodeToString().split('&').associate {
             URLDecoder.decode(it.substringBefore('='), "UTF-8") to URLDecoder.decode(it.substringAfter('='), "UTF-8")
         }

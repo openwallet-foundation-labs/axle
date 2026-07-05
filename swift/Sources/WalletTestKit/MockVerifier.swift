@@ -14,6 +14,9 @@ public actor MockVerifier: HttpTransport {
     private let encPubJwk: JsonValue
     private let encPrivD: [UInt8]
     public private(set) var verifiedClaims: JsonValue?
+    /// When true, the verifier rejects the submitted response with HTTP 400 (e.g. issuer not trusted).
+    public var rejectResponse = false
+    public func setRejectResponse(_ value: Bool) { rejectResponse = value }
 
     public init(issuerPublic: EcPublicKey) {
         self.issuerPublic = issuerPublic
@@ -41,6 +44,9 @@ public actor MockVerifier: HttpTransport {
     public func execute(_ request: HttpRequest) async throws -> HttpResponse {
         guard request.url == responseUri, request.method == .post else {
             return HttpResponse(status: 404, headers: [], body: [])
+        }
+        if rejectResponse {
+            return HttpResponse(status: 400, headers: [], body: Array(#"{"error":"invalid_vp_token"}"#.utf8))
         }
         let bodyStr = String(bytes: request.body ?? [], encoding: .utf8) ?? ""
         var form: [String: String] = [:]

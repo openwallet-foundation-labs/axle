@@ -14,6 +14,8 @@ public struct PresentationService {
     let store: DefaultCredentialStore
     let txlog: TransactionLog
     let secureAreas: [any SecureArea]
+    /// When true, a failed final submission is recorded with `.error` status (opt-in via config).
+    var recordFailures: Bool = false
 
     /// Remote (URL/QR) presentation: resolve → match stored credentials → consent → direct_post submit.
     public func start(_ requestUri: String) -> PresentationSession {
@@ -65,7 +67,14 @@ public struct PresentationService {
                 if selection.chosen.isEmpty { throw PresentationError.selectionIncomplete("no credential selected") }
                 s.emit(.submitting)
                 let chosenHeld = try await buildChosenHeld(envelopes, selection)
-                let terminal = try await submit(resolved, matches, selection, chosenHeld)
+                let terminal: PresentationState
+                do {
+                    terminal = try await submit(resolved, matches, selection, chosenHeld)
+                } catch {
+                    // Only the final submission failed — record the attempted disclosure with .error status (opt-in).
+                    if recordFailures { try? await recordError(resolved, selection, matches) }
+                    throw error
+                }
                 try await recordSuccess(resolved, selection, matches)
                 s.emit(terminal)
             }
@@ -139,6 +148,10 @@ public struct PresentationService {
 
     private func recordDeclined(_ resolved: ResolvedRequest) async throws {
         await txlog.recordPresentation(relyingParty: relyingPartyOf(resolved), documents: [], status: .incomplete)
+    }
+
+    private func recordError(_ resolved: ResolvedRequest, _ selection: PresentationSelection, _ matches: DcqlMatchResult) async throws {
+        await txlog.recordPresentation(relyingParty: relyingPartyOf(resolved), documents: loggedDocuments(selection, matches), status: .error)
     }
 
     private func relyingPartyOf(_ resolved: ResolvedRequest) -> RelyingParty {

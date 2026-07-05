@@ -6,13 +6,26 @@ public struct WalletConfig {
     public let issuance: IssuanceConfig
     public let presentation: PresentationConfig
     public let trust: TrustConfig
+    public let transactionLog: TransactionLogConfig
 
     public init(issuance: IssuanceConfig = IssuanceConfig(),
                 presentation: PresentationConfig = PresentationConfig(),
-                trust: TrustConfig = TrustConfig()) {
+                trust: TrustConfig = TrustConfig(),
+                transactionLog: TransactionLogConfig = TransactionLogConfig()) {
         self.issuance = issuance
         self.presentation = presentation
         self.trust = trust
+        self.transactionLog = transactionLog
+    }
+}
+
+/// Audit / transaction-log behaviour.
+public struct TransactionLogConfig {
+    /// Also record presentations that fail during final submission, with `.error` status.
+    /// Default false — only successful and declined presentations are logged.
+    public let recordFailures: Bool
+    public init(recordFailures: Bool = false) {
+        self.recordFailures = recordFailures
     }
 }
 

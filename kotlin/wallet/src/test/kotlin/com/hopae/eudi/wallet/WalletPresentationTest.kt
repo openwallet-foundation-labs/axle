@@ -209,4 +209,51 @@ class WalletPresentationTest {
         assertEquals(TransactionStatus.SUCCESS, logStore.all().single().status)
         wallet.close()
     }
+
+    @Test
+    fun failedSubmissionRecordsErrorWhenEnabled() = runBlocking {
+        val area = SoftwareSecureArea()
+        val storage = InMemoryStorageDriver()
+        val issuerPublic = seedPid(area, storage)
+        val verifier = MockVerifier(issuerPublic).apply { rejectResponse = true }
+        val logStore = InMemoryTransactionLogStore()
+        val wallet = Wallet.create(
+            WalletConfig(transactionLog = TransactionLogConfig(recordFailures = true)),
+            WalletPorts(listOf(area), storage, verifier, transactionLogStore = logStore),
+        )
+
+        val session = wallet.presentation.start(verifier.requestUri("direct_post"))
+        val resolved = withTimeout(15_000) { session.state.first { it is PresentationState.RequestResolved } }
+        session.respond(PresentationSelection.auto((resolved as PresentationState.RequestResolved).request))
+        val terminal = withTimeout(15_000) { session.state.first { it.isTerminal } }
+        assertTrue(terminal is PresentationState.Failed, "terminal: $terminal")
+
+        // the failed final submission is recorded with ERROR + the attempted disclosure
+        val entry = logStore.all().single()
+        assertEquals(TransactionType.PRESENTATION, entry.type)
+        assertEquals(TransactionStatus.ERROR, entry.status)
+        assertEquals("verifier.example", entry.relyingParty?.id)
+        assertTrue(entry.documents.any { it.type == "urn:eudi:pid:1" }, "attempted document logged")
+        wallet.close()
+    }
+
+    @Test
+    fun failedSubmissionNotRecordedByDefault() = runBlocking {
+        val area = SoftwareSecureArea()
+        val storage = InMemoryStorageDriver()
+        val issuerPublic = seedPid(area, storage)
+        val verifier = MockVerifier(issuerPublic).apply { rejectResponse = true }
+        val logStore = InMemoryTransactionLogStore()
+        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, verifier, transactionLogStore = logStore))
+
+        val session = wallet.presentation.start(verifier.requestUri("direct_post"))
+        val resolved = withTimeout(15_000) { session.state.first { it is PresentationState.RequestResolved } }
+        session.respond(PresentationSelection.auto((resolved as PresentationState.RequestResolved).request))
+        val terminal = withTimeout(15_000) { session.state.first { it.isTerminal } }
+        assertTrue(terminal is PresentationState.Failed, "terminal: $terminal")
+
+        // default config → failures are NOT recorded
+        assertTrue(logStore.all().isEmpty(), "no transaction recorded by default")
+        wallet.close()
+    }
 }

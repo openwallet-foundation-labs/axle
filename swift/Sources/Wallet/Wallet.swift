@@ -47,9 +47,12 @@ public struct Wallet {
             store: ports.transactionLogStore,
             idGenerator: { "txn-" + Base64Url.encode(ports.rng.nextBytes(12)) },
             clock: clockSeconds)
-        let presentation = PresentationService(vp: vp, store: store, txlog: txlog, secureAreas: ports.secureAreas)
+        let recordFailures = config.transactionLog.recordFailures
+        let presentation = PresentationService(vp: vp, store: store, txlog: txlog, secureAreas: ports.secureAreas,
+                                               recordFailures: recordFailures)
         let proximity = ProximityService(store: store, txlog: txlog, secureAreas: ports.secureAreas,
-                                         readerTrust: readerValidator.map { X5cMdocReaderTrust(validator: $0) })
+                                         readerTrust: readerValidator.map { X5cMdocReaderTrust(validator: $0) },
+                                         recordFailures: recordFailures)
 
         return Wallet(credentials: CredentialsService(store: store, statusClient: statusClient),
                       issuance: issuance, presentation: presentation, proximity: proximity, transactions: txlog, ports: ports)

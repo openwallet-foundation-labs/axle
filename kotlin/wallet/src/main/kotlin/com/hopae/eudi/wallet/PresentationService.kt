@@ -36,6 +36,8 @@ class PresentationService internal constructor(
     private val txlog: TransactionLog,
     private val secureAreas: List<SecureArea>,
     private val scope: CoroutineScope,
+    /** When true, a failed final submission is recorded with ERROR status (opt-in via config). */
+    private val recordFailures: Boolean = false,
 ) {
     /** Remote (URL/QR) presentation: resolve → match stored credentials → consent → direct_post submit. */
     fun start(requestUri: String): PresentationSession = runSession(
@@ -82,7 +84,13 @@ class PresentationService internal constructor(
                     if (selection.chosen.isEmpty()) throw WalletError.Presentation.SelectionIncomplete("no credential selected")
                     emit(PresentationState.Submitting)
                     val chosenHeld = buildChosenHeld(envelopes, selection)
-                    val terminal = submit(resolved, matches, selection, chosenHeld)
+                    val terminal = try {
+                        submit(resolved, matches, selection, chosenHeld)
+                    } catch (e: Throwable) {
+                        // Only the final submission failed — record the attempted disclosure with ERROR status (opt-in).
+                        if (recordFailures) runCatching { recordError(resolved, selection, matches) }
+                        throw e
+                    }
                     recordSuccess(resolved, selection, matches)
                     emit(terminal)
                 }
@@ -153,6 +161,10 @@ class PresentationService internal constructor(
 
     private suspend fun recordDeclined(resolved: ResolvedRequest) {
         txlog.recordPresentation(relyingPartyOf(resolved), documents = emptyList(), status = TransactionStatus.INCOMPLETE)
+    }
+
+    private suspend fun recordError(resolved: ResolvedRequest, selection: PresentationSelection, matches: DcqlMatchResult) {
+        txlog.recordPresentation(relyingPartyOf(resolved), loggedDocuments(selection, matches), TransactionStatus.ERROR)
     }
 
     private fun relyingPartyOf(resolved: ResolvedRequest): RelyingParty = RelyingParty(

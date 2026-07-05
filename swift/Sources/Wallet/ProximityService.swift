@@ -16,6 +16,8 @@ public struct ProximityService {
     let secureAreas: [any SecureArea]
     /// Verifies reader authentication against configured reader anchors; nil = no anchors, readers stay untrusted.
     let readerTrust: (any MdocReaderTrust)?
+    /// When true, a failed final submission is recorded with `.error` status (opt-in via config).
+    var recordFailures: Bool = false
 
     /// Starts a proximity session over `transport`: engage → session → reader request → consent → reply.
     public func present(_ transport: any ProximityTransport) -> ProximitySession {
@@ -41,8 +43,15 @@ public struct ProximityService {
                 s.emit(.declined)
             case let .some(selection):
                 s.emit(.submitting)
-                let deviceResponse = try await buildDeviceResponse(deviceRequest, transcript, selection)
-                try await transport.send(try SessionMessages.encodeData(try enc.encrypt(deviceResponse)))
+                do {
+                    let deviceResponse = try await buildDeviceResponse(deviceRequest, transcript, selection)
+                    try await transport.send(try SessionMessages.encodeData(try enc.encrypt(deviceResponse)))
+                } catch {
+                    // Only the final submission failed — record the attempt with .error status (opt-in).
+                    if recordFailures { try? await recordError(request, selection) }
+                    await transport.close()
+                    throw error
+                }
                 try await recordSuccess(request, selection)
                 await transport.close()
                 s.emit(.completed)
@@ -102,15 +111,22 @@ public struct ProximityService {
     }
 
     private func recordSuccess(_ request: ProximityRequest, _ selection: ProximitySelection) async throws {
-        let documents = request.documents.filter { selection.chosen[$0.docType] != nil }.map { doc in
-            LoggedDocument(format: "mso_mdoc", type: doc.docType, queryId: nil,
-                           claims: doc.requestedElements.flatMap { ns, els in els.map { LoggedClaim(path: [ns, $0]) } })
-        }
-        await txlog.recordPresentation(relyingParty: proximityReader(request), documents: documents, status: .success)
+        await txlog.recordPresentation(relyingParty: proximityReader(request), documents: loggedDocuments(request, selection), status: .success)
+    }
+
+    private func recordError(_ request: ProximityRequest, _ selection: ProximitySelection) async throws {
+        await txlog.recordPresentation(relyingParty: proximityReader(request), documents: loggedDocuments(request, selection), status: .error)
     }
 
     private func recordDeclined(_ request: ProximityRequest) async throws {
         await txlog.recordPresentation(relyingParty: proximityReader(request), documents: [], status: .incomplete)
+    }
+
+    private func loggedDocuments(_ request: ProximityRequest, _ selection: ProximitySelection) -> [LoggedDocument] {
+        request.documents.filter { selection.chosen[$0.docType] != nil }.map { doc in
+            LoggedDocument(format: "mso_mdoc", type: doc.docType, queryId: nil,
+                           claims: doc.requestedElements.flatMap { ns, els in els.map { LoggedClaim(path: [ns, $0]) } })
+        }
     }
 
     /// The in-person reader, from verified reader authentication (unauthenticated readers stay untrusted).

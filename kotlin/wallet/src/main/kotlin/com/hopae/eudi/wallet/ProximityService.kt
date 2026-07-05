@@ -39,6 +39,8 @@ class ProximityService internal constructor(
     private val scope: CoroutineScope,
     /** Verifies reader authentication against configured reader anchors; null = no anchors, readers stay untrusted. */
     private val readerTrust: MdocReaderTrust?,
+    /** When true, a failed final submission is recorded with ERROR status (opt-in via config). */
+    private val recordFailures: Boolean = false,
 ) {
     /** Starts a proximity session over [transport]: engage → session → reader request → consent → reply. */
     fun present(transport: ProximityTransport): ProximitySession {
@@ -62,8 +64,15 @@ class ProximityService internal constructor(
                 }
                 else -> {
                     emit(ProximityState.Submitting)
-                    val deviceResponse = buildDeviceResponse(deviceRequest, transcript, selection)
-                    transport.send(SessionMessages.encodeData(enc.encrypt(deviceResponse)))
+                    try {
+                        val deviceResponse = buildDeviceResponse(deviceRequest, transcript, selection)
+                        transport.send(SessionMessages.encodeData(enc.encrypt(deviceResponse)))
+                    } catch (e: Throwable) {
+                        // Only the final submission failed — record the attempt with ERROR status (opt-in).
+                        if (recordFailures) runCatching { recordError(request, selection) }
+                        transport.close()
+                        throw e
+                    }
                     recordSuccess(request, selection)
                     transport.close()
                     emit(ProximityState.Completed)
@@ -123,18 +132,24 @@ class ProximityService internal constructor(
     }
 
     private suspend fun recordSuccess(request: ProximityRequest, selection: ProximitySelection) {
-        val documents = request.documents.filter { selection.chosen.containsKey(it.docType) }.map { doc ->
-            LoggedDocument(
-                format = "mso_mdoc", type = doc.docType, queryId = null,
-                claims = doc.requestedElements.flatMap { (ns, els) -> els.map { LoggedClaim(listOf(ns, it), null) } },
-            )
-        }
-        txlog.recordPresentation(proximityReader(request), documents, TransactionStatus.SUCCESS)
+        txlog.recordPresentation(proximityReader(request), loggedDocuments(request, selection), TransactionStatus.SUCCESS)
+    }
+
+    private suspend fun recordError(request: ProximityRequest, selection: ProximitySelection) {
+        txlog.recordPresentation(proximityReader(request), loggedDocuments(request, selection), TransactionStatus.ERROR)
     }
 
     private suspend fun recordDeclined(request: ProximityRequest) {
         txlog.recordPresentation(proximityReader(request), documents = emptyList(), status = TransactionStatus.INCOMPLETE)
     }
+
+    private fun loggedDocuments(request: ProximityRequest, selection: ProximitySelection): List<LoggedDocument> =
+        request.documents.filter { selection.chosen.containsKey(it.docType) }.map { doc ->
+            LoggedDocument(
+                format = "mso_mdoc", type = doc.docType, queryId = null,
+                claims = doc.requestedElements.flatMap { (ns, els) -> els.map { LoggedClaim(listOf(ns, it), null) } },
+            )
+        }
 
     /** The in-person reader, from verified reader authentication (unauthenticated readers stay untrusted). */
     private fun proximityReader(request: ProximityRequest): RelyingParty = RelyingParty(

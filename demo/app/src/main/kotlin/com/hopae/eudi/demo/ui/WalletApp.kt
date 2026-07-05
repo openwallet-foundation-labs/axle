@@ -108,9 +108,10 @@ fun WalletApp(wallet: Wallet) {
     }
 
     fun handleUri(uri: String, source: String) {
-        LogStore.log("$source: ${uri.take(140)}${if (uri.length > 140) "…" else ""}")
-        when {
-            isOffer(uri) -> scope.launch {
+        val scheme = uri.substringBefore("://", "").lowercase()
+        LogStore.log("$source [$scheme]: ${uri.take(140)}${if (uri.length > 140) "…" else ""}")
+        when (scheme) {
+            in OFFER_SCHEMES -> scope.launch {
                 busy = "Resolving offer…"
                 runCatching {
                     val offer = wallet.issuance.resolveOffer(uri)
@@ -119,7 +120,7 @@ fun WalletApp(wallet: Wallet) {
                 }.onFailure { LogStore.log("❌ resolveOffer: ${it.message}") }
                 busy = null
             }
-            isVpRequest(uri) -> scope.launch {
+            in VP_SCHEMES -> scope.launch {
                 busy = "Resolving request…"
                 runCatching {
                     val session = wallet.presentation.start(uri)
@@ -134,7 +135,7 @@ fun WalletApp(wallet: Wallet) {
                 }.onFailure { LogStore.log("❌ presentation: ${it.message}") }
                 busy = null
             }
-            else -> LogStore.log("⚠️ Unrecognized link (not a credential offer or VP request)")
+            else -> LogStore.log("⚠️ Unrecognized scheme '$scheme' (expected an offer or presentation link)")
         }
     }
 
@@ -280,14 +281,9 @@ private suspend fun runIssuance(
     }.onFailure { LogStore.log("❌ Issuance: ${it.message}") }
 }
 
-// Invocation schemes match the EUDI reference wallet.
-private fun isOffer(uri: String) =
-    uri.startsWith("openid-credential-offer://") || uri.startsWith("haip-vci://") ||
-        uri.contains("credential_offer=") || uri.contains("credential_offer_uri=")
-
-private fun isVpRequest(uri: String) =
-    uri.startsWith("openid4vp://") || uri.startsWith("eudi-openid4vp://") || uri.startsWith("mdoc-openid4vp://") ||
-        uri.startsWith("haip-vp://") || uri.contains("request_uri=") || uri.contains("response_uri=")
+// Invocation schemes match the EUDI reference wallet — deep links route by scheme only (authoritative).
+private val OFFER_SCHEMES = setOf("openid-credential-offer", "haip-vci")
+private val VP_SCHEMES = setOf("openid4vp", "eudi-openid4vp", "mdoc-openid4vp", "haip-vp")
 
 @Composable
 private fun CredentialsScreen(wallet: Wallet, refreshKey: Int) {

@@ -32,8 +32,11 @@ public struct Wallet {
         let issuance = IssuanceService(vci: vci, store: store, storage: ports.storage, secureArea: ports.defaultSecureArea,
                                        rng: ports.rng, clock: ports.clock, redirectUri: config.issuance.redirectUri)
 
-        // Reader trust for signed request objects is wired in a later slice; unsigned requests parse untrusted.
-        let vp = Openid4VpClient(http: ports.http, clock: clockSeconds)
+        // Reader trust: verify signed OpenID4VP request objects against the configured reader anchors.
+        // Unsigned requests (or no anchors) resolve with verifier.trusted == false.
+        let vpTrust: (any RequestTrustVerifier)? = config.trust.readerAnchorsDer.isEmpty ? nil :
+            X509RequestVerifier(validator: X509ChainValidator(anchorSource: LazyIssuerAnchorSource(ders: config.trust.readerAnchorsDer), validationTime: ports.clock.now()))
+        let vp = Openid4VpClient(http: ports.http, clock: clockSeconds, trust: vpTrust)
         let presentation = PresentationService(vp: vp, store: store, txlog: ports.transactionLog,
                                                secureAreas: ports.secureAreas, clock: ports.clock, rng: ports.rng)
 

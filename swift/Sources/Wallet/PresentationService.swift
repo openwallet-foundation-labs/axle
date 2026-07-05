@@ -4,6 +4,7 @@ import Foundation
 import MDoc
 import OpenID4VP
 import SdJwt
+import Trust
 import WalletAPI
 
 /// OpenID4VP remote presentation (API-CONTRACT.md §6.2). Bridges the store to the VP engine + records audit.
@@ -15,11 +16,39 @@ public struct PresentationService {
     let clock: any WalletClock
     let rng: any Rng
 
-    /// Starts a presentation session: resolve → match stored credentials → consent → submit.
+    /// Remote (URL/QR) presentation: resolve → match stored credentials → consent → direct_post submit.
     public func start(_ requestUri: String) -> PresentationSession {
+        runSession(
+            resolve: { try await catchingVp { try await vp.resolveRequest(requestUri) } },
+            submit: { resolved, matches, selection, held in
+                let result = try await catchingVp {
+                    try await vp.respond(request: resolved, matches: matches, selection: toVpSelection(selection), held: held)
+                }
+                return .completed(redirectUri: result.redirectUri, dcApiResponse: nil)
+            })
+    }
+
+    /// Digital Credentials API presentation (browser-mediated). The platform hands over the `requestObject`
+    /// and the caller `origin`; no HTTP is performed — the response object is returned in
+    /// `PresentationState.completed(dcApiResponse:)` for the app to pass back to the platform.
+    public func startDcApi(_ requestObject: String, origin: String) -> PresentationSession {
+        runSession(
+            resolve: { try await catchingVp { try await vp.resolveDcApiRequest(requestObject, origin: origin) } },
+            submit: { resolved, matches, selection, held in
+                let response = try await catchingVp {
+                    try await vp.respondDcApi(request: resolved, matches: matches, selection: toVpSelection(selection), held: held)
+                }
+                return .completed(redirectUri: nil, dcApiResponse: response.serialize())
+            })
+    }
+
+    private func runSession(
+        resolve: @escaping () async throws -> ResolvedRequest,
+        submit: @escaping (ResolvedRequest, DcqlMatchResult, PresentationSelection, [any PresentableCredential]) async throws -> PresentationState
+    ) -> PresentationSession {
         let session = PresentationSession { s in
             s.emit(.resolvingRequest)
-            let resolved = try await catchingVp { try await vp.resolveRequest(requestUri) }
+            let resolved = try await resolve()
 
             let envelopes = try await store.list().filter { if case .issued = $0.lifecycle { return true }; return false }
             var held: [any PresentableCredential] = []
@@ -37,11 +66,9 @@ public struct PresentationService {
                 if selection.chosen.isEmpty { throw PresentationError.selectionIncomplete("no credential selected") }
                 s.emit(.submitting)
                 let chosenHeld = try await buildChosenHeld(envelopes, selection)
-                let result = try await catchingVp {
-                    try await vp.respond(request: resolved, matches: matches, selection: toVpSelection(selection), held: chosenHeld)
-                }
+                let terminal = try await submit(resolved, matches, selection, chosenHeld)
                 try await recordSuccess(resolved, selection, matches)
-                s.emit(.completed(redirectUri: result.redirectUri))
+                s.emit(terminal)
             }
         }
         session.launch()
@@ -131,6 +158,8 @@ public struct PresentationService {
     private func catchingVp<T>(_ block: () async throws -> T) async throws -> T {
         do {
             return try await block()
+        } catch let e as TrustError {
+            throw PresentationError.verifierNotTrusted(e.description)
         } catch VpError.invalidRequest(let m) {
             throw PresentationError.invalidRequest(m)
         } catch VpError.verifierNotTrusted(let m) {

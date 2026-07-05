@@ -54,7 +54,9 @@ public enum PresentationState {
     case resolvingRequest
     case requestResolved(PresentationRequest)
     case submitting
-    case completed(redirectUri: String?)
+    /// Success. `redirectUri` is the verifier redirect for the remote (URL/QR) flow; `dcApiResponse` is
+    /// the JSON object to hand back to the platform for the Digital Credentials API flow. Exactly one is set.
+    case completed(redirectUri: String?, dcApiResponse: String?)
     case declined
     case failed(PresentationError)
 

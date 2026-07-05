@@ -18,6 +18,11 @@ final class WalletPresentationTests: XCTestCase {
         func list() async throws -> [TransactionLogEntry] { entries }
     }
 
+    /// DC API must not perform any HTTP — the request/response are handed over by the platform.
+    private struct NoHttp: HttpTransport {
+        func execute(_ request: HttpRequest) async throws -> HttpResponse { HttpResponse(status: 404, headers: [], body: []) }
+    }
+
     /// Seeds a holder-bound PID SD-JWT VC and returns the issuer public key (for the verifier).
     private func seedPid(_ area: SoftwareSecureArea, _ storage: InMemoryStorageDriver) async throws -> EcPublicKey {
         let issuerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
@@ -132,6 +137,42 @@ final class WalletPresentationTests: XCTestCase {
         let entries = await log.entries
         XCTAssertEqual(.success, entries[0].status)
         XCTAssertTrue(entries[0].credentialIds.contains("mdl-1"))
+        wallet.close()
+    }
+
+    func testDigitalCredentialsApiPresentationBindsOrigin() async throws {
+        let area = SoftwareSecureArea()
+        let storage = InMemoryStorageDriver()
+        let issuerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let deviceKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let bytes = try await MdocTestIssuer.issue(
+            area: area, issuerKey: issuerKey, deviceKey: deviceKey.publicKey,
+            docType: "org.iso.18013.5.1.mDL", namespace: "org.iso.18013.5.1",
+            elements: [("family_name", .text("Kim")), ("given_name", .text("Minsu")), ("age_over_18", .bool(true))],
+            x5chain: [[0x30, 0x01]],
+            signed: now, validFrom: now, validUntil: now.addingTimeInterval(31_536_000))
+        try await DefaultCredentialStore(driver: storage).save(CredentialEnvelope(
+            id: CredentialId("mdl-1"), format: .msoMdoc(docType: "org.iso.18013.5.1.mDL"), createdAt: now,
+            lifecycle: .issued(policy: CredentialPolicy(), instances: [CredentialInstance(key: deviceKey.handle, payload: bytes)])))
+
+        let verifier = MockDcApiVerifier()
+        let log = RecordingLog()
+        let wallet = Wallet.create(config: WalletConfig(), ports: WalletPorts(secureAreas: [area], storage: storage, http: NoHttp(), transactionLog: log))
+
+        let session = wallet.presentation.startDcApi(verifier.requestObject(), origin: verifier.origin)
+        var terminal: PresentationState?
+        for await state in session.states {
+            if case let .requestResolved(request) = state { session.respond(PresentationSelection.auto(request)) }
+            if state.isTerminal { terminal = state; break }
+        }
+        guard case let .completed(redirectUri, dcApiResponse) = terminal else { return XCTFail("terminal: \(String(describing: terminal))") }
+        XCTAssertNil(redirectUri, "DC API has no redirect")
+        let response = try XCTUnwrap(dcApiResponse)
+
+        // response is origin-bound and selectively disclosed
+        XCTAssertEqual(Set(["family_name", "given_name"]), try verifier.verify(response))
+        let entries = await log.entries
+        XCTAssertEqual(.success, entries[0].status)
         wallet.close()
     }
 }

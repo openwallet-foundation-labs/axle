@@ -12,14 +12,14 @@ public struct TrustError: Error, CustomStringConvertible {
 }
 
 /// swift-certificates-backed X.509 helpers shared by the issuer and verifier trust paths.
-enum X509Support {
+public enum X509Support {
 
     static func parse(_ der: [UInt8]) throws -> Certificate {
         do { return try Certificate(derEncoded: der) }
         catch { throw TrustError("invalid X.509 certificate: \(error)") }
     }
 
-    static func der(_ cert: Certificate) throws -> [UInt8] {
+    public static func der(_ cert: Certificate) throws -> [UInt8] {
         var serializer = DER.Serializer()
         try serializer.serialize(cert)
         return serializer.serializedBytes

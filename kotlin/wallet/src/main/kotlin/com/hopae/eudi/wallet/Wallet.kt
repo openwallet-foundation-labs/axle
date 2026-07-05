@@ -5,6 +5,7 @@ import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.trust.TrustAnchorSource
 import com.hopae.eudi.wallet.trust.TrustAnchors
 import com.hopae.eudi.wallet.trust.X509ChainValidator
+import com.hopae.eudi.wallet.trust.X509RequestVerifier
 import com.hopae.eudi.wallet.trust.X5cIssuerKeyResolver
 import com.hopae.eudi.wallet.vci.Openid4VciClient
 import com.hopae.eudi.wallet.vp.Openid4VpClient
@@ -52,8 +53,12 @@ class Wallet private constructor(
             val vci = Openid4VciClient(ports.http, ports.rng, clockSeconds, config.issuance.clientId)
             val issuance = IssuanceService(vci, store, ports.storage, ports.defaultSecureArea, scope, ports.rng, ports.clock, config.issuance.redirectUri)
 
-            // Reader trust for signed request objects is wired in a later slice; unsigned requests parse untrusted.
-            val vp = Openid4VpClient(ports.http, clockSeconds)
+            // Reader trust: verify signed OpenID4VP request objects against the configured reader anchors.
+            // Unsigned requests (or no anchors) resolve with verifier.trusted == false.
+            val vpTrust = config.trust.readerAnchorsDer.takeIf { it.isNotEmpty() }?.let { anchors ->
+                X509RequestVerifier(X509ChainValidator(TrustAnchorSource { TrustAnchors.ofDer(anchors) }, at = { java.util.Date.from(ports.clock.now()) }))
+            }
+            val vp = Openid4VpClient(ports.http, clockSeconds, vpTrust)
             val presentation = PresentationService(vp, store, ports.transactionLog, ports.secureAreas, scope, ports.clock, ports.rng)
 
             return Wallet(

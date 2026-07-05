@@ -26,6 +26,8 @@ dependencies {
     testImplementation(testFixtures(project(":mdoc")))
     testImplementation(testFixtures(project(":openid4vci")))
     testImplementation(testFixtures(project(":openid4vp")))
+    testImplementation(testFixtures(project(":trust")))
+    testImplementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }
 

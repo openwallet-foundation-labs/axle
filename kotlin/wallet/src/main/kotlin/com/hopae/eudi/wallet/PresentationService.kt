@@ -19,6 +19,7 @@ import com.hopae.eudi.wallet.store.CredentialEnvelope
 import com.hopae.eudi.wallet.store.CredentialInstance
 import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.EnvelopeLifecycle
+import com.hopae.eudi.wallet.trust.TrustException
 import com.hopae.eudi.wallet.vp.DcqlMatchResult
 import com.hopae.eudi.wallet.vp.HeldMdoc
 import com.hopae.eudi.wallet.vp.HeldSdJwtVc
@@ -179,6 +180,8 @@ class PresentationService internal constructor(
 
     private suspend fun <T> catchingVp(block: suspend () -> T): T = try {
         block()
+    } catch (e: TrustException) {
+        throw WalletError.Presentation.VerifierNotTrusted(e.message ?: "reader certificate not trusted")
     } catch (e: VpException) {
         throw when (e) {
             is VpException.InvalidRequest -> WalletError.Presentation.InvalidRequest(e.message ?: "", e)

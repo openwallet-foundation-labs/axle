@@ -51,6 +51,11 @@ object X509Support {
     fun commonName(cert: X509Certificate): String? =
         Regex("CN=([^,]+)").find(cert.subjectX500Principal.name)?.groupValues?.get(1)
 
+    /** The subject CommonName of a leaf certificate given its DER bytes (null if unparseable). */
+    fun commonNameFromDer(der: ByteArray): String? = runCatching {
+        commonName(CertificateFactory.getInstance("X.509").generateCertificate(ByteArrayInputStream(der)) as X509Certificate)
+    }.getOrNull()
+
     /** base64url(SHA-256(DER)) — the x509_hash client_id value. */
     fun sha256Thumbprint(cert: X509Certificate): String =
         Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(cert.encoded))

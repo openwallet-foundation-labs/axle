@@ -20,14 +20,13 @@ import com.hopae.eudi.wallet.spi.SecureAreaCoseSigner
 import com.hopae.eudi.wallet.spi.SigningAlgorithm
 import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.EnvelopeLifecycle
+import com.hopae.eudi.wallet.trust.X509Support
 import com.hopae.eudi.wallet.txlog.LoggedClaim
 import com.hopae.eudi.wallet.txlog.LoggedDocument
 import com.hopae.eudi.wallet.txlog.RelyingParty
 import com.hopae.eudi.wallet.txlog.TransactionLog
 import com.hopae.eudi.wallet.txlog.TransactionStatus
 import kotlinx.coroutines.CoroutineScope
-import java.security.cert.CertificateFactory
-import java.security.cert.X509Certificate
 
 /**
  * ISO 18013-5 proximity presentation (API-CONTRACT.md §6.3). Generates device engagement, establishes the
@@ -94,16 +93,9 @@ class ProximityService internal constructor(
             ?: return ProximityReaderInfo(trusted = false, commonName = null, certificateChainDer = emptyList())
         return runCatching {
             val info = ReaderAuth.verify(docRequest, transcript, trust)
-            ProximityReaderInfo(info.trusted, commonNameOf(info.certificateChain), info.certificateChain ?: emptyList())
+            val commonName = info.certificateChain?.firstOrNull()?.let { X509Support.commonNameFromDer(it) }
+            ProximityReaderInfo(info.trusted, commonName, info.certificateChain ?: emptyList())
         }.getOrElse { ProximityReaderInfo(trusted = false, commonName = null, certificateChainDer = emptyList()) }
-    }
-
-    private fun commonNameOf(chainDer: List<ByteArray>?): String? {
-        val leaf = chainDer?.firstOrNull() ?: return null
-        return runCatching {
-            val cert = CertificateFactory.getInstance("X.509").generateCertificate(leaf.inputStream()) as X509Certificate
-            Regex("CN=([^,]+)").find(cert.subjectX500Principal.name)?.groupValues?.get(1)
-        }.getOrNull()
     }
 
     private suspend fun findMdoc(docType: String): CredentialId? =

@@ -2,10 +2,15 @@ package com.hopae.eudi.demo.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,9 +30,11 @@ import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -43,7 +50,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -79,8 +88,10 @@ private class PendingConsent(val session: PresentationSession, val request: Pres
 fun WalletApp(wallet: Wallet) {
     var tab by remember { mutableStateOf(0) }
     var refreshKey by remember { mutableStateOf(0) }
+    var offerToConfirm by remember { mutableStateOf<CredentialOffer?>(null) }
     var txCodeFor by remember { mutableStateOf<CredentialOffer?>(null) }
     var consent by remember { mutableStateOf<PendingConsent?>(null) }
+    var busy by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
@@ -89,14 +100,17 @@ fun WalletApp(wallet: Wallet) {
         LogStore.log("Scanned: ${uri.take(140)}${if (uri.length > 140) "…" else ""}")
         when {
             isOffer(uri) -> scope.launch {
+                busy = "Resolving offer…"
                 runCatching {
                     LogStore.log("Resolving credential offer…")
                     val offer = wallet.issuance.resolveOffer(uri)
                     LogStore.log("Offer: issuer=${offer.credentialIssuer}, configs=${offer.credentialConfigurationIds}, txCode=${offer.requiresTxCode}")
-                    if (offer.requiresTxCode) { txCodeFor = offer } else { runIssuance(wallet, offer, null); refreshKey++ }
+                    offerToConfirm = offer   // show the offer confirmation dialog before issuing
                 }.onFailure { LogStore.log("❌ resolveOffer: ${it.message}") }
+                busy = null
             }
             isVpRequest(uri) -> scope.launch {
+                busy = "Resolving request…"
                 runCatching {
                     LogStore.log("Resolving presentation request…")
                     val session = wallet.presentation.start(uri)
@@ -109,6 +123,7 @@ fun WalletApp(wallet: Wallet) {
                         else -> {}
                     }
                 }.onFailure { LogStore.log("❌ presentation: ${it.message}") }
+                busy = null
             }
             else -> LogStore.log("⚠️ Unrecognized QR (not a credential offer or VP request)")
         }
@@ -152,11 +167,23 @@ fun WalletApp(wallet: Wallet) {
         }
     }
 
+    offerToConfirm?.let { offer ->
+        OfferConfirmDialog(
+            offer = offer,
+            onConfirm = {
+                offerToConfirm = null
+                if (offer.requiresTxCode) txCodeFor = offer
+                else scope.launch { busy = "Issuing…"; runIssuance(wallet, offer, null); refreshKey++; busy = null }
+            },
+            onCancel = { offerToConfirm = null; LogStore.log("Issuance cancelled") },
+        )
+    }
+
     txCodeFor?.let { offer ->
         TxCodeDialog(
             onSubmit = { code ->
                 txCodeFor = null
-                scope.launch { runIssuance(wallet, offer, code); refreshKey++ }
+                scope.launch { busy = "Issuing…"; runIssuance(wallet, offer, code); refreshKey++; busy = null }
             },
             onDismiss = { txCodeFor = null; LogStore.log("Issuance cancelled (no tx_code)") },
         )
@@ -168,21 +195,43 @@ fun WalletApp(wallet: Wallet) {
             onApprove = {
                 consent = null
                 scope.launch {
-                    LogStore.log("Presenting (auto-select)…")
-                    p.session.respond(PresentationSelection.auto(p.request))
-                    val t = p.session.state.first { it.isTerminal }
-                    LogStore.log(
-                        when (t) {
-                            is PresentationState.Completed -> "✅ Presented" + (t.redirectUri?.let { " → $it" } ?: "")
-                            is PresentationState.Failed -> "❌ ${t.error.message}"
-                            else -> t::class.simpleName ?: ""
-                        },
-                    )
-                    refreshKey++
+                    busy = "Presenting…"
+                    try {
+                        LogStore.log("Presenting (auto-select)…")
+                        p.session.respond(PresentationSelection.auto(p.request))
+                        val t = p.session.state.first { it.isTerminal }
+                        LogStore.log(
+                            when (t) {
+                                is PresentationState.Completed -> "✅ Presented" + (t.redirectUri?.let { " → $it" } ?: "")
+                                is PresentationState.Failed -> "❌ ${t.error.message}"
+                                else -> t::class.simpleName ?: ""
+                            },
+                        )
+                        refreshKey++
+                    } finally {
+                        busy = null
+                    }
                 }
             },
             onDecline = { consent = null; scope.launch { p.session.decline(); LogStore.log("Declined presentation") } },
         )
+    }
+
+    busy?.let { message ->
+        Box(
+            Modifier.fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.35f))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 6.dp) {
+                Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+                    Spacer(Modifier.width(16.dp))
+                    Text(message, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
     }
 }
 
@@ -349,6 +398,29 @@ private fun DebugLogScreen() {
 }
 
 @Composable
+private fun OfferConfirmDialog(offer: CredentialOffer, onConfirm: () -> Unit, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Receive credential?") },
+        text = {
+            Column {
+                Text("Issuer", style = MaterialTheme.typography.labelMedium)
+                Text(offer.credentialIssuer, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                Text(if (offer.credentialConfigurationIds.size > 1) "Credentials" else "Credential", style = MaterialTheme.typography.labelMedium)
+                offer.credentialConfigurationIds.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                if (offer.requiresTxCode) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("A transaction code (PIN) will be requested.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("OK") } },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+    )
+}
+
+@Composable
 private fun TxCodeDialog(onSubmit: (String) -> Unit, onDismiss: () -> Unit) {
     var code by remember { mutableStateOf("") }
     AlertDialog(
@@ -372,8 +444,15 @@ private fun ConsentDialog(request: PresentationRequest, onApprove: () -> Unit, o
                 Text(request.verifier.commonName ?: request.verifier.clientId, style = MaterialTheme.typography.titleMedium)
                 Text(if (request.verifier.trusted) "✅ trusted" else "⚠️ not verified", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(8.dp))
+                Text("Will share", style = MaterialTheme.typography.labelMedium)
                 request.queries.forEach { q ->
-                    Text("• ${q.queryId}: ${q.candidates.size} candidate(s)", style = MaterialTheme.typography.bodySmall)
+                    val cand = q.candidates.firstOrNull()
+                    if (cand == null) {
+                        Text("• ${q.queryId}: no matching credential", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text("• ${q.queryId}${if (q.required) "" else " (optional)"} → ${cand.credentialId.value}", style = MaterialTheme.typography.bodySmall)
+                        Text("   claims: ${cand.disclosedPaths.joinToString(", ") { it.joinToString(".") }}", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 if (!request.satisfiable) Text("No matching credential.", style = MaterialTheme.typography.bodySmall)
             }

@@ -253,8 +253,10 @@ class MockIssuer(
          "deferred_credential_endpoint":"$issuer/deferred_credential",
          "notification_endpoint":"$issuer/notification",
          "authorization_servers":["$issuer"],
+         "display":[{"name":"Hopae Test Issuer"}],
          "credential_configurations_supported":{
            "eu.europa.ec.eudi.pid.1":{"format":"dc+sd-jwt","vct":"eu.europa.ec.eudi.pid.1",
+             "display":[{"name":"Personal ID","logo":{"uri":"https://logo.example/pid.png"},"background_color":"#123456"}],
              "proof_types_supported":{"jwt":{"proof_signing_alg_values_supported":["ES256"]}}}}}
     """.trimIndent()
 

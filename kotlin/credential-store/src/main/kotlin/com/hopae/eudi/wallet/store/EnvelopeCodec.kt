@@ -29,6 +29,7 @@ object EnvelopeCodec {
     private const val K_CREATED_AT = 4L       // epoch millis
     private const val K_LIFECYCLE_TYPE = 5L   // 0 pending, 1 deferred, 2 issued
     private const val K_LIFECYCLE = 6L
+    private const val K_METADATA = 7L         // optional issuer/display metadata
 
     fun encode(envelope: CredentialEnvelope): ByteArray = CborEncoder.encode(toCbor(envelope))
 
@@ -79,6 +80,16 @@ object EnvelopeCodec {
             put(K_CREATED_AT, Cbor.int(e.createdAt.toEpochMilli()))
             put(K_LIFECYCLE_TYPE, Cbor.int(lifecycleType))
             put(K_LIFECYCLE, lifecycle)
+            e.metadata?.let { m ->
+                put(K_METADATA, cborMap {
+                    put(0L, Cbor.Text(m.issuerUrl))
+                    m.issuerDisplayName?.let { put(1L, Cbor.Text(it)) }
+                    put(2L, Cbor.Text(m.configurationId))
+                    m.displayName?.let { put(3L, Cbor.Text(it)) }
+                    m.logoUri?.let { put(4L, Cbor.Text(it)) }
+                    m.backgroundColor?.let { put(5L, Cbor.Text(it)) }
+                })
+            }
         }
     }
 
@@ -123,11 +134,22 @@ object EnvelopeCodec {
             }
             else -> throw EnvelopeCodecException("unknown lifecycle type $t")
         }
+        val metadata = root.get(K_METADATA)?.asMap("metadata")?.let { m ->
+            CredentialMetadata(
+                issuerUrl = m.text(0L),
+                issuerDisplayName = (m.get(1L) as? Cbor.Text)?.value,
+                configurationId = m.text(2L),
+                displayName = (m.get(3L) as? Cbor.Text)?.value,
+                logoUri = (m.get(4L) as? Cbor.Text)?.value,
+                backgroundColor = (m.get(5L) as? Cbor.Text)?.value,
+            )
+        }
         return CredentialEnvelope(
             id = CredentialId(root.text(K_ID)),
             format = format,
             createdAt = Instant.ofEpochMilli(root.long(K_CREATED_AT)),
             lifecycle = lifecycle,
+            metadata = metadata,
         )
     }
 

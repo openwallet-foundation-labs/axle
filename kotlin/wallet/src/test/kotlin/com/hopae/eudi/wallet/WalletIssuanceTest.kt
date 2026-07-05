@@ -46,6 +46,13 @@ class WalletIssuanceTest {
         assertEquals(KeyUse.OneTime, issued.instances.use)
         assertTrue(issued.claims.any { it.path == listOf("given_name") && it.value.display() == "John" }, "PID given_name")
 
+        // metadata captured at issuance
+        val credential = creds.single()
+        assertEquals("Hopae Test Issuer", credential.issuer?.displayName)
+        assertEquals("Personal ID", credential.display?.name)
+        assertEquals("https://logo.example/pid.png", credential.display?.logoUri)
+        assertEquals("eu.europa.ec.eudi.pid.1", credential.configurationId)
+
         wallet.close()
     }
 

@@ -62,10 +62,13 @@ class CredentialIssuerMetadata(
     val notificationEndpoint: String?,
     val authorizationServers: List<String>,
     val credentialConfigurationsSupported: Map<String, CredentialConfiguration>,
+    /** Issuer display name (first `display` entry), if advertised. */
+    val issuerDisplayName: String? = null,
 ) {
     companion object {
         fun fromObj(o: JsonValue.Obj): CredentialIssuerMetadata {
             val issuer = o.requireStr("credential_issuer", "issuer metadata")
+            val issuerDisplay = (o["display"] as? JsonValue.Arr)?.items?.firstOrNull() as? JsonValue.Obj
             val configs = (o["credential_configurations_supported"] as? JsonValue.Obj)?.entries
                 ?.associate { (id, v) ->
                     id to CredentialConfiguration.fromObj(
@@ -80,6 +83,7 @@ class CredentialIssuerMetadata(
                 notificationEndpoint = o.str("notification_endpoint"),
                 authorizationServers = o.arrStr("authorization_servers") ?: listOf(issuer),
                 credentialConfigurationsSupported = configs,
+                issuerDisplayName = (issuerDisplay?.get("name") as? JsonValue.Str)?.value,
             )
         }
     }
@@ -91,6 +95,10 @@ class CredentialConfiguration(
     val docType: String?,
     val proofSigningAlgs: List<String>,
     val scope: String?,
+    /** From the first `display` entry — for wallet UI. */
+    val displayName: String? = null,
+    val logoUri: String? = null,
+    val backgroundColor: String? = null,
 ) {
     companion object {
         fun fromObj(o: JsonValue.Obj): CredentialConfiguration {
@@ -98,12 +106,16 @@ class CredentialConfiguration(
                 ?.get("jwt") as? JsonValue.Obj)
                 ?.let { (it["proof_signing_alg_values_supported"] as? JsonValue.Arr) }
                 ?.items?.mapNotNull { (it as? JsonValue.Str)?.value } ?: emptyList()
+            val display = (o["display"] as? JsonValue.Arr)?.items?.firstOrNull() as? JsonValue.Obj
             return CredentialConfiguration(
                 format = (o["format"] as? JsonValue.Str)?.value ?: "",
                 vct = (o["vct"] as? JsonValue.Str)?.value,
                 docType = (o["doctype"] as? JsonValue.Str)?.value,
                 proofSigningAlgs = proofAlgs,
                 scope = (o["scope"] as? JsonValue.Str)?.value,
+                displayName = (display?.get("name") as? JsonValue.Str)?.value,
+                logoUri = ((display?.get("logo") as? JsonValue.Obj)?.get("uri") as? JsonValue.Str)?.value,
+                backgroundColor = (display?.get("background_color") as? JsonValue.Str)?.value,
             )
         }
     }

@@ -47,9 +47,9 @@ internal fun CredentialEnvelope.toCredential(): Credential = Credential(
     id = id,
     format = format,
     createdAt = createdAt,
-    issuer = null, // captured at issuance — metadata slice
-    display = null,
-    configurationId = null,
+    issuer = metadata?.let { IssuerInfo(it.issuerUrl, it.issuerDisplayName) },
+    display = metadata?.let { CredentialDisplay(it.displayName, it.logoUri, it.backgroundColor) },
+    configurationId = metadata?.configurationId,
     lifecycle = when (val lc = lifecycle) {
         is EnvelopeLifecycle.Issued -> Lifecycle.Issued(
             claims = claimsTree()?.let { flattenClaims(it) } ?: emptyList(),

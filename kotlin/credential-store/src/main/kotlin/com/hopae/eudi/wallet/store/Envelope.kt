@@ -34,4 +34,16 @@ class CredentialEnvelope(
     val format: CredentialFormat,
     val createdAt: Instant,
     val lifecycle: EnvelopeLifecycle,
+    /** Issuer/display metadata captured at issuance (from issuer metadata). */
+    val metadata: CredentialMetadata? = null,
+)
+
+/** Display/issuer metadata captured at issuance so the app renders cards without re-fetching. */
+class CredentialMetadata(
+    val issuerUrl: String,
+    val issuerDisplayName: String?,
+    val configurationId: String,
+    val displayName: String?,
+    val logoUri: String?,
+    val backgroundColor: String?,
 )

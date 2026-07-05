@@ -19,6 +19,7 @@ import com.hopae.eudi.wallet.spi.StorageDriver
 import com.hopae.eudi.wallet.spi.WalletClock
 import com.hopae.eudi.wallet.store.CredentialEnvelope
 import com.hopae.eudi.wallet.store.CredentialInstance
+import com.hopae.eudi.wallet.store.CredentialMetadata
 import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.EnvelopeLifecycle
 import com.hopae.eudi.wallet.vci.CredentialResponse
@@ -135,7 +136,7 @@ class IssuanceService internal constructor(
         val ctx = contextOf(response, built.proofKeys.map { it.handle }, built.dpopKey.handle, request.policy, request.configurationId)
         val id = newId()
         val format = if (ctx.requestedFormat == "mso_mdoc") CredentialFormat.MsoMdoc(ctx.configurationId) else CredentialFormat.SdJwtVc(ctx.configurationId)
-        store.save(CredentialEnvelope(id, format, clock.now(), EnvelopeLifecycle.Deferred(ctx.encode(), null)))
+        store.save(CredentialEnvelope(id, format, clock.now(), EnvelopeLifecycle.Deferred(ctx.encode(), null), captureMetadata(response)))
         return id
     }
 
@@ -144,7 +145,7 @@ class IssuanceService internal constructor(
         val format = decode(response.credentials.first()).first
         val instances = response.credentials.mapIndexed { i, credential -> CredentialInstance(proofKeys[i], decode(credential).second) }
         val id = existingId ?: newId()
-        store.save(CredentialEnvelope(id, format, clock.now(), EnvelopeLifecycle.Issued(policy, instances)))
+        store.save(CredentialEnvelope(id, format, clock.now(), EnvelopeLifecycle.Issued(policy, instances), captureMetadata(response)))
         // Persist reissue context and best-effort notify the issuer of acceptance.
         storage.put("followup", id.value, contextOf(response, proofKeys, dpopKey, policy, response.configurationId ?: "").encode())
         autoNotify(response, dpopKey)
@@ -166,6 +167,24 @@ class IssuanceService internal constructor(
 
     private suspend fun loadFollowUp(id: CredentialId): FollowUpContext? =
         storage.get("followup", id.value)?.let { FollowUpContext.decode(it) }
+
+    /** Captures issuer/display metadata at issuance so the app renders cards without re-fetching. Best-effort. */
+    private suspend fun captureMetadata(response: CredentialResponse): CredentialMetadata? {
+        val issuer = response.credentialIssuer ?: return null
+        val configId = response.configurationId ?: return null
+        return runCatching {
+            val metadata = vci.loadIssuerMetadata(issuer)
+            val config = metadata.credentialConfigurationsSupported[configId]
+            CredentialMetadata(
+                issuerUrl = issuer,
+                issuerDisplayName = metadata.issuerDisplayName,
+                configurationId = configId,
+                displayName = config?.displayName,
+                logoUri = config?.logoUri,
+                backgroundColor = config?.backgroundColor,
+            )
+        }.getOrNull()
+    }
 
     private suspend fun autoNotify(response: CredentialResponse, dpopKey: KeyHandle) {
         if (response.notificationId == null) return

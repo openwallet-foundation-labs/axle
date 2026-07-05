@@ -70,6 +70,8 @@ class Openid4VciClient(
     private val clientAuth: WalletClientAuth? = null,
     /** Optional Key Attestation for the proof key(s), added to each key-proof header (HAIP). */
     private val keyAttestation: KeyAttestationSource? = null,
+    /** How to treat the issuer's `signed_metadata` (OpenID4VCI §11.2.3). Default: ignore. */
+    private val metadataPolicy: IssuerMetadataPolicy = IssuerMetadataPolicy.IgnoreSigned,
 ) {
     /** With attestation-based client auth the client_id is the wallet instance's attestation subject. */
     private val clientId: String = clientAuth?.clientId ?: clientId
@@ -104,8 +106,21 @@ class Openid4VciClient(
 
     suspend fun loadIssuerMetadata(credentialIssuer: String): CredentialIssuerMetadata {
         val url = wellKnown(credentialIssuer, "openid-credential-issuer")
-        val body = getJson(url)
-        return CredentialIssuerMetadata.fromObj(body)
+        return CredentialIssuerMetadata.fromObj(applyMetadataPolicy(getJson(url)))
+    }
+
+    /** Applies [metadataPolicy]: verifies `signed_metadata` and overlays its claims when configured. */
+    private suspend fun applyMetadataPolicy(body: JsonValue.Obj): JsonValue.Obj {
+        val signed = (body["signed_metadata"] as? JsonValue.Str)?.value
+        return when (val policy = metadataPolicy) {
+            is IssuerMetadataPolicy.IgnoreSigned -> body
+            is IssuerMetadataPolicy.PreferSigned ->
+                if (signed != null) mergeSignedMetadata(body, policy.verifier.verify(signed)) else body
+            is IssuerMetadataPolicy.RequireSigned -> {
+                if (signed == null) throw VciException.MetadataError("policy requires signed_metadata but the issuer metadata is unsigned")
+                mergeSignedMetadata(body, policy.verifier.verify(signed))
+            }
+        }
     }
 
     suspend fun loadAuthorizationServerMetadata(issuer: String): AuthorizationServerMetadata {
@@ -316,7 +331,29 @@ class Openid4VciClient(
             accessToken = token.accessToken,
         )
         return CredentialResponse.fromObj(parseObj(credResp, "credential response"), requestFormat)
-            .withContext(token.accessToken, issuerMeta.credentialIssuer, requestFormat)
+            .withContext(token.accessToken, issuerMeta.credentialIssuer, requestFormat, token.refreshToken, configurationId)
+    }
+
+    /**
+     * Reissues (renews) a credential using the refresh token from a prior issuance (OAuth 2.0
+     * refresh_token grant, RFC 6749 §6) — no browser re-authorization. Bind [keys] to fresh holder
+     * keys to rotate the credential's key. Requires [CredentialResponse.canReissue].
+     */
+    suspend fun reissue(previous: CredentialResponse, keys: IssuanceKeys): CredentialResponse {
+        val refreshToken = previous.refreshToken ?: throw VciException.ProtocolError("no refresh_token to reissue")
+        val configurationId = previous.configurationId ?: throw VciException.ProtocolError("no configuration_id to reissue")
+        val issuerMeta = loadIssuerMetadata(previous.credentialIssuer!!)
+        val asMeta = loadAuthorizationServerMetadata(issuerMeta.authorizationServers.first())
+
+        val dpop = DpopProver(keys.dpopSigner, keys.dpopPublicKey, rng, clock)
+        val form = buildString {
+            append("grant_type=").append(enc("refresh_token"))
+            append("&refresh_token=").append(enc(refreshToken))
+            append("&client_id=").append(enc(clientId))
+        }
+        val tokenResp = postFormWithDpop(asMeta.tokenEndpoint, form, dpop, accessToken = null, extraHeaders = clientAuthHeaders(asMeta))
+        val token = TokenResponse.fromObj(parseObj(tokenResp, "refresh token response"))
+        return requestCredential(issuerMeta, configurationId, token, dpop, keys)
     }
 
     /**

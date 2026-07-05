@@ -109,6 +109,7 @@ class MockIssuer(
                 val computed = Base64Url.encode(sha256(verifier.encodeToByteArray()))
                 require(computed == authCodeChallenge) { "PKCE verification failed" }
             }
+            "refresh_token" -> require(form["refresh_token"] == issuedRefreshToken) { "wrong refresh_token" }
             else -> error("unsupported grant_type ${form["grant_type"]}")
         }
 
@@ -125,8 +126,14 @@ class MockIssuer(
         seenDpopNonceRetry = true
         accessToken = "ACCESS-" + Base64Url.encode(byteArrayOf(1, 2, 3, 4))
         cNonce = "c-nonce-xyz"
-        return ok("""{"access_token":"$accessToken","token_type":"DPoP","expires_in":3600}""")
+        issuedRefreshToken = "REFRESH-" + Base64Url.encode(byteArrayOf(5, 6, 7, 8))
+        return ok("""{"access_token":"$accessToken","token_type":"DPoP","expires_in":3600,"refresh_token":"$issuedRefreshToken","c_nonce":"$cNonce"}""")
     }
+
+    private var issuedRefreshToken: String? = null
+
+    /** When set, the issuer metadata carries this `signed_metadata` JWT. */
+    var signedMetadata: String? = null
 
     private fun handleNonce(): HttpResponse = ok("""{"c_nonce":"${cNonce ?: "c-nonce-xyz"}"}""")
 
@@ -240,6 +247,7 @@ class MockIssuer(
 
     private fun issuerMetadata(): String = """
         {"credential_issuer":"$issuer",
+         ${signedMetadata?.let { "\"signed_metadata\":\"$it\"," } ?: ""}
          "credential_endpoint":"$issuer/credential",
          "nonce_endpoint":"$issuer/nonce",
          "deferred_credential_endpoint":"$issuer/deferred_credential",

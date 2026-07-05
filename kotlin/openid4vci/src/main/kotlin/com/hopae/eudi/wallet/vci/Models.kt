@@ -134,6 +134,8 @@ class TokenResponse(
     val cNonce: String?,
     val expiresIn: Long?,
     val authorizationDetails: JsonValue?,
+    /** OAuth 2.0 refresh token (RFC 6749 §5.1) — enables reissuance without re-authorization. */
+    val refreshToken: String?,
 ) {
     companion object {
         fun fromObj(o: JsonValue.Obj): TokenResponse = TokenResponse(
@@ -142,6 +144,7 @@ class TokenResponse(
             cNonce = o.str("c_nonce"),
             expiresIn = (o["expires_in"] as? JsonValue.NumInt)?.value,
             authorizationDetails = o["authorization_details"],
+            refreshToken = o.str("refresh_token"),
         )
     }
 }
@@ -153,16 +156,24 @@ class CredentialResponse(
     val credentials: List<IssuedCredential>,
     val transactionId: String?,
     val notificationId: String?,
-    /** Context for follow-ups (deferred poll, notification) — set by the client, not parsed. */
+    /** Context for follow-ups (deferred poll, notification, reissuance) — set by the client, not parsed. */
     val accessToken: String? = null,
     val credentialIssuer: String? = null,
     val requestedFormat: String = "dc+sd-jwt",
+    /** Refresh token + config id — persist these to reissue (renew) the credential later. */
+    val refreshToken: String? = null,
+    val configurationId: String? = null,
 ) {
     /** True when the issuer deferred issuance (returned a transaction_id, no credential yet). */
     val isDeferred: Boolean get() = credentials.isEmpty() && transactionId != null
 
-    internal fun withContext(accessToken: String?, credentialIssuer: String?, requestedFormat: String) =
-        CredentialResponse(credentials, transactionId, notificationId, accessToken, credentialIssuer, requestedFormat)
+    /** True when the issuer granted a refresh token, so [Openid4VciClient.reissue] can renew later. */
+    val canReissue: Boolean get() = refreshToken != null && credentialIssuer != null && configurationId != null
+
+    internal fun withContext(
+        accessToken: String?, credentialIssuer: String?, requestedFormat: String,
+        refreshToken: String? = null, configurationId: String? = null,
+    ) = CredentialResponse(credentials, transactionId, notificationId, accessToken, credentialIssuer, requestedFormat, refreshToken, configurationId)
 
     companion object {
         fun fromObj(o: JsonValue.Obj, requestedFormat: String): CredentialResponse {

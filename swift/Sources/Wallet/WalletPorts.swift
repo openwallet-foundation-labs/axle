@@ -12,11 +12,13 @@ public struct WalletPorts {
     public let clock: any WalletClock
     public let rng: any Rng
     public let logger: (any WalletLogger)?
+    /// Audit log of presentations/issuances. Defaults to no-op; production wallets should persist.
+    public let transactionLog: any TransactionLog
 
     public init(secureAreas: [any SecureArea], storage: any StorageDriver, http: any HttpTransport,
                 walletAttestation: (any WalletAttestationProvider)? = nil,
                 clock: any WalletClock = SystemClock(), rng: any Rng = SystemRng(),
-                logger: (any WalletLogger)? = nil) {
+                logger: (any WalletLogger)? = nil, transactionLog: any TransactionLog = NoOpTransactionLog()) {
         precondition(!secureAreas.isEmpty, "WalletPorts requires at least one SecureArea")
         self.secureAreas = secureAreas
         self.storage = storage
@@ -25,6 +27,7 @@ public struct WalletPorts {
         self.clock = clock
         self.rng = rng
         self.logger = logger
+        self.transactionLog = transactionLog
     }
 
     var defaultSecureArea: any SecureArea { secureAreas[0] }

@@ -1,16 +1,18 @@
 import CredentialStore
 import Foundation
 import OpenID4VCI
+import OpenID4VP
 import StatusList
 import Trust
 import WalletAPI
 
 /// The unified EUDI Wallet SDK facade (API-CONTRACT.md §5). Multi-instance; no global state.
 ///
-/// Phases A–B wire credential storage, DCQL retrieval, status, and issuance; presentation/proximity follow.
+/// Phases A–C wire credential storage, DCQL retrieval, status, issuance, and remote presentation; proximity follows.
 public struct Wallet {
     public let credentials: CredentialsService
     public let issuance: IssuanceService
+    public let presentation: PresentationService
     private let ports: WalletPorts
 
     /// Idempotent; no resources held yet.
@@ -30,7 +32,13 @@ public struct Wallet {
         let issuance = IssuanceService(vci: vci, store: store, storage: ports.storage, secureArea: ports.defaultSecureArea,
                                        rng: ports.rng, clock: ports.clock, redirectUri: config.issuance.redirectUri)
 
-        return Wallet(credentials: CredentialsService(store: store, statusClient: statusClient), issuance: issuance, ports: ports)
+        // Reader trust for signed request objects is wired in a later slice; unsigned requests parse untrusted.
+        let vp = Openid4VpClient(http: ports.http, clock: clockSeconds)
+        let presentation = PresentationService(vp: vp, store: store, txlog: ports.transactionLog,
+                                               secureAreas: ports.secureAreas, clock: ports.clock, rng: ports.rng)
+
+        return Wallet(credentials: CredentialsService(store: store, statusClient: statusClient),
+                      issuance: issuance, presentation: presentation, ports: ports)
     }
 }
 

@@ -8,3 +8,13 @@ public enum IssuanceError: Error, Equatable {
     case deferredNotReady
     case unexpected(String)
 }
+
+/// Typed presentation errors (API-CONTRACT.md §8).
+public enum PresentationError: Error, Equatable {
+    case invalidRequest(String)
+    case verifierNotTrusted(String)
+    case queryNotSatisfiable(String)
+    case selectionIncomplete(String)
+    case responseRejected(String)
+    case unexpected(String)
+}

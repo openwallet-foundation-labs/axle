@@ -69,7 +69,7 @@ let package = Package(
         ),
         .target(
             name: "WalletTestKit",
-            dependencies: ["WalletAPI", "CborCose", "SdJwt", .product(name: "Crypto", package: "swift-crypto")]
+            dependencies: ["WalletAPI", "CborCose", "SdJwt", "MDoc", "OpenID4VP", .product(name: "Crypto", package: "swift-crypto")]
         ),
         .target(
             name: "Wallet",

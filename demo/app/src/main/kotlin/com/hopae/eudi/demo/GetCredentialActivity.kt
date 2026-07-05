@@ -39,6 +39,25 @@ class GetCredentialActivity : ComponentActivity() {
         }
 
         val origin = originOf(request)
+
+        // org-iso-mdoc (ISO 18013-7): raw mdoc DeviceRequest → HPKE-encrypted DeviceResponse.
+        val mdoc = matchProtocol(option.requestJson, listOf("org-iso-mdoc", "org.iso.mdoc"))
+        if (mdoc != null) {
+            val (proto, data) = mdoc
+            LogStore.log("DC API [$proto] request · origin=$origin")
+            lifecycleScope.launch {
+                runCatching {
+                    val response = wallet.proximity.respondDcApiMdoc(data.getString("deviceRequest"), data.getString("encryptionInfo"), origin)
+                    val content = JSONObject().put("protocol", proto).put("data", JSONObject().put("response", response))
+                    PendingIntentHandler.setGetCredentialResponse(resultData, GetCredentialResponse(DigitalCredential(content.toString())))
+                    LogStore.log("✅ DC API (mdoc) response returned to caller")
+                    setResult(RESULT_OK, resultData)
+                }.onFailure { failException(resultData, it.message) }
+                finish()
+            }
+            return
+        }
+
         val openid4vp = extractOpenId4Vp(option.requestJson)
         if (openid4vp == null) {
             LogStore.log("DC API: no openid4vp request in envelope: ${option.requestJson.take(200)}")
@@ -74,6 +93,18 @@ class GetCredentialActivity : ComponentActivity() {
      * request object (preferring unsigned) that the SDK's [startDcApi] understands. Falls back to the raw
      * JSON if it's already a flat request.
      */
+    /** Returns the (protocol, data) of the first request in the envelope matching one of [protocols]. */
+    private fun matchProtocol(requestJson: String, protocols: List<String>): Pair<String, JSONObject>? {
+        val requests = runCatching { JSONObject(requestJson) }.getOrNull()?.optJSONArray("requests") ?: return null
+        for (proto in protocols) {
+            for (i in 0 until requests.length()) {
+                val req = requests.optJSONObject(i) ?: continue
+                if (req.optString("protocol") == proto) return (req.optJSONObject("data") ?: continue).let { proto to it }
+            }
+        }
+        return null
+    }
+
     private fun extractOpenId4Vp(requestJson: String): String? {
         val root = runCatching { JSONObject(requestJson) }.getOrNull() ?: return null
         val requests = root.optJSONArray("requests") ?: return requestJson

@@ -1,11 +1,17 @@
 package com.hopae.eudi.wallet
 
 import com.hopae.eudi.wallet.cbor.Cbor
+import com.hopae.eudi.wallet.cbor.CborDecoder
+import com.hopae.eudi.wallet.cbor.CborEncoder
+import com.hopae.eudi.wallet.cbor.cose.CoseKey
 import com.hopae.eudi.wallet.mdoc.DeviceRequest
+import com.hopae.eudi.wallet.mdoc.Hpke
 import com.hopae.eudi.wallet.mdoc.IssuerSigned
 import com.hopae.eudi.wallet.mdoc.MdocPresenter
 import com.hopae.eudi.wallet.mdoc.MdocReaderTrust
+import com.hopae.eudi.wallet.mdoc.MdocSessionTranscript
 import com.hopae.eudi.wallet.mdoc.ReaderAuth
+import com.hopae.eudi.wallet.sdjwt.Base64Url
 import com.hopae.eudi.wallet.proximity.DeviceEngagement
 import com.hopae.eudi.wallet.proximity.EphemeralKeyPair
 import com.hopae.eudi.wallet.proximity.ProximityException
@@ -81,6 +87,51 @@ class ProximityService internal constructor(
         }
         session.launch()
         return session
+    }
+
+    /**
+     * ISO/IEC 18013-7:2025 Annex C `org-iso-mdoc` Digital Credentials API: builds the mdoc DeviceResponse for
+     * [deviceRequestBase64], HPKE-encrypts it to the verifier's `recipientPublicKey` (from [encryptionInfoBase64]),
+     * and returns the base64url of `["dcapi", {enc, cipherText}]`. No transport — the platform mediates.
+     */
+    suspend fun respondDcApiMdoc(deviceRequestBase64: String, encryptionInfoBase64: String, origin: String): String {
+        val deviceRequest = catchingProximity { DeviceRequest.decode(Base64Url.decode(deviceRequestBase64)) }
+        val encInfo = CborDecoder.decode(Base64Url.decode(encryptionInfoBase64)) as? Cbor.Array
+            ?: throw WalletError.Proximity.SessionFailed("malformed EncryptionInfo")
+        if ((encInfo.items.getOrNull(0) as? Cbor.Text)?.value != "dcapi") {
+            throw WalletError.Proximity.SessionFailed("EncryptionInfo is not a dcapi array")
+        }
+        val recipientKeyCbor = (encInfo.items.getOrNull(1) as? Cbor.CborMap)?.entries
+            ?.firstOrNull { (it.first as? Cbor.Text)?.value == "recipientPublicKey" }?.second as? Cbor.CborMap
+            ?: throw WalletError.Proximity.SessionFailed("EncryptionInfo missing recipientPublicKey")
+        val recipientKey = CoseKey.decode(recipientKeyCbor)
+
+        val transcript = MdocSessionTranscript.dcApiIsoMdoc(encryptionInfoBase64, origin)
+        val chosen = deviceRequest.docRequests.mapNotNull { dr -> findMdoc(dr.docType)?.let { dr.docType to it } }.toMap()
+        if (chosen.isEmpty()) throw WalletError.Proximity.NoMatchingCredential("no stored mdoc for the DC API request")
+
+        val deviceResponse = buildDeviceResponse(deviceRequest, transcript, ProximitySelection(chosen))
+        val sealed = Hpke.sealBaseP256(recipientKey, CborEncoder.encode(transcript), ByteArray(0), deviceResponse)
+        val envelope = Cbor.Array(
+            listOf(
+                Cbor.Text("dcapi"),
+                Cbor.CborMap(listOf(Cbor.Text("enc") to Cbor.Bytes(sealed.enc), Cbor.Text("cipherText") to Cbor.Bytes(sealed.ciphertext))),
+            ),
+        )
+        recordDcApiMdocSuccess(deviceRequest, transcript, chosen.keys, origin)
+        return Base64Url.encode(CborEncoder.encode(envelope))
+    }
+
+    private suspend fun recordDcApiMdocSuccess(deviceRequest: DeviceRequest, transcript: Cbor, docTypes: Set<String>, origin: String) {
+        val reader = verifyReader(deviceRequest, transcript)
+        val documents = deviceRequest.docRequests.filter { it.docType in docTypes }.map { dr ->
+            LoggedDocument(
+                format = "mso_mdoc", type = dr.docType, queryId = null,
+                claims = dr.requested.flatMap { (ns, els) -> els.map { LoggedClaim(listOf(ns, it.identifier), null) } },
+            )
+        }
+        val rp = RelyingParty(reader.commonName ?: origin, reader.commonName ?: origin, reader.trusted, reader.certificateChainDer)
+        txlog.recordPresentation(rp, documents, TransactionStatus.SUCCESS)
     }
 
     private suspend fun buildRequest(deviceRequest: DeviceRequest, transcript: Cbor, session: SessionEncryption): ProximityRequest {

@@ -87,6 +87,7 @@ public struct CredentialIssuerMetadata {
     public let credentialEndpoint: String
     public let nonceEndpoint: String?
     public let deferredCredentialEndpoint: String?
+    public let notificationEndpoint: String?
     public let authorizationServers: [String]
     public let credentialConfigurationsSupported: [String: CredentialConfiguration]
 
@@ -104,6 +105,7 @@ public struct CredentialIssuerMetadata {
             credentialEndpoint: try o.requireString("credential_endpoint", "issuer metadata"),
             nonceEndpoint: o.string("nonce_endpoint"),
             deferredCredentialEndpoint: o.string("deferred_credential_endpoint"),
+            notificationEndpoint: o.string("notification_endpoint"),
             authorizationServers: o.stringArray("authorization_servers") ?? [issuer],
             credentialConfigurationsSupported: configs
         )
@@ -182,6 +184,28 @@ public struct CredentialResponse {
     public let credentials: [IssuedCredential]
     public let transactionId: String?
     public let notificationId: String?
+    /// Context for follow-ups (deferred poll, notification) — set by the client, not parsed.
+    public let accessToken: String?
+    public let credentialIssuer: String?
+    public let requestedFormat: String
+
+    public init(credentials: [IssuedCredential], transactionId: String?, notificationId: String?,
+                accessToken: String? = nil, credentialIssuer: String? = nil, requestedFormat: String = "dc+sd-jwt") {
+        self.credentials = credentials
+        self.transactionId = transactionId
+        self.notificationId = notificationId
+        self.accessToken = accessToken
+        self.credentialIssuer = credentialIssuer
+        self.requestedFormat = requestedFormat
+    }
+
+    /// True when the issuer deferred issuance (returned a transaction_id, no credential yet).
+    public var isDeferred: Bool { credentials.isEmpty && transactionId != nil }
+
+    func withContext(accessToken: String?, credentialIssuer: String?, requestedFormat: String) -> CredentialResponse {
+        CredentialResponse(credentials: credentials, transactionId: transactionId, notificationId: notificationId,
+                           accessToken: accessToken, credentialIssuer: credentialIssuer, requestedFormat: requestedFormat)
+    }
 
     public static func fromObj(_ o: JsonValue, requestedFormat: String) -> CredentialResponse {
         var creds: [IssuedCredential] = []
@@ -196,6 +220,6 @@ public struct CredentialResponse {
         if case let .str(t)? = o["transaction_id"] { txId = t }
         var notifId: String?
         if case let .str(n)? = o["notification_id"] { notifId = n }
-        return CredentialResponse(credentials: creds, transactionId: txId, notificationId: notifId)
+        return CredentialResponse(credentials: creds, transactionId: txId, notificationId: notifId, requestedFormat: requestedFormat)
     }
 }

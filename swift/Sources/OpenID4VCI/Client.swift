@@ -323,6 +323,39 @@ public struct Openid4VciClient {
             issuerMeta.credentialEndpoint, json: requestBody, dpop: dpop, accessToken: token.accessToken
         )
         return CredentialResponse.fromObj(try parseObj(credResp, "credential response"), requestedFormat: requestFormat)
+            .withContext(accessToken: token.accessToken, credentialIssuer: issuerMeta.credentialIssuer, requestedFormat: requestFormat)
+    }
+
+    /// Polls the deferred credential endpoint (OpenID4VCI §9). Pass a `CredentialResponse` whose
+    /// `isDeferred` is true. Throws `VciError.issuancePending` if the issuer is still not ready.
+    public func fetchDeferredCredential(_ deferred: CredentialResponse, keys: IssuanceKeys) async throws -> CredentialResponse {
+        guard let transactionId = deferred.transactionId else { throw VciError.protocolError("response has no transaction_id to defer") }
+        guard let accessToken = deferred.accessToken else { throw VciError.protocolError("deferred response has no access token") }
+        let issuerMeta = try await loadIssuerMetadata(deferred.credentialIssuer!)
+        guard let endpoint = issuerMeta.deferredCredentialEndpoint else { throw VciError.metadata("issuer has no deferred_credential_endpoint") }
+
+        let dpop = DpopProver(signer: keys.dpopSigner, publicKey: keys.dpopPublicKey, rng: rng, now: clock)
+        let body = JsonValue.obj([("transaction_id", .str(transactionId))]).serialize()
+        let response: HttpResponse
+        do {
+            response = try await postJsonWithDpop(endpoint, json: body, dpop: dpop, accessToken: accessToken)
+        } catch let VciError.oauth(error, _, _) where error == "issuance_pending" {
+            throw VciError.issuancePending
+        }
+        return CredentialResponse.fromObj(try parseObj(response, "deferred credential"), requestedFormat: deferred.requestedFormat)
+            .withContext(accessToken: accessToken, credentialIssuer: deferred.credentialIssuer, requestedFormat: deferred.requestedFormat)
+    }
+
+    /// Sends an issuance notification (OpenID4VCI §10). No-op if the response carried no notification_id.
+    public func sendNotification(_ response: CredentialResponse, event: NotificationEvent, keys: IssuanceKeys) async throws {
+        guard let notificationId = response.notificationId else { return }
+        guard let accessToken = response.accessToken else { throw VciError.protocolError("response has no access token") }
+        let issuerMeta = try await loadIssuerMetadata(response.credentialIssuer!)
+        guard let endpoint = issuerMeta.notificationEndpoint else { throw VciError.metadata("issuer has no notification_endpoint") }
+
+        let dpop = DpopProver(signer: keys.dpopSigner, publicKey: keys.dpopPublicKey, rng: rng, now: clock)
+        let body = JsonValue.obj([("notification_id", .str(notificationId)), ("event", .str(event.rawValue))]).serialize()
+        try checkStatus(try await postJsonWithDpop(endpoint, json: body, dpop: dpop, accessToken: accessToken), endpoint)
     }
 
     // MARK: - HTTP helpers

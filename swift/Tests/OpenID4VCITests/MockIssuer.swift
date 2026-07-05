@@ -29,6 +29,15 @@ actor MockIssuer: HttpTransport {
     private(set) var seenKeyAttestation: String?
     private(set) var seenProofCount = 0
 
+    /// When true, /credential defers (returns a transaction_id); the credential comes from /deferred_credential.
+    private var deferMode = false
+    private var deferredHolderKey: EcPublicKey?
+    private var deferredPollCount = 0
+    /// Test-observable: (notification_id, event) of the last notification received.
+    private(set) var seenNotification: (String, String)?
+
+    func setDeferMode(_ enabled: Bool) { deferMode = enabled }
+
     init(area: SoftwareSecureArea, issuerKey: KeyInfo, now: Int64) {
         self.area = area
         self.issuerKey = issuerKey
@@ -53,6 +62,8 @@ actor MockIssuer: HttpTransport {
         case "/token": return try await handleToken(request)
         case "/nonce": return handleNonce()
         case "/credential": return try await handleCredential(request)
+        case "/deferred_credential": return try await handleDeferred(request)
+        case "/notification": return try handleNotification(request)
         case "/par": return handlePar(request)
         default:
             if path.hasPrefix("/authorize") { return handleAuthorize(request) }
@@ -119,6 +130,31 @@ actor MockIssuer: HttpTransport {
         ok(#"{"c_nonce":"\#(cNonce ?? "c-nonce-xyz")"}"#)
     }
 
+    private func handleDeferred(_ request: HttpRequest) async throws -> HttpResponse {
+        guard let token = accessToken else { return HttpResponse(status: 401, headers: [], body: [UInt8]("no token".utf8)) }
+        precondition(request.headers.contains { $0.0 == "Authorization" && $0.1 == "DPoP \(token)" }, "bad auth")
+        _ = try await verifyDpop(request, htm: "POST", htu: "\(issuer)/deferred_credential", accessToken: token)
+        deferredPollCount += 1
+        // First poll: not ready yet; second poll: issue.
+        if deferredPollCount < 2 {
+            return HttpResponse(status: 400, headers: [("Content-Type", "application/json")], body: [UInt8](#"{"error":"issuance_pending"}"#.utf8))
+        }
+        let cred = try await issueSdJwtVc(holderKey: deferredHolderKey!)
+        return ok(#"{"credentials":[{"credential":"\#(cred)"}]}"#)
+    }
+
+    private func handleNotification(_ request: HttpRequest) throws -> HttpResponse {
+        guard let token = accessToken else { return HttpResponse(status: 401, headers: [], body: [UInt8]("no token".utf8)) }
+        precondition(request.headers.contains { $0.0 == "Authorization" && $0.1 == "DPoP \(token)" }, "bad auth")
+        guard case let .obj(entries)? = try? JsonValue.parse(String(bytes: request.body ?? [], encoding: .utf8) ?? ""),
+              case let .str(nid)? = JsonValue.obj(entries)["notification_id"],
+              case let .str(ev)? = JsonValue.obj(entries)["event"] else {
+            preconditionFailure("bad notification body")
+        }
+        seenNotification = (nid, ev)
+        return HttpResponse(status: 204, headers: [], body: [])
+    }
+
     private func handleCredential(_ request: HttpRequest) async throws -> HttpResponse {
         guard let token = accessToken else {
             return HttpResponse(status: 401, headers: [], body: [UInt8]("no token".utf8))
@@ -136,6 +172,12 @@ actor MockIssuer: HttpTransport {
         seenProofCount = jwts.count
         if case let .str(first) = jwts[0], case let .str(ka)? = (try? Jws.parse(first))?.header["key_attestation"] {
             seenKeyAttestation = ka
+        }
+
+        if deferMode, case let .str(first) = jwts[0] {
+            // Defer: verify the proof, remember the holder key, return a transaction_id (no credential yet).
+            deferredHolderKey = try await verifyKeyProof(first)
+            return ok(#"{"transaction_id":"tx-1","notification_id":"n-1"}"#)
         }
 
         // One credential per proof (batch issuance), each bound to that proof's holder key.
@@ -210,6 +252,8 @@ actor MockIssuer: HttpTransport {
         {"credential_issuer":"\(issuer)",
          "credential_endpoint":"\(issuer)/credential",
          "nonce_endpoint":"\(issuer)/nonce",
+         "deferred_credential_endpoint":"\(issuer)/deferred_credential",
+         "notification_endpoint":"\(issuer)/notification",
          "authorization_servers":["\(issuer)"],
          "credential_configurations_supported":{
            "eu.europa.ec.eudi.pid.1":{"format":"dc+sd-jwt","vct":"eu.europa.ec.eudi.pid.1",

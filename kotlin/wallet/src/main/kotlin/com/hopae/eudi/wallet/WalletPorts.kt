@@ -3,7 +3,9 @@ package com.hopae.eudi.wallet
 import com.hopae.eudi.wallet.spi.HttpTransport
 import com.hopae.eudi.wallet.spi.Rng
 import com.hopae.eudi.wallet.spi.SecureArea
+import com.hopae.eudi.wallet.spi.NoOpTransactionLog
 import com.hopae.eudi.wallet.spi.StorageDriver
+import com.hopae.eudi.wallet.spi.TransactionLog
 import com.hopae.eudi.wallet.spi.WalletAttestationProvider
 import com.hopae.eudi.wallet.spi.WalletClock
 import com.hopae.eudi.wallet.spi.WalletLogger
@@ -22,6 +24,8 @@ class WalletPorts(
     val clock: WalletClock = WalletClock.System,
     val rng: Rng = Rng.Default,
     val logger: WalletLogger? = null,
+    /** Audit log of presentations/issuances. Defaults to no-op; production wallets should persist. */
+    val transactionLog: TransactionLog = NoOpTransactionLog,
 ) {
     init {
         require(secureAreas.isNotEmpty()) { "WalletPorts requires at least one SecureArea" }

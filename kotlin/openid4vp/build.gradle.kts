@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm")
+    `java-test-fixtures`
 }
 
 group = "com.hopae.eudi"
@@ -13,6 +14,7 @@ dependencies {
     api(project(":wallet-api"))
     api(project(":sdjwt"))
     api(project(":mdoc"))
+    testFixturesImplementation(project(":testkit"))
     testImplementation(kotlin("test"))
     testImplementation(project(":testkit"))
     testImplementation(testFixtures(project(":mdoc")))

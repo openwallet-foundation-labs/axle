@@ -10,4 +10,13 @@ sealed class WalletError(message: String, cause: Throwable? = null) : Exception(
         class DeferredNotReady : Issuance("deferred credential not ready")
         class Unexpected(cause: Throwable) : Issuance("unexpected issuance error: ${cause.message}", cause)
     }
+
+    sealed class Presentation(message: String, cause: Throwable? = null) : WalletError(message, cause) {
+        class InvalidRequest(message: String, cause: Throwable? = null) : Presentation("invalid presentation request: $message", cause)
+        class VerifierNotTrusted(message: String) : Presentation("verifier not trusted: $message")
+        class QueryNotSatisfiable(message: String) : Presentation("request not satisfiable: $message")
+        class SelectionIncomplete(message: String) : Presentation("selection incomplete: $message")
+        class ResponseRejected(message: String, cause: Throwable? = null) : Presentation("verifier rejected the response: $message", cause)
+        class Unexpected(cause: Throwable) : Presentation("unexpected presentation error: ${cause.message}", cause)
+    }
 }

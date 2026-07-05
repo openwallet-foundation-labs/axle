@@ -1,5 +1,7 @@
 package com.hopae.eudi.wallet
 
+import com.hopae.eudi.wallet.cbor.Cbor
+import com.hopae.eudi.wallet.mdoc.MdocTestIssuer
 import com.hopae.eudi.wallet.sdjwt.JsonValue
 import com.hopae.eudi.wallet.sdjwt.SdJwtIssuer
 import com.hopae.eudi.wallet.sdjwt.SecureAreaJwsSigner
@@ -20,6 +22,7 @@ import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.EnvelopeLifecycle
 import com.hopae.eudi.wallet.testkit.InMemoryStorageDriver
 import com.hopae.eudi.wallet.testkit.SoftwareSecureArea
+import com.hopae.eudi.wallet.vp.MockMdocVerifier
 import com.hopae.eudi.wallet.vp.MockVerifier
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -120,6 +123,47 @@ class WalletPresentationTest {
 
         assertNull(verifier.verifiedClaims, "nothing presented on decline")
         assertEquals(TransactionStatus.Declined, log.entries.single().status)
+        wallet.close()
+    }
+
+    @Test
+    fun mdocRemotePresentationSignsDeviceResponse() = runBlocking {
+        val area = SoftwareSecureArea()
+        val storage = InMemoryStorageDriver()
+        val issuerKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val deviceKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val bytes = MdocTestIssuer.issue(
+            area = area, issuerKey = issuerKey, deviceKey = deviceKey.publicKey,
+            docType = "org.iso.18013.5.1.mDL", namespace = "org.iso.18013.5.1",
+            elements = listOf("family_name" to Cbor.Text("Kim"), "given_name" to Cbor.Text("Minsu"), "age_over_18" to Cbor.Bool(true)),
+            x5chain = listOf(byteArrayOf(0x30, 0x01)),
+            signed = now, validFrom = now, validUntil = now.plusSeconds(31_536_000),
+        )
+        CredentialStore(storage).save(
+            CredentialEnvelope(
+                CredentialId("mdl-1"), CredentialFormat.MsoMdoc("org.iso.18013.5.1.mDL"), now,
+                EnvelopeLifecycle.Issued(CredentialPolicy(), listOf(CredentialInstance(deviceKey.handle, bytes))),
+            ),
+        )
+
+        val verifier = MockMdocVerifier()
+        val log = RecordingLog()
+        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, verifier, transactionLog = log))
+
+        val session = wallet.presentation.start(verifier.requestUri())
+        val resolved = withTimeout(15_000) { session.state.first { it is PresentationState.RequestResolved || it is PresentationState.Failed } }
+        assertTrue(resolved is PresentationState.RequestResolved, "resolved: $resolved")
+        assertTrue(resolved.request.satisfiable, "mDL query satisfiable")
+
+        session.respond(PresentationSelection.auto(resolved.request))
+        val terminal = withTimeout(15_000) { session.state.first { it.isTerminal } }
+        assertTrue(terminal is PresentationState.Completed, "terminal: $terminal")
+
+        // verifier verified the device signature and got only the requested elements (age_over_18 withheld)
+        assertEquals(setOf("family_name", "given_name"), verifier.disclosedElements)
+        val entry = log.entries.single()
+        assertEquals(TransactionStatus.Success, entry.status)
+        assertTrue(entry.credentialIds.contains("mdl-1"))
         wallet.close()
     }
 }

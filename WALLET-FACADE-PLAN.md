@@ -32,7 +32,7 @@ wallet (파사드) ──▶ wallet-api, credential-store, openid4vci, openid4vp
 2. **영속**: `CredentialResponse.credentials` → `CredentialEnvelope`(instances 바인딩) → `store.save`
 3. **follow-up 컨텍스트**: reissue/deferred/notification이 이전 `CredentialResponse`(accessToken·refreshToken·txId 등) 필요 → 앱 재시작 넘어 `Envelope.Deferred.transactionContext`/`Pending.resumeContext` 불투명 바이트로 직렬화
 4. **clock/rng 브리지**: 클라이언트는 `()->Long`(epoch초), SPI는 `WalletClock.now():Instant` → `{ clock.now().epochSecond }`
-5. **HAIP 조립**: `WalletClientAuth.create(provider, instanceKey, signer, ...)` 배선
+5. **HAIP 조립 + WUA 인스턴스 키 소유**: SDK가 인스턴스 키 생성·보관(storage `wallet-instance`)·재사용, `walletAttestation` 호출·캐싱, PoP 서명. 앱은 `WalletAttestationProvider` + `clientAuth=AttestationBased`만 (§6)
 6. **store→PresentableCredential**: envelope payload를 `SdJwt`/`IssuerSigned`로 파싱 → `HeldSdJwtVc`/`HeldMdoc`(signer 바인딩) → match·respond 양쪽에 전달
 7. **usage 카운팅**: `consumeInstance`로 인스턴스 선택 → 그 payload/key로 Held 빌드 → 실패 시 보정(OneTime 롤백)
 8. **VP 3스텝 루프**: resolveRequest→match→selection→respond를 세션으로 감쌈 (기존 PresentationSession은 SD-JWT 전용·internal 생성자 → 새로)
@@ -84,3 +84,27 @@ wallet (파사드) ──▶ wallet-api, credential-store, openid4vci, openid4vp
 - **follow-up 컨텍스트 직렬화**(갭 3): `CredentialResponse`의 internal `withContext` 필드를 봉투 불투명 바이트로 왕복시키는 코덱 필요 — deferred/reissue의 앱 재시작 내구성.
 - **claims 파싱 이중화**: SD-JWT는 sdjwt, mdoc은 mdoc 모듈이 파싱 — `Credential.claims` path 뷰를 양 포맷 통일 매핑.
 - **Swift 병행**: 각 Phase를 Kotlin/Swift 페어로 — 세션의 StateFlow↔AsyncStream 대응이 가장 큰 병행 작업.
+
+## 6. 횡단 관심사 소유권 (storage · keys · WUA) — 확정 2026-07-05
+
+**원칙: 앱은 얇은 포트 어댑터만 주입하고, SDK가 도메인 로직·수명주기를 자동 오케스트레이션한다.** "앱이 자유롭게"가 아니라 "SDK 자동 + 포트로 플랫폼 통제". 근거: ARF/HAIP 정확성(PoP·key attestation·OneTime 키 위생)을 SDK가 보장, 키 재료가 앱에 노출되지 않음, 앱은 어느 keystore/storage/backend인지만 어댑터로 통제.
+
+| 관심사 | 앱 주입 포트 (얇음) | SDK 자동 소유 |
+|---|---|---|
+| **영속 저장** | `StorageDriver` (put/get/delete/keys — 암호화 블롭) | 봉투 인코딩·저장/로드·lifecycle·follow-up 컨텍스트 직렬화 |
+| **holder 바인딩 키** | `SecureArea` (createKey/sign/deleteKey) | 발급 시 생성·핸들 보관·제시 서명·삭제 시 파기·OneTime 소비 시 키 삭제 |
+| **wallet instance attestation (WUA)** | `WalletAttestationProvider` (WP 백엔드 링크) | 인스턴스 키 소유·재사용·PoP 서명·attestation 캐싱·만료 갱신 |
+
+### 6a. WUA — SDK가 인스턴스 키 소유 (개선)
+- 앱은 `WalletAttestationProvider`(백엔드 통신) + `IssuanceConfig(clientAuth = ClientAuth.AttestationBased)`만 제공.
+- SDK 내부: ①인스턴스 키 1회 생성(SecureArea) → 핸들을 storage `wallet-instance` 컬렉션에 보관 → 재사용 ②`walletAttestation(instanceKeyInfo)` 호출 → `exp`까지 캐싱 ③`ClientAttestationPoP` 직접 서명 → PAR·토큰 자동 첨부.
+- 앱은 인스턴스 키·PoP를 안 건드림. 기존 `WalletClientAuth.create(provider, instanceKey, signer, ...)`의 `instanceKey`/`signer` 인자를 **SDK 내부로 흡수** (파사드 조립기가 담당).
+
+### 6b. 저장 암호화 = (a) 어댑터가 암호화 (확정)
+- `StorageDriver`가 저장하는 블롭의 암호화는 **어댑터 소관** — 플랫폼 암호화 스토리지(Android EncryptedSharedPreferences / iOS Keychain-backed DB). ref 월렛 방식, v0 단순.
+- SDK 레벨 봉투 암호화(SecureArea 키 래핑)는 **후속 옵션**(`StorageEncryption` 정책) — v0 미포함.
+
+### 6c. 탈출구 (고급 앱)
+- 키: `IssuanceRequest(keySpec = ...)`로 알고리즘·userAuth·하드웨어 정책 지정.
+- WUA: 앱이 `provider` 내부에서 캐싱/갱신 스케줄 직접 제어(SDK는 provider 반환을 신뢰).
+- 저장: 어댑터가 암호화·백업·마이그레이션 정책 소유.

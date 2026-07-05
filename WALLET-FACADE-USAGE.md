@@ -11,7 +11,7 @@ val wallet = Wallet.create(
     config = WalletConfig(
         issuance = IssuanceConfig(
             clientId = "eudi-wallet",
-            clientAuth = ClientAuth.None,                 // 또는 ClientAuth.AttestationBased
+            clientAuth = ClientAuth.AttestationBased,      // WUA 사용 (SDK가 인스턴스 키·PoP·캐싱 자동) / 또는 ClientAuth.None
             redirectUri = "eudi-wallet://authorize",
             // par = Required, dpop = Required 가 HAIP 기본값
         ),
@@ -27,12 +27,13 @@ val wallet = Wallet.create(
     ),
     ports = WalletPorts(
         secureArea = listOf(SoftwareSecureArea()),        // 앱: AndroidKeystoreSecureArea / SecureEnclaveArea
-        storage = InMemoryStorage(),                      // 앱: 플랫폼 암호화 스토리지 어댑터
+        storage = InMemoryStorage(),                      // 앱: 플랫폼 암호화 스토리지 어댑터 (암호화는 어댑터 소관)
         http = JdkHttpTransport(),
-        walletAttestation = myWuaProvider,                // 옵션 (WUA 백엔드)
+        walletAttestation = myWuaProvider,                // WP 백엔드 링크만 — 인스턴스 키·PoP·캐싱은 SDK 자동
     ),
 )
 // wallet은 스레드 세이프·멀티인스턴스. 앱 종료 시 wallet.close() (멱등).
+// 횡단 관심사(저장·holder 키·WUA) = 앱은 얇은 포트만 주입, SDK가 lifecycle 자동 소유 (PLAN §6).
 ```
 
 ```swift

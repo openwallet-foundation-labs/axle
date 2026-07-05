@@ -18,11 +18,13 @@ dependencies {
     implementation(project(":mdoc"))
     implementation(project(":trust"))
     implementation(project(":statuslist"))
+    implementation(project(":openid4vci"))
     implementation(project(":openid4vp"))
 
     testImplementation(kotlin("test"))
     testImplementation(project(":testkit"))
     testImplementation(testFixtures(project(":mdoc")))
+    testImplementation(testFixtures(project(":openid4vci")))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }
 

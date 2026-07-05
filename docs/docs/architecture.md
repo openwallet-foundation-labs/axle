@@ -12,7 +12,7 @@ JVM/Linux (and Linux Swift). Everything platform-specific is a **port** the host
 injects at construction time.
 
 ```
-   ┌──────────────────────────── your app (UI) ────────────────────────────┐
+   ┌──────────────────────────── your app (UI) ─────────────────────────────┐
    │                                                                        │
    │   Wallet.create(config, ports)                                         │
    │        │                                                               │
@@ -20,7 +20,7 @@ injects at construction time.
    │   ┌────────────────── Wallet facade ──────────────────┐                │
    │   │ credentials · issuance · presentation · proximity │                │
    │   └───────────────────────┬───────────────────────────┘                │
-   │        core modules (pure)│  cbor · sdjwt · mdoc · openid4vci/vp ·      │
+   │        core modules (pure)│  cbor · sdjwt · mdoc · openid4vci/vp ·     │
    │                           │  trust · statuslist · credential-store ·   │
    │                           │  proximity · txlog                         │
    │                           ▼                                            │
@@ -32,16 +32,16 @@ injects at construction time.
 
 ## The ports
 
-| Port | Responsibility | Typical adapter |
-|---|---|---|
-| `SecureArea` | Create keys, sign, hold public keys | Android Keystore / iOS Secure Enclave (software for tests) |
-| `StorageDriver` | Persist bytes by collection/key | Encrypted file / DataStore / Keychain |
-| `HttpTransport` | Execute HTTP with redirect control | OkHttp / URLSession |
-| `Rng` | Random bytes | `SecureRandom` (a default is provided) |
-| `WalletClock` | Current time | System clock (a default is provided) |
-| `ProximityTransport` | BLE/NFC duplex channel | GATT peripheral (in-person only) |
-| `TransactionLogStore` | Append-only audit persistence | Encrypted store (in-memory default) |
-| `WalletAttestationProvider` | Wallet Provider link (WUA) | Backend client |
+| Port                        | Responsibility                      | Typical adapter                                            |
+| --------------------------- | ----------------------------------- | ---------------------------------------------------------- |
+| `SecureArea`                | Create keys, sign, hold public keys | Android Keystore / iOS Secure Enclave (software for tests) |
+| `StorageDriver`             | Persist bytes by collection/key     | Encrypted file / DataStore / Keychain                      |
+| `HttpTransport`             | Execute HTTP with redirect control  | OkHttp / URLSession                                        |
+| `Rng`                       | Random bytes                        | `SecureRandom` (a default is provided)                     |
+| `WalletClock`               | Current time                        | System clock (a default is provided)                       |
+| `ProximityTransport`        | BLE/NFC duplex channel              | GATT peripheral (in-person only)                           |
+| `TransactionLogStore`       | Append-only audit persistence       | Encrypted store (in-memory default)                        |
+| `WalletAttestationProvider` | Wallet Provider link (WUA)          | Backend client                                             |
 
 The SDK **owns** credential, key, issuance, and presentation lifecycle. The host only supplies the
 thin capabilities above — there is no DI framework, just constructor injection.

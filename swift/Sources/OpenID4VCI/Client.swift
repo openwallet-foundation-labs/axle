@@ -76,10 +76,13 @@ public struct Openid4VciClient {
     private let clientAuth: WalletClientAuth?
     /// Optional Key Attestation for the proof key(s), added to each key-proof header (HAIP).
     private let keyAttestation: (any KeyAttestationSource)?
+    /// How to treat the issuer's `signed_metadata` (OpenID4VCI §11.2.3). Default: ignore.
+    private let metadataPolicy: IssuerMetadataPolicy
 
     public init(http: any HttpTransport, rng: any Rng, clock: @escaping () -> Int64,
                 clientId: String = "wallet-dev", clientAuth: WalletClientAuth? = nil,
-                keyAttestation: (any KeyAttestationSource)? = nil) {
+                keyAttestation: (any KeyAttestationSource)? = nil,
+                metadataPolicy: IssuerMetadataPolicy = .ignoreSigned) {
         self.http = http
         self.rng = rng
         self.clock = clock
@@ -87,6 +90,7 @@ public struct Openid4VciClient {
         self.clientId = clientAuth?.clientId ?? clientId
         self.clientAuth = clientAuth
         self.keyAttestation = keyAttestation
+        self.metadataPolicy = metadataPolicy
     }
 
     /// Client-attestation headers bound to the authorization server (empty when not configured).
@@ -126,7 +130,24 @@ public struct Openid4VciClient {
     }
 
     public func loadIssuerMetadata(_ credentialIssuer: String) async throws -> CredentialIssuerMetadata {
-        try await CredentialIssuerMetadata.fromObj(getJson(wellKnown(credentialIssuer, "openid-credential-issuer")))
+        let body = try await getJson(wellKnown(credentialIssuer, "openid-credential-issuer"))
+        return try CredentialIssuerMetadata.fromObj(try await applyMetadataPolicy(body))
+    }
+
+    /// Applies `metadataPolicy`: verifies `signed_metadata` and overlays its claims when configured.
+    private func applyMetadataPolicy(_ body: JsonValue) async throws -> JsonValue {
+        var signed: String?
+        if case let .str(s)? = body["signed_metadata"] { signed = s }
+        switch metadataPolicy {
+        case .ignoreSigned:
+            return body
+        case let .preferSigned(verifier):
+            guard let signed else { return body }
+            return mergeSignedMetadata(plain: body, verified: try await verifier.verify(signedMetadataJws: signed))
+        case let .requireSigned(verifier):
+            guard let signed else { throw VciError.metadata("policy requires signed_metadata but the issuer metadata is unsigned") }
+            return mergeSignedMetadata(plain: body, verified: try await verifier.verify(signedMetadataJws: signed))
+        }
     }
 
     public func loadAuthorizationServerMetadata(_ issuer: String) async throws -> AuthorizationServerMetadata {
@@ -323,7 +344,23 @@ public struct Openid4VciClient {
             issuerMeta.credentialEndpoint, json: requestBody, dpop: dpop, accessToken: token.accessToken
         )
         return CredentialResponse.fromObj(try parseObj(credResp, "credential response"), requestedFormat: requestFormat)
-            .withContext(accessToken: token.accessToken, credentialIssuer: issuerMeta.credentialIssuer, requestedFormat: requestFormat)
+            .withContext(accessToken: token.accessToken, credentialIssuer: issuerMeta.credentialIssuer, requestedFormat: requestFormat,
+                         refreshToken: token.refreshToken, configurationId: configurationId)
+    }
+
+    /// Reissues (renews) a credential using the refresh token from a prior issuance (OAuth 2.0
+    /// refresh_token grant, RFC 6749 §6) — no browser re-authorization. Requires `canReissue`.
+    public func reissue(_ previous: CredentialResponse, keys: IssuanceKeys) async throws -> CredentialResponse {
+        guard let refreshToken = previous.refreshToken else { throw VciError.protocolError("no refresh_token to reissue") }
+        guard let configurationId = previous.configurationId else { throw VciError.protocolError("no configuration_id to reissue") }
+        let issuerMeta = try await loadIssuerMetadata(previous.credentialIssuer!)
+        let asMeta = try await loadAuthorizationServerMetadata(issuerMeta.authorizationServers[0])
+
+        let dpop = DpopProver(signer: keys.dpopSigner, publicKey: keys.dpopPublicKey, rng: rng, now: clock)
+        let form = "grant_type=\(enc("refresh_token"))&refresh_token=\(enc(refreshToken))&client_id=\(enc(clientId))"
+        let tokenResp = try await postFormWithDpop(asMeta.tokenEndpoint, form: form, dpop: dpop, accessToken: nil, extraHeaders: try await clientAuthHeaders(asMeta))
+        let token = try TokenResponse.fromObj(try parseObj(tokenResp, "refresh token response"))
+        return try await requestCredential(issuerMeta, configurationId, token, dpop, keys)
     }
 
     /// Polls the deferred credential endpoint (OpenID4VCI §9). Pass a `CredentialResponse` whose

@@ -110,6 +110,8 @@ actor MockIssuer: HttpTransport {
             let verifier = form["code_verifier"] ?? ""
             let computed = Base64Url.encode(sha256([UInt8](verifier.utf8)))
             precondition(computed == authCodeChallenge, "PKCE verification failed")
+        case "refresh_token":
+            precondition(form["refresh_token"] == issuedRefreshToken, "wrong refresh_token")
         default:
             preconditionFailure("unsupported grant_type \(form["grant_type"] ?? "nil")")
         }
@@ -123,8 +125,15 @@ actor MockIssuer: HttpTransport {
         seenDpopNonceRetry = true
         accessToken = "ACCESS-token-123"
         cNonce = "c-nonce-xyz"
-        return ok(#"{"access_token":"\#(accessToken!)","token_type":"DPoP","expires_in":3600}"#)
+        issuedRefreshToken = "REFRESH-token-5678"
+        return ok(#"{"access_token":"\#(accessToken!)","token_type":"DPoP","expires_in":3600,"refresh_token":"\#(issuedRefreshToken!)","c_nonce":"\#(cNonce!)"}"#)
     }
+
+    private var issuedRefreshToken: String?
+
+    /// When set, the issuer metadata carries this `signed_metadata` JWT.
+    func setSignedMetadata(_ jws: String) { signedMetadata = jws }
+    private var signedMetadata: String?
 
     private func handleNonce() -> HttpResponse {
         ok(#"{"c_nonce":"\#(cNonce ?? "c-nonce-xyz")"}"#)
@@ -248,9 +257,10 @@ actor MockIssuer: HttpTransport {
     }
 
     private func issuerMetadata() -> String {
-        """
+        let signed = signedMetadata.map { #""signed_metadata":"\#($0)","# } ?? ""
+        return """
         {"credential_issuer":"\(issuer)",
-         "credential_endpoint":"\(issuer)/credential",
+         \(signed)"credential_endpoint":"\(issuer)/credential",
          "nonce_endpoint":"\(issuer)/nonce",
          "deferred_credential_endpoint":"\(issuer)/deferred_credential",
          "notification_endpoint":"\(issuer)/notification",

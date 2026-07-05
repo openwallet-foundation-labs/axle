@@ -160,17 +160,22 @@ public struct TokenResponse {
     public let tokenType: String
     public let cNonce: String?
     public let expiresIn: Int64?
+    /// OAuth 2.0 refresh token (RFC 6749 §5.1) — enables reissuance without re-authorization.
+    public let refreshToken: String?
 
     public static func fromObj(_ o: JsonValue) throws -> TokenResponse {
         var cNonce: String?
         if case let .str(n)? = o["c_nonce"] { cNonce = n }
         var expiresIn: Int64?
         if case let .numInt(e)? = o["expires_in"] { expiresIn = e }
+        var refreshToken: String?
+        if case let .str(r)? = o["refresh_token"] { refreshToken = r }
         return TokenResponse(
             accessToken: try o.requireString("access_token", "token response"),
             tokenType: try o.requireString("token_type", "token response"),
             cNonce: cNonce,
-            expiresIn: expiresIn
+            expiresIn: expiresIn,
+            refreshToken: refreshToken
         )
     }
 }
@@ -184,27 +189,38 @@ public struct CredentialResponse {
     public let credentials: [IssuedCredential]
     public let transactionId: String?
     public let notificationId: String?
-    /// Context for follow-ups (deferred poll, notification) — set by the client, not parsed.
+    /// Context for follow-ups (deferred poll, notification, reissuance) — set by the client, not parsed.
     public let accessToken: String?
     public let credentialIssuer: String?
     public let requestedFormat: String
+    /// Refresh token + config id — persist these to reissue (renew) the credential later.
+    public let refreshToken: String?
+    public let configurationId: String?
 
     public init(credentials: [IssuedCredential], transactionId: String?, notificationId: String?,
-                accessToken: String? = nil, credentialIssuer: String? = nil, requestedFormat: String = "dc+sd-jwt") {
+                accessToken: String? = nil, credentialIssuer: String? = nil, requestedFormat: String = "dc+sd-jwt",
+                refreshToken: String? = nil, configurationId: String? = nil) {
         self.credentials = credentials
         self.transactionId = transactionId
         self.notificationId = notificationId
         self.accessToken = accessToken
         self.credentialIssuer = credentialIssuer
         self.requestedFormat = requestedFormat
+        self.refreshToken = refreshToken
+        self.configurationId = configurationId
     }
 
     /// True when the issuer deferred issuance (returned a transaction_id, no credential yet).
     public var isDeferred: Bool { credentials.isEmpty && transactionId != nil }
 
-    func withContext(accessToken: String?, credentialIssuer: String?, requestedFormat: String) -> CredentialResponse {
+    /// True when the issuer granted a refresh token, so `reissue` can renew the credential later.
+    public var canReissue: Bool { refreshToken != nil && credentialIssuer != nil && configurationId != nil }
+
+    func withContext(accessToken: String?, credentialIssuer: String?, requestedFormat: String,
+                     refreshToken: String? = nil, configurationId: String? = nil) -> CredentialResponse {
         CredentialResponse(credentials: credentials, transactionId: transactionId, notificationId: notificationId,
-                           accessToken: accessToken, credentialIssuer: credentialIssuer, requestedFormat: requestedFormat)
+                           accessToken: accessToken, credentialIssuer: credentialIssuer, requestedFormat: requestedFormat,
+                           refreshToken: refreshToken, configurationId: configurationId)
     }
 
     public static func fromObj(_ o: JsonValue, requestedFormat: String) -> CredentialResponse {

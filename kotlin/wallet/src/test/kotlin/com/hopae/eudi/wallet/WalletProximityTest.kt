@@ -22,15 +22,14 @@ import com.hopae.eudi.wallet.spi.HttpTransport
 import com.hopae.eudi.wallet.spi.KeySpec
 import com.hopae.eudi.wallet.spi.ProximityTransport
 import com.hopae.eudi.wallet.spi.SigningAlgorithm
-import com.hopae.eudi.wallet.spi.TransactionLog
-import com.hopae.eudi.wallet.spi.TransactionLogEntry
-import com.hopae.eudi.wallet.spi.TransactionStatus
 import com.hopae.eudi.wallet.store.CredentialEnvelope
 import com.hopae.eudi.wallet.store.CredentialInstance
 import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.EnvelopeLifecycle
 import com.hopae.eudi.wallet.testkit.InMemoryStorageDriver
 import com.hopae.eudi.wallet.testkit.SoftwareSecureArea
+import com.hopae.eudi.wallet.txlog.InMemoryTransactionLogStore
+import com.hopae.eudi.wallet.txlog.TransactionStatus
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -46,12 +45,6 @@ class WalletProximityTest {
     private val now: Instant = Instant.parse("2026-06-01T00:00:00Z")
     private val noHttp = object : HttpTransport {
         override suspend fun execute(request: HttpRequest): HttpResponse = HttpResponse(404, emptyList(), ByteArray(0))
-    }
-
-    private class RecordingLog : TransactionLog {
-        val entries = mutableListOf<TransactionLogEntry>()
-        override suspend fun record(entry: TransactionLogEntry) { entries.add(entry) }
-        override suspend fun list(): List<TransactionLogEntry> = entries.toList()
     }
 
     /** In-memory duplex channel: the wallet drives [deviceSide]; the test plays the reader. */
@@ -91,8 +84,8 @@ class WalletProximityTest {
             ),
         )
 
-        val log = RecordingLog()
-        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, noHttp, transactionLog = log))
+        val logStore = InMemoryTransactionLogStore()
+        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, noHttp, transactionLogStore = logStore))
         val transport = TransportPair()
         val session = wallet.proximity.present(transport.deviceSide)
 
@@ -133,6 +126,6 @@ class WalletProximityTest {
 
         val terminal = withTimeout(15_000) { session.state.first { it.isTerminal } }
         assertTrue(terminal is ProximityState.Completed, "terminal: $terminal")
-        assertEquals(TransactionStatus.Success, log.entries.single().status)
+        assertEquals(TransactionStatus.SUCCESS, logStore.all().single().status)
     }
 }

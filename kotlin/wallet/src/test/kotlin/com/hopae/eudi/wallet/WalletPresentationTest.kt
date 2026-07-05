@@ -15,16 +15,15 @@ import com.hopae.eudi.wallet.spi.KeySpec
 import com.hopae.eudi.wallet.spi.SecureArea
 import com.hopae.eudi.wallet.spi.SigningAlgorithm
 import com.hopae.eudi.wallet.spi.StorageDriver
-import com.hopae.eudi.wallet.spi.TransactionLog
-import com.hopae.eudi.wallet.spi.TransactionLogEntry
-import com.hopae.eudi.wallet.spi.TransactionStatus
-import com.hopae.eudi.wallet.spi.TransactionType
 import com.hopae.eudi.wallet.store.CredentialEnvelope
 import com.hopae.eudi.wallet.store.CredentialInstance
 import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.EnvelopeLifecycle
 import com.hopae.eudi.wallet.testkit.InMemoryStorageDriver
 import com.hopae.eudi.wallet.testkit.SoftwareSecureArea
+import com.hopae.eudi.wallet.txlog.InMemoryTransactionLogStore
+import com.hopae.eudi.wallet.txlog.TransactionStatus
+import com.hopae.eudi.wallet.txlog.TransactionType
 import com.hopae.eudi.wallet.vp.MockDcApiVerifier
 import com.hopae.eudi.wallet.vp.MockMdocVerifier
 import com.hopae.eudi.wallet.vp.MockVerifier
@@ -41,12 +40,6 @@ import kotlin.test.assertTrue
 class WalletPresentationTest {
 
     private val now: Instant = Instant.parse("2026-06-01T00:00:00Z")
-
-    private class RecordingLog : TransactionLog {
-        val entries = mutableListOf<TransactionLogEntry>()
-        override suspend fun record(entry: TransactionLogEntry) { entries.add(entry) }
-        override suspend fun list(): List<TransactionLogEntry> = entries.toList()
-    }
 
     /** Seeds a holder-bound PID SD-JWT VC and returns the issuer public key (for the verifier). */
     private suspend fun seedPid(area: SecureArea, storage: StorageDriver) = run {
@@ -78,8 +71,8 @@ class WalletPresentationTest {
         val storage = InMemoryStorageDriver()
         val issuerPublic = seedPid(area, storage)
         val verifier = MockVerifier(issuerPublic)
-        val log = RecordingLog()
-        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, verifier, transactionLog = log))
+        val logStore = InMemoryTransactionLogStore()
+        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, verifier, transactionLogStore = logStore))
 
         val session = wallet.presentation.start(verifier.requestUri("direct_post"))
         val resolved = withTimeout(15_000) { session.state.first { it is PresentationState.RequestResolved || it is PresentationState.Failed } }
@@ -101,13 +94,14 @@ class WalletPresentationTest {
         assertNull(claims["birthdate"], "unrequested claim must not be disclosed")
 
         // audit recorded
-        val entry = log.entries.single()
-        assertEquals(TransactionType.Presentation, entry.type)
-        assertEquals(TransactionStatus.Success, entry.status)
-        assertEquals("verifier.example", entry.relyingParty?.identifier)
+        val entry = logStore.all().single()
+        assertEquals(TransactionType.PRESENTATION, entry.type)
+        assertEquals(TransactionStatus.SUCCESS, entry.status)
+        assertEquals("verifier.example", entry.relyingParty?.id)
         assertEquals(false, entry.relyingParty?.trusted) // unsigned request → not cryptographically trusted
-        assertTrue(entry.credentialIds.contains("pid-1"))
-        assertTrue(entry.claimsDisclosed.containsAll(listOf("family_name", "given_name")))
+        assertTrue(entry.documents.any { it.type == "urn:eudi:pid:1" && it.format == "dc+sd-jwt" })
+        val loggedPaths = entry.documents.flatMap { it.claims.map { c -> c.path } }
+        assertTrue(loggedPaths.containsAll(listOf(listOf("family_name"), listOf("given_name"))))
         wallet.close()
     }
 
@@ -117,8 +111,8 @@ class WalletPresentationTest {
         val storage = InMemoryStorageDriver()
         val issuerPublic = seedPid(area, storage)
         val verifier = MockVerifier(issuerPublic)
-        val log = RecordingLog()
-        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, verifier, transactionLog = log))
+        val logStore = InMemoryTransactionLogStore()
+        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, verifier, transactionLogStore = logStore))
 
         val session = wallet.presentation.start(verifier.requestUri("direct_post"))
         withTimeout(15_000) { session.state.first { it is PresentationState.RequestResolved } }
@@ -127,7 +121,7 @@ class WalletPresentationTest {
         assertTrue(terminal is PresentationState.Declined, "terminal: $terminal")
 
         assertNull(verifier.verifiedClaims, "nothing presented on decline")
-        assertEquals(TransactionStatus.Declined, log.entries.single().status)
+        assertEquals(TransactionStatus.INCOMPLETE, logStore.all().single().status)
         wallet.close()
     }
 
@@ -152,8 +146,8 @@ class WalletPresentationTest {
         )
 
         val verifier = MockMdocVerifier()
-        val log = RecordingLog()
-        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, verifier, transactionLog = log))
+        val logStore = InMemoryTransactionLogStore()
+        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, verifier, transactionLogStore = logStore))
 
         val session = wallet.presentation.start(verifier.requestUri())
         val resolved = withTimeout(15_000) { session.state.first { it is PresentationState.RequestResolved || it is PresentationState.Failed } }
@@ -166,9 +160,9 @@ class WalletPresentationTest {
 
         // verifier verified the device signature and got only the requested elements (age_over_18 withheld)
         assertEquals(setOf("family_name", "given_name"), verifier.disclosedElements)
-        val entry = log.entries.single()
-        assertEquals(TransactionStatus.Success, entry.status)
-        assertTrue(entry.credentialIds.contains("mdl-1"))
+        val entry = logStore.all().single()
+        assertEquals(TransactionStatus.SUCCESS, entry.status)
+        assertTrue(entry.documents.any { it.type == "org.iso.18013.5.1.mDL" })
         wallet.close()
     }
 
@@ -193,12 +187,12 @@ class WalletPresentationTest {
         )
 
         val verifier = MockDcApiVerifier()
-        val log = RecordingLog()
+        val logStore = InMemoryTransactionLogStore()
         // DC API must not perform any HTTP — the request/response are handed over by the platform.
         val noHttp = object : HttpTransport {
             override suspend fun execute(request: HttpRequest): HttpResponse = throw AssertionError("DC API must not do HTTP")
         }
-        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, noHttp, transactionLog = log))
+        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, noHttp, transactionLogStore = logStore))
 
         val session = wallet.presentation.startDcApi(verifier.requestObject(), verifier.origin)
         val resolved = withTimeout(15_000) { session.state.first { it is PresentationState.RequestResolved || it is PresentationState.Failed } }
@@ -212,7 +206,7 @@ class WalletPresentationTest {
 
         // response is origin-bound and selectively disclosed
         assertEquals(setOf("family_name", "given_name"), verifier.verify(dcResponse))
-        assertEquals(TransactionStatus.Success, log.entries.single().status)
+        assertEquals(TransactionStatus.SUCCESS, logStore.all().single().status)
         wallet.close()
     }
 }

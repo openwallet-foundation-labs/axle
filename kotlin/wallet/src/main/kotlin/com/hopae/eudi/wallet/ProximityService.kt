@@ -10,22 +10,19 @@ import com.hopae.eudi.wallet.proximity.ProximityException
 import com.hopae.eudi.wallet.proximity.ProximitySessionTranscript
 import com.hopae.eudi.wallet.proximity.SessionEncryption
 import com.hopae.eudi.wallet.proximity.SessionMessages
-import com.hopae.eudi.wallet.sdjwt.Base64Url
 import com.hopae.eudi.wallet.spi.CredentialFormat
 import com.hopae.eudi.wallet.spi.CredentialId
 import com.hopae.eudi.wallet.spi.ProximityTransport
-import com.hopae.eudi.wallet.spi.RelyingPartyInfo
-import com.hopae.eudi.wallet.spi.Rng
 import com.hopae.eudi.wallet.spi.SecureArea
 import com.hopae.eudi.wallet.spi.SecureAreaCoseSigner
 import com.hopae.eudi.wallet.spi.SigningAlgorithm
-import com.hopae.eudi.wallet.spi.TransactionLog
-import com.hopae.eudi.wallet.spi.TransactionLogEntry
-import com.hopae.eudi.wallet.spi.TransactionStatus
-import com.hopae.eudi.wallet.spi.TransactionType
-import com.hopae.eudi.wallet.spi.WalletClock
 import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.EnvelopeLifecycle
+import com.hopae.eudi.wallet.txlog.LoggedClaim
+import com.hopae.eudi.wallet.txlog.LoggedDocument
+import com.hopae.eudi.wallet.txlog.RelyingParty
+import com.hopae.eudi.wallet.txlog.TransactionLog
+import com.hopae.eudi.wallet.txlog.TransactionStatus
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -37,8 +34,6 @@ class ProximityService internal constructor(
     private val txlog: TransactionLog,
     private val secureAreas: List<SecureArea>,
     private val scope: CoroutineScope,
-    private val clock: WalletClock,
-    private val rng: Rng,
 ) {
     /** Starts a proximity session over [transport]: engage → session → reader request → consent → reply. */
     fun present(transport: ProximityTransport): ProximitySession {
@@ -56,7 +51,7 @@ class ProximityService internal constructor(
             val request = buildRequest(deviceRequest, transcript, enc)
             when (val selection = awaitDecision(request)) {
                 null -> {
-                    recordDeclined(request)
+                    recordDeclined()
                     transport.close()
                     emit(ProximityState.Declined)
                 }
@@ -110,38 +105,21 @@ class ProximityService internal constructor(
     }
 
     private suspend fun recordSuccess(request: ProximityRequest, selection: ProximitySelection) {
-        val disclosed = request.documents
-            .filter { selection.chosen.containsKey(it.docType) }
-            .flatMap { doc -> doc.requestedElements.flatMap { (ns, els) -> els.map { "$ns.$it" } } }
-        txlog.record(
-            TransactionLogEntry(
-                id = newLogId(), type = TransactionType.Presentation, timestamp = clock.now(),
-                relyingParty = proximityReader(request),
-                credentialIds = selection.chosen.values.map { it.value }.distinct(),
-                claimsDisclosed = disclosed, status = TransactionStatus.Success,
-            ),
-        )
+        val documents = request.documents.filter { selection.chosen.containsKey(it.docType) }.map { doc ->
+            LoggedDocument(
+                format = "mso_mdoc", type = doc.docType, queryId = null,
+                claims = doc.requestedElements.flatMap { (ns, els) -> els.map { LoggedClaim(listOf(ns, it), null) } },
+            )
+        }
+        txlog.recordPresentation(proximityReader(), documents, TransactionStatus.SUCCESS)
     }
 
-    private suspend fun recordDeclined(request: ProximityRequest) {
-        txlog.record(
-            TransactionLogEntry(
-                id = newLogId(), type = TransactionType.Presentation, timestamp = clock.now(),
-                relyingParty = proximityReader(request), credentialIds = emptyList(),
-                claimsDisclosed = emptyList(), status = TransactionStatus.Declined,
-            ),
-        )
+    private suspend fun recordDeclined() {
+        txlog.recordPresentation(proximityReader(), documents = emptyList(), status = TransactionStatus.INCOMPLETE)
     }
 
     /** The in-person reader. Reader-auth verification against a reader anchor is a follow-up, so [trusted] is false. */
-    private fun proximityReader(request: ProximityRequest): RelyingPartyInfo = RelyingPartyInfo(
-        identifier = "proximity-reader",
-        name = null,
-        trusted = false,
-        scheme = if (request.deviceRequest.docRequests.any { it.readerAuth != null }) "reader-auth" else null,
-    )
-
-    private fun newLogId(): String = "txn-" + Base64Url.encode(rng.nextBytes(12))
+    private fun proximityReader(): RelyingParty = RelyingParty(id = "proximity-reader", name = null, trusted = false)
 
     private suspend fun <T> catchingProximity(block: suspend () -> T): T = try {
         block()

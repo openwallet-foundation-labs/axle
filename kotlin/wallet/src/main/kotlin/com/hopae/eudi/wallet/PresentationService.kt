@@ -6,21 +6,19 @@ import com.hopae.eudi.wallet.sdjwt.SdJwt
 import com.hopae.eudi.wallet.sdjwt.SecureAreaJwsSigner
 import com.hopae.eudi.wallet.spi.CredentialFormat
 import com.hopae.eudi.wallet.spi.CredentialId
-import com.hopae.eudi.wallet.spi.RelyingPartyInfo
-import com.hopae.eudi.wallet.spi.Rng
 import com.hopae.eudi.wallet.spi.SecureArea
 import com.hopae.eudi.wallet.spi.SecureAreaCoseSigner
 import com.hopae.eudi.wallet.spi.SigningAlgorithm
-import com.hopae.eudi.wallet.spi.TransactionLog
-import com.hopae.eudi.wallet.spi.TransactionLogEntry
-import com.hopae.eudi.wallet.spi.TransactionStatus
-import com.hopae.eudi.wallet.spi.TransactionType
-import com.hopae.eudi.wallet.spi.WalletClock
 import com.hopae.eudi.wallet.store.CredentialEnvelope
 import com.hopae.eudi.wallet.store.CredentialInstance
 import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.EnvelopeLifecycle
 import com.hopae.eudi.wallet.trust.TrustException
+import com.hopae.eudi.wallet.txlog.LoggedClaim
+import com.hopae.eudi.wallet.txlog.LoggedDocument
+import com.hopae.eudi.wallet.txlog.RelyingParty
+import com.hopae.eudi.wallet.txlog.TransactionLog
+import com.hopae.eudi.wallet.txlog.TransactionStatus
 import com.hopae.eudi.wallet.vp.DcqlMatchResult
 import com.hopae.eudi.wallet.vp.HeldMdoc
 import com.hopae.eudi.wallet.vp.HeldSdJwtVc
@@ -38,8 +36,6 @@ class PresentationService internal constructor(
     private val txlog: TransactionLog,
     private val secureAreas: List<SecureArea>,
     private val scope: CoroutineScope,
-    private val clock: WalletClock,
-    private val rng: Rng,
 ) {
     /** Remote (URL/QR) presentation: resolve → match stored credentials → consent → direct_post submit. */
     fun start(requestUri: String): PresentationSession = runSession(
@@ -152,39 +148,31 @@ class PresentationService internal constructor(
         (lifecycle as? EnvelopeLifecycle.Issued)?.instances?.firstOrNull()
 
     private suspend fun recordSuccess(resolved: ResolvedRequest, selection: PresentationSelection, matches: DcqlMatchResult) {
-        val disclosed = selection.chosen.flatMap { (queryId, credentialId) ->
-            matches.candidatesByQuery[queryId].orEmpty()
-                .firstOrNull { it.credential.credentialId == credentialId.value }
-                ?.disclosedPaths?.map { it.joinToString(".") } ?: emptyList()
-        }
-        txlog.record(
-            TransactionLogEntry(
-                id = newLogId(), type = TransactionType.Presentation, timestamp = clock.now(),
-                relyingParty = relyingPartyOf(resolved),
-                credentialIds = selection.chosen.values.map { it.value }.distinct(),
-                claimsDisclosed = disclosed, status = TransactionStatus.Success,
-            ),
-        )
+        txlog.recordPresentation(relyingPartyOf(resolved), loggedDocuments(selection, matches), TransactionStatus.SUCCESS)
     }
 
     private suspend fun recordDeclined(resolved: ResolvedRequest) {
-        txlog.record(
-            TransactionLogEntry(
-                id = newLogId(), type = TransactionType.Presentation, timestamp = clock.now(),
-                relyingParty = relyingPartyOf(resolved), credentialIds = emptyList(),
-                claimsDisclosed = emptyList(), status = TransactionStatus.Declined,
-            ),
-        )
+        txlog.recordPresentation(relyingPartyOf(resolved), documents = emptyList(), status = TransactionStatus.INCOMPLETE)
     }
 
-    private fun relyingPartyOf(resolved: ResolvedRequest): RelyingPartyInfo = RelyingPartyInfo(
-        identifier = resolved.verifier.clientId,
+    private fun relyingPartyOf(resolved: ResolvedRequest): RelyingParty = RelyingParty(
+        id = resolved.verifier.clientId,
         name = resolved.verifier.commonName,
         trusted = resolved.verifier.trusted,
-        scheme = resolved.verifier.clientIdScheme,
+        certificateChainDer = resolved.verifier.certificateChainDer ?: emptyList(),
     )
 
-    private fun newLogId(): String = "txn-" + Base64Url.encode(rng.nextBytes(12))
+    private fun loggedDocuments(selection: PresentationSelection, matches: DcqlMatchResult): List<LoggedDocument> =
+        selection.chosen.mapNotNull { (queryId, credentialId) ->
+            val candidate = matches.candidatesByQuery[queryId].orEmpty()
+                .firstOrNull { it.credential.credentialId == credentialId.value } ?: return@mapNotNull null
+            LoggedDocument(
+                format = candidate.credential.format,
+                type = candidate.credential.vct ?: candidate.credential.docType,
+                queryId = queryId,
+                claims = candidate.disclosedPaths.map { LoggedClaim(it, null) },
+            )
+        }
 
     private suspend fun <T> catchingVp(block: suspend () -> T): T = try {
         block()

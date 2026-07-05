@@ -7,6 +7,8 @@ import com.hopae.eudi.wallet.trust.TrustAnchors
 import com.hopae.eudi.wallet.trust.X509ChainValidator
 import com.hopae.eudi.wallet.trust.X509RequestVerifier
 import com.hopae.eudi.wallet.trust.X5cIssuerKeyResolver
+import com.hopae.eudi.wallet.sdjwt.Base64Url
+import com.hopae.eudi.wallet.txlog.TransactionLog
 import com.hopae.eudi.wallet.vci.Openid4VciClient
 import com.hopae.eudi.wallet.vp.Openid4VpClient
 import kotlinx.coroutines.CoroutineScope
@@ -25,6 +27,8 @@ class Wallet private constructor(
     val issuance: IssuanceService,
     val presentation: PresentationService,
     val proximity: ProximityService,
+    /** Audit history of presentations/issuances (ARF/GDPR) — query with [TransactionLog.history]/[TransactionLog.query]. */
+    val transactions: TransactionLog,
     private val scope: CoroutineScope,
 ) : AutoCloseable {
 
@@ -60,14 +64,20 @@ class Wallet private constructor(
                 X509RequestVerifier(X509ChainValidator(TrustAnchorSource { TrustAnchors.ofDer(anchors) }, at = { java.util.Date.from(ports.clock.now()) }))
             }
             val vp = Openid4VpClient(ports.http, clockSeconds, vpTrust)
-            val presentation = PresentationService(vp, store, ports.transactionLog, ports.secureAreas, scope, ports.clock, ports.rng)
-            val proximity = ProximityService(store, ports.transactionLog, ports.secureAreas, scope, ports.clock, ports.rng)
+            val txlog = TransactionLog(
+                store = ports.transactionLogStore,
+                idGenerator = { "txn-" + Base64Url.encode(ports.rng.nextBytes(12)) },
+                clock = clockSeconds,
+            )
+            val presentation = PresentationService(vp, store, txlog, ports.secureAreas, scope)
+            val proximity = ProximityService(store, txlog, ports.secureAreas, scope)
 
             return Wallet(
                 credentials = CredentialsService(store, statusClient),
                 issuance = issuance,
                 presentation = presentation,
                 proximity = proximity,
+                transactions = txlog,
                 scope = scope,
             )
         }

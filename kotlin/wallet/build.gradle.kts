@@ -21,6 +21,7 @@ dependencies {
     implementation(project(":openid4vci"))
     implementation(project(":openid4vp"))
     implementation(project(":proximity"))
+    implementation(project(":txlog"))
 
     testImplementation(kotlin("test"))
     testImplementation(project(":testkit"))

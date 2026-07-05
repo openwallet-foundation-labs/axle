@@ -205,9 +205,21 @@ private fun isVpRequest(uri: String) =
 @Composable
 private fun CredentialsScreen(wallet: Wallet, refreshKey: Int) {
     var creds by remember { mutableStateOf<List<Credential>>(emptyList()) }
-    LaunchedEffect(refreshKey) { creds = wallet.credentials.list() }
+    val scope = rememberCoroutineScope()
+    suspend fun reload() {
+        runCatching { wallet.credentials.list() }
+            .onSuccess { creds = it; LogStore.log("Credentials list → ${it.size}") }
+            .onFailure { LogStore.log("❌ credentials.list: ${it.javaClass.simpleName}: ${it.message}") }
+    }
+    LaunchedEffect(refreshKey) {
+        reload()
+        runCatching { wallet.credentials.changes.collect { reload() } }  // live-update on add/remove
+    }
     Column(Modifier.padding(16.dp)) {
-        Text("Credentials (${creds.size})", style = MaterialTheme.typography.titleLarge)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Credentials (${creds.size})", style = MaterialTheme.typography.titleLarge)
+            TextButton(onClick = { scope.launch { reload() } }) { Text("Refresh") }
+        }
         Spacer(Modifier.height(8.dp))
         if (creds.isEmpty()) Text("No credentials yet — tap Scan QR to issue one.", style = MaterialTheme.typography.bodyMedium)
         LazyColumn { items(creds) { CredentialCard(it) } }

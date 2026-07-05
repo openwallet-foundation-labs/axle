@@ -359,6 +359,10 @@ private fun CredentialDetailDialog(c: Credential, onCopy: () -> Unit, onDelete: 
                     if (lc.claims.isNotEmpty()) {
                         Spacer(Modifier.height(12.dp))
                         Text("CLAIMS", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        if (c.format is CredentialFormat.MsoMdoc) {
+                            val ns = lc.claims.mapNotNull { it.path.firstOrNull() }.distinct().joinToString(", ")
+                            if (ns.isNotEmpty()) Text(ns, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         Spacer(Modifier.height(4.dp))
                         lc.claims.forEach { DetailRow(claimLabel(c, it.path), it.value.display()) }
                     }

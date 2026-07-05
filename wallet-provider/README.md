@@ -15,6 +15,8 @@ SDK의 `WalletAttestationProvider` 포트가 이 백엔드에 붙어 HAIP attest
 | POST | `/wallet-instances` | 등록: `{instanceKey(JWK), integrityToken, nonce}` → 무결성 검증 → `{instanceId}` |
 | POST | `/wallet-attestation` | WUA 발급: `{instanceId, clientId?, pop}` → `{wallet_attestation}`. `pop`=인스턴스 키로 서명한 JWT(`aud`=WP, `nonce`) |
 | POST | `/key-attestation` | `{attestedKeys(JWK[]), nonce?}` → `{key_attestation}`. `nonce`=이슈어 c_nonce |
+| POST | `/wallet-instances/:id/revoke` | 인스턴스 revoke (이후 WUA 발급 거부) |
+| GET | `/wallet-instances/:id/status` | 인스턴스 상태 `{revoked, createdAt, revokedAt}` — 이슈어의 revocation 체크 |
 | GET | `/.well-known/jwks.json` | WP 서명 공개키 |
 | GET | `/.well-known/wallet-provider-ca.pem` | WP CA 인증서(PEM) — 릴라잉 wallet/issuer가 trust anchor로 설치 |
 
@@ -34,7 +36,11 @@ npm run build && PORT=3200 node dist/main.js   # 또는 npm run start:dev
 node test/wp-flow.mjs                            # 전체 플로우 e2e (서버 실행 중일 때)
 ```
 
+## 영속 (Drizzle + SQLite)
+
+인스턴스 레지스트리는 **Drizzle ORM + better-sqlite3**(`src/db/`). dev는 기동 시 `CREATE TABLE IF NOT EXISTS`, 프로덕션은 `drizzle.config.ts` + drizzle-kit 마이그레이션(드라이버만 Postgres로 교체). DB 파일 경로는 `DB_PATH`(기본 `wallet-provider.db`).
+
 ## 상태
 
-- v0: nonce·등록·WUA(PoP 게이트)·key attestation·jwks·CA pem 완료. 인메모리 인스턴스 레지스트리.
-- 잔여: 프로덕션 무결성 어댑터, DB 영속(Postgres), WUA revocation, SDK `WalletAttestationProvider` 참조 어댑터 + 우리 trust로 WUA 검증 e2e.
+- v0 완료: nonce·등록·WUA(PoP 게이트)·key attestation·**revocation**·jwks·CA pem, **SQLite 영속**. e2e(`test/wp-flow.mjs`) 통과.
+- 잔여: 프로덕션 무결성 어댑터(Play Integrity/App Attest), Postgres 스왑, SDK `WalletAttestationProvider` 참조 어댑터 + 우리 trust로 WUA 검증 e2e(루프 닫기).

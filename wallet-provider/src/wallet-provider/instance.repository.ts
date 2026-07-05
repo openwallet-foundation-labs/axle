@@ -1,6 +1,9 @@
-import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { Inject, Injectable } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import type { JWK } from 'jose';
+import { randomUUID } from 'node:crypto';
+import { DRIZZLE, type DrizzleDb } from '../db/drizzle.module';
+import { walletInstances, type WalletInstanceRow } from '../db/schema';
 
 export interface WalletInstance {
   instanceId: string;
@@ -8,36 +11,50 @@ export interface WalletInstance {
   platform: string;
   createdAt: number;
   revoked: boolean;
+  revokedAt: number | null;
 }
 
-/**
- * Registry of wallet instances. In-memory for dev; the interface is the DB seam
- * (swap for Postgres/Prisma without touching callers).
- */
+/** Registry of wallet instances, persisted in SQLite via Drizzle. */
 @Injectable()
 export class InstanceRepository {
-  private readonly byId = new Map<string, WalletInstance>();
+  constructor(@Inject(DRIZZLE) private readonly db: DrizzleDb) {}
 
-  create(publicJwk: JWK, platform: string): WalletInstance {
-    const instance: WalletInstance = {
+  async create(publicJwk: JWK, platform: string): Promise<WalletInstance> {
+    const row = {
       instanceId: randomUUID(),
-      publicJwk,
+      publicJwk: JSON.stringify(publicJwk),
       platform,
       createdAt: Date.now(),
       revoked: false,
+      revokedAt: null,
     };
-    this.byId.set(instance.instanceId, instance);
-    return instance;
+    await this.db.insert(walletInstances).values(row);
+    return this.toModel(row as WalletInstanceRow);
   }
 
-  get(instanceId: string): WalletInstance | undefined {
-    return this.byId.get(instanceId);
+  async get(instanceId: string): Promise<WalletInstance | null> {
+    const rows = await this.db.select().from(walletInstances).where(eq(walletInstances.instanceId, instanceId));
+    return rows[0] ? this.toModel(rows[0]) : null;
   }
 
-  revoke(instanceId: string): boolean {
-    const instance = this.byId.get(instanceId);
-    if (!instance) return false;
-    instance.revoked = true;
+  /** Soft-revoke: the instance can no longer obtain a WUA. Idempotent; false if unknown. */
+  async revoke(instanceId: string): Promise<boolean> {
+    if (!(await this.get(instanceId))) return false;
+    await this.db
+      .update(walletInstances)
+      .set({ revoked: true, revokedAt: Date.now() })
+      .where(eq(walletInstances.instanceId, instanceId));
     return true;
+  }
+
+  private toModel(row: WalletInstanceRow): WalletInstance {
+    return {
+      instanceId: row.instanceId,
+      publicJwk: JSON.parse(row.publicJwk) as JWK,
+      platform: row.platform,
+      createdAt: Number(row.createdAt),
+      revoked: Boolean(row.revoked),
+      revokedAt: row.revokedAt == null ? null : Number(row.revokedAt),
+    };
   }
 }

@@ -1,4 +1,14 @@
-import { BadRequestException, Body, Controller, Get, Header, Post, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Header,
+  NotFoundException,
+  Param,
+  Post,
+  UnauthorizedException,
+} from '@nestjs/common';
 import * as jose from 'jose';
 import { AttestationService } from './attestation.service';
 import { KeyAttestationDto, RegisterInstanceDto, WalletAttestationDto } from './dto';
@@ -29,14 +39,29 @@ export class WalletProviderController {
     if (!this.nonce.consume(dto.nonce)) throw new BadRequestException('invalid or expired nonce');
     const integrity = await this.integrity.verify(dto.integrityToken, dto.nonce);
     if (!integrity.trusted) throw new UnauthorizedException(`device integrity failed: ${integrity.reason}`);
-    const instance = this.instances.create(dto.instanceKey, integrity.platform);
+    const instance = await this.instances.create(dto.instanceKey, integrity.platform);
     return { instanceId: instance.instanceId };
+  }
+
+  /** Revoke a wallet instance — it can no longer obtain a WUA (soft revocation). */
+  @Post('wallet-instances/:id/revoke')
+  async revoke(@Param('id') id: string): Promise<{ revoked: boolean }> {
+    if (!(await this.instances.revoke(id))) throw new NotFoundException('unknown instance');
+    return { revoked: true };
+  }
+
+  /** Instance status — issuers/relying parties check whether a WUA's instance is still valid. */
+  @Get('wallet-instances/:id/status')
+  async status(@Param('id') id: string): Promise<{ instanceId: string; revoked: boolean; createdAt: number; revokedAt: number | null }> {
+    const instance = await this.instances.get(id);
+    if (!instance) throw new NotFoundException('unknown instance');
+    return { instanceId: instance.instanceId, revoked: instance.revoked, createdAt: instance.createdAt, revokedAt: instance.revokedAt };
   }
 
   /** Issue a Wallet Unit Attestation, gated on a PoP proving possession of the instance key. */
   @Post('wallet-attestation')
   async walletAttestation(@Body() dto: WalletAttestationDto): Promise<{ wallet_attestation: string }> {
-    const instance = this.instances.get(dto.instanceId);
+    const instance = await this.instances.get(dto.instanceId);
     if (!instance || instance.revoked) throw new UnauthorizedException('unknown or revoked instance');
 
     let pop: jose.JWTPayload;

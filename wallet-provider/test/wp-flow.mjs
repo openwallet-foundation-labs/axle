@@ -54,6 +54,19 @@ async function main() {
   assert(ka.nonce === 'c-nonce-xyz' && Array.isArray(ka.attested_keys), 'key attestation binds keys + nonce');
   console.log('key attestation verified: attested_keys=%d nonce=%s', ka.attested_keys.length, ka.nonce);
 
-  console.log('\n✅ ALL WALLET PROVIDER FLOWS PASSED');
+  // 8) revoke -> status reflects it -> further WUA issuance rejected
+  const rev = await post(`/wallet-instances/${reg.instanceId}/revoke`, {});
+  assert(rev.status < 300, 'revoke accepted');
+  const st = await (await fetch(`${BASE}/wallet-instances/${reg.instanceId}/status`)).json();
+  assert(st.revoked === true && st.revokedAt, 'status shows revoked');
+  const { nonce: n3 } = await (await fetch(`${BASE}/nonce`)).json();
+  const pop2 = await new jose.SignJWT({ nonce: n3 })
+    .setProtectedHeader({ typ: 'oauth-client-attestation-pop+jwt', alg: 'ES256' })
+    .setAudience(ISS).setIssuedAt().sign(privateKey);
+  const afterRevoke = await post('/wallet-attestation', { instanceId: reg.instanceId, pop: pop2 });
+  assert(afterRevoke.status === 401, 'revoked instance cannot obtain a WUA');
+  console.log('revocation: status.revoked=%s, post-revoke WUA rejected=%d', st.revoked, afterRevoke.status);
+
+  console.log('\n✅ ALL WALLET PROVIDER FLOWS PASSED (persisted + revocation)');
 }
 main().catch((e) => { console.error('❌', e.message); process.exit(1); });

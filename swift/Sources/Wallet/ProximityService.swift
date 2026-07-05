@@ -74,6 +74,49 @@ public struct ProximityService {
     }
 
     /// Verifies reader authentication (ISO 18013-5 §9.1.4) against the configured reader anchors.
+    /// ISO/IEC 18013-7:2025 Annex C `org-iso-mdoc` Digital Credentials API: builds the mdoc DeviceResponse for
+    /// `deviceRequestBase64`, HPKE-encrypts it to the verifier's `recipientPublicKey` (from `encryptionInfoBase64`),
+    /// and returns the base64url of `["dcapi", {enc, cipherText}]`. No transport — the platform mediates.
+    public func respondDcApiMdoc(deviceRequestBase64: String, encryptionInfoBase64: String, origin: String) async throws -> String {
+        let deviceRequest = try DeviceRequest.decode(try Base64Url.decode(deviceRequestBase64))
+        guard case let .array(encInfo) = try CborDecoder.decode(try Base64Url.decode(encryptionInfoBase64)),
+              encInfo.count >= 2, case .text("dcapi") = encInfo[0] else {
+            throw ProximityError.sessionFailed("malformed EncryptionInfo")
+        }
+        guard case let .map(infoMap) = encInfo[1],
+              let recipientKeyCbor = infoMap.first(where: { if case .text("recipientPublicKey") = $0.0 { return true }; return false })?.1 else {
+            throw ProximityError.sessionFailed("EncryptionInfo missing recipientPublicKey")
+        }
+        let recipientKey = try CoseKey.decode(recipientKeyCbor)
+
+        let transcript = try MdocSessionTranscript.dcApiIsoMdoc(encryptionInfoBase64: encryptionInfoBase64, origin: origin)
+        var chosen: [String: CredentialId] = [:]
+        for dr in deviceRequest.docRequests where chosen[dr.docType] == nil {
+            if let id = try await findMdoc(dr.docType) { chosen[dr.docType] = id }
+        }
+        guard !chosen.isEmpty else { throw ProximityError.noMatchingCredential("no stored mdoc for the DC API request") }
+
+        let deviceResponse = try await buildDeviceResponse(deviceRequest, transcript, ProximitySelection(chosen: chosen))
+        let sealed = try Hpke.sealBaseP256(recipient: recipientKey, info: try CborEncoder.encode(transcript), aad: [], plaintext: deviceResponse)
+        let envelope = Cbor.array([
+            .text("dcapi"),
+            .map([(.text("enc"), .bytes(sealed.enc)), (.text("cipherText"), .bytes(sealed.ciphertext))]),
+        ])
+        try await recordDcApiMdocSuccess(deviceRequest, transcript, Set(chosen.keys), origin)
+        return Base64Url.encode(try CborEncoder.encode(envelope))
+    }
+
+    private func recordDcApiMdocSuccess(_ deviceRequest: DeviceRequest, _ transcript: Cbor, _ docTypes: Set<String>, _ origin: String) async throws {
+        let reader = await verifyReader(deviceRequest, transcript)
+        let documents = deviceRequest.docRequests.filter { docTypes.contains($0.docType) }.map { dr in
+            LoggedDocument(format: "mso_mdoc", type: dr.docType, queryId: nil,
+                           claims: dr.requested.flatMap { ns, els in els.map { LoggedClaim(path: [ns, $0.identifier]) } })
+        }
+        let rp = RelyingParty(id: reader.commonName ?? origin, name: reader.commonName ?? origin,
+                              trusted: reader.trusted, certificateChainDer: reader.certificateChainDer)
+        await txlog.recordPresentation(relyingParty: rp, documents: documents, status: .success)
+    }
+
     private func verifyReader(_ deviceRequest: DeviceRequest, _ transcript: Cbor) async -> ProximityReaderInfo {
         let untrusted = ProximityReaderInfo(trusted: false, commonName: nil, certificateChainDer: [])
         guard let trust = readerTrust,

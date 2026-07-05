@@ -1,7 +1,10 @@
 package com.hopae.eudi.demo.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +25,8 @@ import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +50,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hopae.eudi.demo.LogStore
+import com.hopae.eudi.demo.PortraitCaptureActivity
 import com.hopae.eudi.wallet.Credential
 import com.hopae.eudi.wallet.CredentialOffer
 import com.hopae.eudi.wallet.IssuanceRequest
@@ -119,18 +125,21 @@ fun WalletApp(wallet: Wallet) {
             }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = {
-                    scanLauncher.launch(ScanOptions().apply {
-                        setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                        setPrompt("Scan a credential offer or verifier request")
-                        setBeepEnabled(false)
-                        setOrientationLocked(false)
-                    })
-                },
-                icon = { Icon(Icons.Filled.QrCodeScanner, null) },
-                text = { Text("Scan QR") },
-            )
+            if (tab == 0) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        scanLauncher.launch(ScanOptions().apply {
+                            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                            setPrompt("Scan a credential offer or verifier request")
+                            setBeepEnabled(false)
+                            setOrientationLocked(false)
+                            setCaptureActivity(PortraitCaptureActivity::class.java)
+                        })
+                    },
+                    icon = { Icon(Icons.Filled.QrCodeScanner, null) },
+                    text = { Text("Scan QR") },
+                )
+            }
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
@@ -206,6 +215,7 @@ private fun isVpRequest(uri: String) =
 private fun CredentialsScreen(wallet: Wallet, refreshKey: Int) {
     var creds by remember { mutableStateOf<List<Credential>>(emptyList()) }
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
     suspend fun reload() {
         runCatching { wallet.credentials.list() }
             .onSuccess { creds = it; LogStore.log("Credentials list → ${it.size}") }
@@ -222,22 +232,52 @@ private fun CredentialsScreen(wallet: Wallet, refreshKey: Int) {
         }
         Spacer(Modifier.height(8.dp))
         if (creds.isEmpty()) Text("No credentials yet — tap Scan QR to issue one.", style = MaterialTheme.typography.bodyMedium)
-        LazyColumn { items(creds) { CredentialCard(it) } }
+        else Text("Long-press a card to copy or delete.", style = MaterialTheme.typography.bodySmall)
+        LazyColumn {
+            items(creds) { c ->
+                CredentialCard(
+                    c,
+                    onCopy = {
+                        clipboard.setText(AnnotatedString(credentialText(c)))
+                        LogStore.log("Copied credential ${c.id.value}")
+                    },
+                    onDelete = {
+                        scope.launch {
+                            runCatching { wallet.credentials.delete(c.id) }
+                                .onSuccess { LogStore.log("Deleted credential ${c.id.value}") }
+                                .onFailure { LogStore.log("❌ delete: ${it.message}") }
+                            reload()
+                        }
+                    },
+                )
+            }
+        }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CredentialCard(c: Credential) {
-    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Column(Modifier.padding(12.dp)) {
-            Text(typeLabel(c), style = MaterialTheme.typography.titleMedium)
-            c.issuer?.displayName?.let { Text("Issuer: $it", style = MaterialTheme.typography.bodySmall) }
-            when (val lc = c.lifecycle) {
-                is Lifecycle.Issued -> lc.claims.take(10).forEach {
-                    Text("${it.path.joinToString(".")}: ${it.value.display()}", style = MaterialTheme.typography.bodySmall)
+private fun CredentialCard(c: Credential, onCopy: () -> Unit, onDelete: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Card(
+            Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                .combinedClickable(onClick = {}, onLongClick = { menu = true }),
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text(typeLabel(c), style = MaterialTheme.typography.titleMedium)
+                c.issuer?.displayName?.let { Text("Issuer: $it", style = MaterialTheme.typography.bodySmall) }
+                when (val lc = c.lifecycle) {
+                    is Lifecycle.Issued -> lc.claims.take(10).forEach {
+                        Text("${it.path.joinToString(".")}: ${it.value.display()}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    else -> Text(lc::class.simpleName ?: "", style = MaterialTheme.typography.bodySmall)
                 }
-                else -> Text(lc::class.simpleName ?: "", style = MaterialTheme.typography.bodySmall)
             }
+        }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text("Copy") }, onClick = { menu = false; onCopy() })
+            DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
         }
     }
 }
@@ -245,6 +285,12 @@ private fun CredentialCard(c: Credential) {
 private fun typeLabel(c: Credential): String = when (val f = c.format) {
     is CredentialFormat.SdJwtVc -> "SD-JWT VC · ${f.vct}"
     is CredentialFormat.MsoMdoc -> "mdoc · ${f.docType}"
+}
+
+private fun credentialText(c: Credential): String = buildString {
+    appendLine(typeLabel(c))
+    c.issuer?.displayName?.let { appendLine("Issuer: $it") }
+    (c.lifecycle as? Lifecycle.Issued)?.claims?.forEach { appendLine("${it.path.joinToString(".")}: ${it.value.display()}") }
 }
 
 @Composable

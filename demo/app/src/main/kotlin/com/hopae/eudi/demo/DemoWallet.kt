@@ -4,6 +4,7 @@ import android.content.Context
 import com.hopae.eudi.demo.adapters.FileStorageDriver
 import com.hopae.eudi.demo.adapters.LogWalletLogger
 import com.hopae.eudi.demo.adapters.OkHttpTransport
+import com.hopae.eudi.wallet.TransactionLogConfig
 import com.hopae.eudi.wallet.Wallet
 import com.hopae.eudi.wallet.WalletConfig
 import com.hopae.eudi.wallet.WalletPorts
@@ -24,7 +25,8 @@ object DemoWallet {
 
     fun get(context: Context): Wallet = instance ?: synchronized(this) {
         instance ?: Wallet.create(
-            config = WalletConfig(),
+            // Debug wallet: also log presentations that fail at final submission (opt-in).
+            config = WalletConfig(transactionLog = TransactionLogConfig(recordFailures = true)),
             ports = WalletPorts(
                 secureAreas = listOf(SoftwareSecureArea()),
                 storage = FileStorageDriver(File(context.applicationContext.filesDir, "wallet")),

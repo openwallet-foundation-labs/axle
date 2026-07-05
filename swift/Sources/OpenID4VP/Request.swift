@@ -74,8 +74,9 @@ public struct AuthorizationRequestResolver {
 
         let claims: JsonValue
         let verifier: VerifierInfo
+        let uriMethod = (params["request_uri_method"] ?? "get").lowercased()
         if let requestUriParam = params["request_uri"] {
-            let jwt = try await fetchRequestObject(requestUriParam)
+            let jwt = try await fetchRequestObject(requestUriParam, method: uriMethod)
             (claims, verifier) = try await parseSignedRequest(jwt, clientId, scheme)
         } else if let requestParam = params["request"] {
             (claims, verifier) = try await parseSignedRequest(requestParam, clientId, scheme)
@@ -158,10 +159,29 @@ public struct AuthorizationRequestResolver {
         return (claims, verifier)
     }
 
-    private func fetchRequestObject(_ url: String) async throws -> String {
-        let resp = try await http.execute(HttpRequest(method: .get, url: url, headers: [("Accept", "application/oauth-authz-req+jwt")]))
+    /// Fetches the request object from `request_uri`. With `request_uri_method=post` (OpenID4VP §5.10)
+    /// the wallet POSTs its capabilities as `wallet_metadata` so the verifier can tailor the request;
+    /// otherwise it GETs the URL.
+    private func fetchRequestObject(_ url: String, method: String) async throws -> String {
+        let request: HttpRequest
+        if method == "post" {
+            let body = Array("wallet_metadata=\(formEncode(walletMetadataJson))".utf8)
+            request = HttpRequest(method: .post, url: url, headers: [
+                ("Accept", "application/oauth-authz-req+jwt"),
+                ("Content-Type", "application/x-www-form-urlencoded"),
+            ], body: body)
+        } else {
+            request = HttpRequest(method: .get, url: url, headers: [("Accept", "application/oauth-authz-req+jwt")])
+        }
+        let resp = try await http.execute(request)
         guard (200...299).contains(resp.status) else { throw VpError.invalidRequest("request_uri fetch failed: HTTP \(resp.status)") }
         return (String(bytes: resp.body, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func formEncode(_ s: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-_.*")
+        return s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
     }
 
     private func clientIdScheme(_ clientId: String, _ explicit: String?) -> String {
@@ -184,3 +204,18 @@ public struct AuthorizationRequestResolver {
         return out
     }
 }
+
+/// Wallet capabilities advertised to the verifier for `request_uri_method=post`.
+private let walletMetadataJson: String = JsonValue.obj([
+    ("vp_formats_supported", JsonValue.obj([
+        ("dc+sd-jwt", JsonValue.obj([
+            ("sd-jwt_alg_values", JsonValue.arr([.str("ES256")])),
+            ("kb-jwt_alg_values", JsonValue.arr([.str("ES256")])),
+        ])),
+        ("mso_mdoc", JsonValue.obj([("alg_values", JsonValue.arr([.str("ES256")]))])),
+    ])),
+    ("client_id_schemes_supported", JsonValue.arr([.str("x509_san_dns"), .str("x509_hash"), .str("redirect_uri")])),
+    ("request_object_signing_alg_values_supported", JsonValue.arr([.str("ES256")])),
+    ("response_types_supported", JsonValue.arr([.str("vp_token")])),
+    ("response_modes_supported", JsonValue.arr([.str("direct_post"), .str("direct_post.jwt")])),
+]).serialize()

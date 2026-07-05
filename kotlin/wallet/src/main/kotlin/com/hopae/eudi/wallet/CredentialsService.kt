@@ -1,10 +1,11 @@
 package com.hopae.eudi.wallet
 
+import com.hopae.eudi.wallet.sdjwt.JsonValue
 import com.hopae.eudi.wallet.spi.CredentialId
-import com.hopae.eudi.wallet.store.CredentialEnvelope
 import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.CredentialStoreChange
-import com.hopae.eudi.wallet.store.EnvelopeLifecycle
+import com.hopae.eudi.wallet.vp.DcqlEngine
+import com.hopae.eudi.wallet.vp.DcqlQuery
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -20,7 +21,35 @@ class CredentialsService internal constructor(private val store: CredentialStore
 
     /** Reactive list changes (Added/Updated/Removed) for UI refresh. */
     val changes: Flow<CredentialChange> = store.changes.map { it.toCredentialChange() }
+
+    /**
+     * Matches stored credentials against a DCQL query (OpenID4VP §6) — presentation-independent.
+     * Uses the same engine the presentation flow uses (credential_sets, claim_sets, null-wildcard).
+     */
+    suspend fun match(dcqlJson: String): CredentialMatch {
+        val envelopes = store.list()
+        val held = envelopes.mapNotNull { it.toQueryable() }
+        val query = DcqlQuery.parse(JsonValue.parse(dcqlJson) as JsonValue.Obj)
+        val result = DcqlEngine.match(query, held)
+        val byId = envelopes.associateBy { it.id.value }
+        return CredentialMatch(
+            satisfiable = result.isSatisfiable(),
+            byQuery = result.candidatesByQuery.mapValues { (_, candidates) ->
+                candidates.mapNotNull { candidate ->
+                    byId[candidate.credential.credentialId]?.let { MatchedCredential(it.toCredential(), candidate.disclosedPaths) }
+                }
+            },
+        )
+    }
 }
+
+/** Result of [CredentialsService.match]: which held credentials satisfy each query, and disclosed paths. */
+class CredentialMatch(
+    val satisfiable: Boolean,
+    val byQuery: Map<String, List<MatchedCredential>>,
+)
+
+class MatchedCredential(val credential: Credential, val disclosedPaths: List<List<String>>)
 
 sealed interface CredentialChange {
     val id: CredentialId
@@ -35,22 +64,3 @@ internal fun CredentialStoreChange.toCredentialChange(): CredentialChange = when
     is CredentialStoreChange.Updated -> CredentialChange.Updated(id)
     is CredentialStoreChange.Removed -> CredentialChange.Removed(id)
 }
-
-/** Assembles the format-agnostic [Credential] view from a storage envelope. */
-internal fun CredentialEnvelope.toCredential(): Credential = Credential(
-    id = id,
-    format = format,
-    createdAt = createdAt,
-    issuer = null, // captured at issuance — metadata slice
-    display = null,
-    configurationId = null,
-    lifecycle = when (val lc = lifecycle) {
-        is EnvelopeLifecycle.Issued -> Lifecycle.Issued(
-            claims = emptyList(), // parsed from payload — claims slice
-            validity = null,
-            instances = CredentialInstances(remaining = lc.instances.size, use = lc.policy.use),
-        )
-        is EnvelopeLifecycle.Deferred -> Lifecycle.Deferred(lc.retryAfter)
-        is EnvelopeLifecycle.Pending -> Lifecycle.Pending(lc.authorizationUrl)
-    },
-)

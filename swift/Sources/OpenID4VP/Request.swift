@@ -96,10 +96,20 @@ public struct AuthorizationRequestResolver {
         let claims: JsonValue
         let verifier: VerifierInfo
         if trimmed.hasPrefix("{") {
-            claims = try JsonValue.parse(trimmed)
-            var clientId = origin
-            if case let .str(c)? = claims["client_id"] { clientId = c }
-            verifier = VerifierInfo(clientId: clientId, clientIdScheme: "web-origin", certificateChainDer: nil, commonName: nil, trusted: false)
+            let envelope = try JsonValue.parse(trimmed)
+            if case let .str(signedRequest)? = envelope["request"] {
+                // OpenID4VP 1.0 signed DC API: data is {"request": "<JWS>"} (JAR); the claims live in the JWS.
+                let (c, v) = try await parseSignedRequest(signedRequest, origin, "x509_san_dns")
+                claims = c
+                var clientId = origin
+                if case let .str(cid)? = c["client_id"] { clientId = cid }
+                verifier = VerifierInfo(clientId: clientId, clientIdScheme: v.clientIdScheme, certificateChainDer: v.certificateChainDer, commonName: v.commonName, trusted: v.trusted)
+            } else {
+                claims = envelope
+                var clientId = origin
+                if case let .str(c)? = envelope["client_id"] { clientId = c }
+                verifier = VerifierInfo(clientId: clientId, clientIdScheme: "web-origin", certificateChainDer: nil, commonName: nil, trusted: false)
+            }
         } else {
             let (c, v) = try await parseSignedRequest(trimmed, origin, "x509_san_dns")
             claims = c

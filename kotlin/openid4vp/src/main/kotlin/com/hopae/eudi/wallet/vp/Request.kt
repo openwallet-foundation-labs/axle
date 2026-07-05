@@ -76,12 +76,18 @@ class AuthorizationRequestResolver(
         val trimmed = requestObject.trim()
         val (claims, verifier) = if (trimmed.startsWith("{")) {
             val c = JsonValue.parse(trimmed) as? JsonValue.Obj ?: throw VpException.InvalidRequest("DC API request must be JSON")
-            val clientId = c.str("client_id") ?: origin
-            c to VerifierInfo(clientId, "web-origin", null, null, trusted = false)
+            val signedRequest = c.str("request")
+            if (signedRequest != null) {
+                // OpenID4VP 1.0 signed DC API: data is {"request": "<JWS>"} (JAR); the claims live in the JWS.
+                val (jwsClaims, v) = verifySigned(signedRequest, origin, "x509_san_dns")
+                jwsClaims to VerifierInfo(jwsClaims.str("client_id") ?: origin, v.clientIdScheme, v.certificateChainDer, v.commonName, v.trusted)
+            } else {
+                val clientId = c.str("client_id") ?: origin
+                c to VerifierInfo(clientId, "web-origin", null, null, trusted = false)
+            }
         } else {
-            val clientIdHint = origin
-            val (c, v) = verifySigned(trimmed, clientIdHint, "x509_san_dns")
-            c to VerifierInfo(c.str("client_id") ?: clientIdHint, v.clientIdScheme, v.certificateChainDer, v.commonName, v.trusted)
+            val (c, v) = verifySigned(trimmed, origin, "x509_san_dns")
+            c to VerifierInfo(c.str("client_id") ?: origin, v.clientIdScheme, v.certificateChainDer, v.commonName, v.trusted)
         }
         return build(claims, verifier.clientId, verifier.clientIdScheme, verifier, origin)
     }

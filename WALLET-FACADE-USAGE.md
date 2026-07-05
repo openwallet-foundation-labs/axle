@@ -78,10 +78,7 @@ session.state.collect { state ->
 }
 ```
 
-**중단점 없는 pre-auth라면** — 편의 확장으로 한 줄:
-```kotlin
-val result = wallet.issuance.start(request).await()   // 중단(txCode/브라우저) 필요 시 WalletError로 throw
-```
+> **발급은 세션 단일 방식.** 간편 one-shot API는 제공하지 않는다 — 중단점(txCode·브라우저)이 흔하고, 한 가지 진입점이 API를 단순하게 유지한다. pre-auth처럼 중단이 없으면 세션이 `Preparing → Processing → Completed`로 즉시 흘러간다.
 
 ```swift
 let offer = try await wallet.issuance.resolveOffer(offerUri)
@@ -150,24 +147,63 @@ wallet.credentials.notifyIssuer(cred.id, NotificationEvent.CredentialAccepted)
 
 ---
 
-## 4. 크리덴셜 관리
+## 4. 크리덴셜 관리 — 메타데이터와 함께 저장/조회
+
+발급 시점에 **이슈어 메타데이터(display·issuer 정보)를 봉투에 함께 캡처**해 보관한다. 앱은 재조회 없이 이름·로고를 쓴다.
 
 ```kotlin
+class Credential {                        // CredentialEnvelope의 뷰
+    val id: CredentialId
+    val format: CredentialFormat          // MsoMdoc(docType) | SdJwtVc(vct)
+    val lifecycle: Lifecycle              // Issued | Deferred | Pending
+    val issuer: IssuerInfo                // url, displayName            ← 발급 시 캡처
+    val display: CredentialDisplay?       // name, logo, backgroundColor ← issuer metadata display 유래
+    val configurationId: String          // reissue·재조회용
+    val createdAt: Instant
+    // Lifecycle.Issued 전용: claims(path 뷰), validity, instances(배치 잔량·policy), payload(타입드 원본)
+}
+```
+
+```kotlin
+// ── 조회 (로컬, 네트워크 없음) ──
 val all = wallet.credentials.list()                        // List<Credential>
 val pid = wallet.credentials.list(CredentialFilter.byVct("eu.europa.ec.eudi.pid.1")).firstOrNull()
 
 pid?.let { c ->
-    c.claims.forEach { println("${it.path} = ${it.value.display()}") }   // path 기반 포맷 불문 뷰
-    println("valid: ${(c.lifecycle as Lifecycle.Issued).validity.validUntil}")
-    println("남은 단일사용 인스턴스: ${c.lifecycle.instances.remaining}")
+    println("${c.display?.name} — ${c.issuer.displayName}")             // 메타데이터로 카드 렌더
+    (c.lifecycle as? Lifecycle.Issued)?.let { issued ->
+        issued.claims.forEach { println("${it.path} = ${it.value.display()}") }   // path 기반 포맷 불문 뷰
+        println("valid until ${issued.validity.validUntil}, 남은 단일사용 ${issued.instances.remaining}")
+    }
 }
 
-val status = wallet.credentials.status(pid!!.id)           // VALID / INVALID(revoked) / SUSPENDED — Token Status List
-wallet.credentials.delete(pid.id)                          // 삭제 (+ 자동 CREDENTIAL_DELETED 통지)
+// ── 상태 (네트워크 — Token Status List fetch) ──
+val status = wallet.credentials.status(pid!!.id)           // VALID / INVALID(revoked) / SUSPENDED
 
-// 리액티브 목록 갱신
+// ── 삭제 · 리액티브 갱신 ──
+wallet.credentials.delete(pid.id)                          // + 자동 CREDENTIAL_DELETED 통지
 wallet.credentials.changes.collect { refreshUi() }         // Added/Updated/Removed
 ```
+
+### 4b. DCQL로 크리덴셜 매칭 조회 (제시와 무관하게)
+
+"이 DCQL 쿼리를 만족하는 보유 크리덴셜?" — 제시 세션을 안 열고도 조회. (내부적으로 제시가 쓰는 것과 같은 DcqlEngine.)
+
+```kotlin
+val result: CredentialMatch = wallet.credentials.match(dcqlQuery)   // DcqlQuery (JSON 파싱 or 빌더)
+
+result.satisfiable                                         // 전체 쿼리 만족 가능?
+result.byQuery.forEach { (queryId, candidates) ->
+    candidates.forEach { cand ->
+        cand.credential                                    // 매칭된 보유 Credential
+        cand.disclosedPaths                                // 제시 시 공개될 claim path
+    }
+}
+
+// 활용: 특정 verifier 쿼리를 지금 만족하는지 사전 체크, 홈 화면에서 "제시 가능한 크리덴셜" 필터 등
+```
+
+`list(filter)` = 단순 필터(vct/docType/format), `match(dcqlQuery)` = DCQL 의미론(credential_sets·claim_sets·null 와일드카드·values) 전체.
 
 ---
 
@@ -292,12 +328,14 @@ try {
 
 ---
 
-## 인간공학 노트 (이 연습으로 발견 — 구현에 반영)
+## 결정·인간공학 노트 (이 연습으로 확정 — 구현에 반영)
 
-1. **`session.state.collect`는 선형 플로우에 무겁다.** pre-auth·reissue처럼 중단점 없는 경우가 흔하므로 **편의 `suspend fun IssuanceSession.await(): IssuanceResult`** 제공(중단 필요 시 throw). Swift는 `await session.result()`. → 계약에 추가 제안.
-2. **`PresentationSelection.auto(request)`** 편의 필수 — 후보 1개뿐인 일반 케이스에서 앱이 매핑 안 짜게. (VP 모듈에 `PresentationSelection.auto`가 이미 있음 → 파사드 노출.)
-3. **reissue가 계약 IssuanceService에 없음** — vci 클라이언트엔 구현됨. 파사드 `issuance.reissue(credentialId)` + `Credential.canReissue` 노출로 추가.
-4. **notification 자동화 범위** — 발급 Completed 시 자동 `CredentialAccepted`, 삭제 시 자동 `CredentialDeleted`가 기본. 수동 `notifyIssuer`도 노출(§3). 계약에 자동화 규칙 명문화 필요.
-5. **`Credential.claims`의 값 표시** — `ClaimValue.display()`가 포맷별(mdoc CBOR vs SD-JWT JSON) 값을 통일 문자열로. path는 `List<String>`(namespace+element / JSON path) 통일.
-6. **reader 진입점** — `wallet.reader` 서브파사드 vs 독립 `Reader.create`. dual-role이므로 wallet과 포트 공유가 자연스러움 → `wallet.reader` 권장, 독립 생성도 허용.
-7. **`filter`/`status`의 네트워크성** — `credentials.status()`는 네트워크(Status List fetch), `list()`는 로컬. 이름/시그니처로 비용 차이 드러나게(status는 suspend·throws 명확).
+1. **발급 = 세션 단일 방식 확정.** 간편 one-shot/`await()` API는 **제공하지 않음**(진입점 하나로 단순 유지). 중단점 없는 pre-auth는 세션이 즉시 `Completed`로 흐른다.
+2. **크리덴셜은 메타데이터와 함께 저장(중요).** 봉투에 발급 시점 `issuer`(url·displayName) + `display`(name·logo·color, issuer metadata display 유래) + `configurationId` 캡처 → 앱이 재조회 없이 카드 렌더·reissue. **→ 잠금결정 #3 개정: display 최소가 아니라 "발급 시 캡처한 메타데이터 보관".** 봉투 모델·CredentialConfiguration에 display 파싱 추가(Phase A).
+3. **DCQL 크리덴셜 조회(중요).** `credentials.match(dcqlQuery): CredentialMatch` — 제시와 무관하게 보유 크리덴셜을 DCQL로 매칭(내부 DcqlEngine 재사용). `list(filter)`(단순)와 분리. 홈 화면 필터·사전 만족도 체크에 필수.
+4. **`PresentationSelection.auto(request)`** 편의 필수 — 후보 1개인 일반 케이스에서 앱이 매핑 안 짜게. (VP 모듈에 이미 있음 → 파사드 노출.)
+5. **reissue 노출** — vci엔 구현됨. 파사드 `issuance.reissue(credentialId)`(세션) + `Credential.canReissue`.
+6. **notification 자동화** — 발급 Completed 시 자동 `CredentialAccepted`, 삭제 시 자동 `CredentialDeleted` + 수동 `notifyIssuer`.
+7. **`ClaimValue.display()` / path 통일** — mdoc CBOR vs SD-JWT JSON 값을 통일 문자열로, path는 `List<String>` 통일(namespace+element / JSON path).
+8. **reader 진입점** — `wallet.reader` 서브파사드(dual-role·포트 공유) + 독립 `Reader.create` 허용.
+9. **비용 가시성** — `status()`는 네트워크(Status List), `list()`·`match()`는 로컬. 시그니처로 구분.

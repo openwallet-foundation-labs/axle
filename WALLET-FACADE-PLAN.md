@@ -44,11 +44,12 @@ wallet (파사드) ──▶ wallet-api, credential-store, openid4vci, openid4vp
 
 각 단계는 Linux에서 `SoftwareSecureArea`+인메모리 storage+MockIssuer/MockVerifier로 e2e 테스트 가능. 각 단계 끝에 Kotlin+Swift 페어 + 골든 벡터(해당 시).
 
-### Phase A — 조립 + Credential 모델 + credentials 서비스
+### Phase A — 조립 + 메타데이터 리치 Credential 저장/조회 + credentials 서비스
 - `Wallet` / `WalletConfig`(불변) / `WalletPorts`(어댑터 주입) / `Wallet.create(config, ports)` 조립기 (trust fan-out·clock 브리지·클라이언트 생성 = 갭 4·11)
-- 통합 `Credential` + `Lifecycle` + `Claim`(path 뷰) — `CredentialEnvelope`→`Credential` 변환 (payload를 SD-JWT/mdoc claims로)
-- `credentials` 서비스: list/get/delete/status/changes (스토어 위임 + status는 `StatusListClient.check`)
-- **검증 슬라이스**: 봉투 저장→list→Credential 뷰(claims 파싱)→status 조회
+- **봉투 메타데이터 확장**: `CredentialEnvelope`에 `metadata`(issuer url·displayName, display name·logo·color, configurationId) 필드 + `CredentialConfiguration` display 파싱. 발급 시 캡처.
+- 통합 `Credential` + `Lifecycle` + `Claim`(path 뷰) + `issuer`/`display` — `CredentialEnvelope`→`Credential` 변환 (payload를 SD-JWT/mdoc claims로)
+- `credentials` 서비스: `list(filter)` · `get` · `delete` · `status`(`StatusListClient.check`) · `changes` + **`match(dcqlQuery)`**(DcqlEngine 재사용, 제시 무관 조회)
+- **검증 슬라이스**: 봉투(메타데이터 포함) 저장→list→Credential 뷰(claims·display)→`match(dcql)` 조회→status
 
 ### Phase B — issuance 서비스
 - `IssuanceService`(resolveOffer/start/resumeDeferred/resumePending) + `IssuanceSession`(StateFlow<IssuanceState>)
@@ -69,13 +70,14 @@ wallet (파사드) ──▶ wallet-api, credential-store, openid4vci, openid4vp
 ## 4. 결정 (2026-07-05 확정 — "설계만 확정")
 
 1. **구현 순서**: **A → B → C → D** 확정. 착수 범위(어디까지 지금)는 구현 시작 시 재결정 — 이 문서는 설계 잠금까지.
-2. **세션 모델**: ✅ 계약대로 StateFlow(Kotlin)/AsyncStream(Swift) 세션. 중단점 없는 pre-auth는 한 스텝에 `Completed`로 귀결(세션이되 즉시 완료). auth-code·txCode·consent만 실제 중단.
-3. **Credential.display/issuer**: ✅ v0 **최소** — `issuer: IssuerRef(url)`만. 로고·표시명(display) 리소스는 앱 소관(헤드리스 원칙) 또는 후속 Phase. 발급 시 issuer URL만 봉투에 보관.
-4. **events/txlog 영속**: ✅ **코어가 StorageDriver 영속** + 조회 API(계약 §10.4). ARF 투명성 보장을 SDK가 책임. `events: Flow<WalletEvent>`는 txlog append + store.changes 병합.
-5. **에러 매핑**: ✅ **점진** — 각 Phase에서 해당 도메인 에러만 `WalletError.{Issuance|Presentation|...}`로 매핑. Phase D에서 최종 정합 점검.
-6. **모듈**: ✅ 새 최상위 `wallet` 모듈(§0). `wallet-api`는 SPI로 유지.
+2. **발급 = 세션 단일 방식**: ✅ StateFlow(Kotlin)/AsyncStream(Swift) 세션만. **간편 one-shot/`await()` API는 제공 안 함**(진입점 하나로 단순 유지, 2026-07-05 확정). 중단점 없는 pre-auth는 세션이 즉시 `Completed`로 흐름. auth-code·txCode·consent만 실제 중단.
+3. **크리덴셜 = 메타데이터와 함께 저장** (개정, 중요): ✅ 발급 시점에 `issuer`(url·displayName) + `display`(name·logo·color) + `configurationId`를 봉투에 **캡처·보관** → 앱이 재조회 없이 카드 렌더·reissue. (이전 "display 최소 드랍"에서 개정 — 메타데이터 관리가 핵심 요구.) 봉투 모델 + `CredentialConfiguration` display 파싱 추가 = Phase A.
+4. **DCQL 크리덴셜 조회** (중요): ✅ `credentials.match(dcqlQuery): CredentialMatch` — 제시와 무관하게 보유를 DCQL로 매칭(내부 DcqlEngine 재사용). `list(filter)`(단순 필터)와 분리 = Phase A.
+5. **events/txlog 영속**: ✅ **코어가 StorageDriver 영속** + 조회 API(계약 §10.4). `events: Flow<WalletEvent>`는 txlog append + store.changes 병합.
+6. **에러 매핑**: ✅ **점진** — 각 Phase에서 해당 도메인 에러만 `WalletError.{...}`로 매핑. Phase D 최종 정합.
+7. **모듈**: ✅ 새 최상위 `wallet` 모듈(§0). `wallet-api`는 SPI로 유지.
 
-이 6개가 설계 잠금. 구현 착수 시 §3 Phase A부터.
+설계 잠금. 구현 착수 시 §3 Phase A(조립 + **메타데이터 리치 Credential 저장/조회** + **DCQL 매칭** + status)부터.
 
 ## 5. 열린 리스크
 

@@ -1,10 +1,8 @@
 package com.hopae.eudi.demo.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,9 +30,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -57,7 +54,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hopae.eudi.demo.DemoWallet
@@ -81,6 +77,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import java.text.SimpleDateFormat
+import java.time.Instant
 import java.util.Date
 import java.util.Locale
 
@@ -277,6 +274,7 @@ private fun CredentialsScreen(wallet: Wallet, refreshKey: Int) {
         reload()
         runCatching { wallet.credentials.changes.collect { reload() } }  // live-update on add/remove
     }
+    var detail by remember { mutableStateOf<Credential?>(null) }
     Column(Modifier.padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Credentials (${creds.size})", style = MaterialTheme.typography.titleLarge)
@@ -284,66 +282,89 @@ private fun CredentialsScreen(wallet: Wallet, refreshKey: Int) {
         }
         Spacer(Modifier.height(8.dp))
         if (creds.isEmpty()) Text("No credentials yet — tap Scan QR to issue one.", style = MaterialTheme.typography.bodyMedium)
-        else Text("Long-press a card to copy or delete.", style = MaterialTheme.typography.bodySmall)
+        else Text("Tap a card for details.", style = MaterialTheme.typography.bodySmall)
         LazyColumn {
-            items(creds) { c ->
-                CredentialCard(
-                    c,
-                    onCopy = {
-                        clipboard.setText(AnnotatedString(credentialText(c)))
-                        LogStore.log("Copied credential ${c.id.value}")
-                    },
-                    onDelete = {
-                        scope.launch {
-                            runCatching { wallet.credentials.delete(c.id) }
-                                .onSuccess { LogStore.log("Deleted credential ${c.id.value}") }
-                                .onFailure { LogStore.log("❌ delete: ${it.message}") }
-                            reload()
-                        }
-                    },
-                )
+            items(creds) { c -> CredentialCard(c) { detail = c } }
+        }
+    }
+
+    detail?.let { c ->
+        CredentialDetailDialog(
+            c = c,
+            onCopy = {
+                clipboard.setText(AnnotatedString(credentialText(c)))
+                LogStore.log("Copied credential ${c.id.value}")
+            },
+            onDelete = {
+                detail = null
+                scope.launch {
+                    runCatching { wallet.credentials.delete(c.id) }
+                        .onSuccess { LogStore.log("Deleted credential ${c.id.value}") }
+                        .onFailure { LogStore.log("❌ delete: ${it.message}") }
+                    reload()
+                }
+            },
+            onDismiss = { detail = null },
+        )
+    }
+}
+
+@Composable
+private fun CredentialCard(c: Credential, onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth().padding(vertical = 6.dp).clickable { onClick() }) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(credentialTitle(c), style = MaterialTheme.typography.titleMedium)
+                c.issuer?.displayName?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text("Issued ${issuedDate(c)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            FormatChip(c.format)
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CredentialCard(c: Credential, onCopy: () -> Unit, onDelete: () -> Unit) {
-    var menu by remember { mutableStateOf(false) }
-    Box {
-        Card(
-            Modifier.fillMaxWidth().padding(vertical = 6.dp)
-                .combinedClickable(onClick = {}, onLongClick = { menu = true }),
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(credentialTitle(c), style = MaterialTheme.typography.titleMedium)
-                        c.issuer?.displayName?.let {
-                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    FormatChip(c.format)
-                }
+private fun CredentialDetailDialog(c: Credential, onCopy: () -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(credentialTitle(c)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                DetailRow("Type", formatLabel(c.format))
+                c.issuer?.displayName?.let { DetailRow("Issuer", it) }
+                c.issuer?.url?.let { DetailRow("Issuer URL", it) }
+                DetailRow("Issued", issuedDate(c))
                 (c.lifecycle as? Lifecycle.Issued)?.let { lc ->
-                    Spacer(Modifier.height(10.dp))
-                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp)) {
-                            lc.claims.take(14).forEach { ClaimRow(it.path.joinToString(" › "), it.value.display()) }
-                            if (lc.claims.size > 14) {
-                                Text("+${lc.claims.size - 14} more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
+                    lc.validity?.validUntil?.let { DetailRow("Expires", instantDate(it)) }
+                    if (lc.claims.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        Text("CLAIMS", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(4.dp))
+                        lc.claims.forEach { DetailRow(it.path.joinToString(" › "), it.value.display()) }
                     }
                 }
             }
-        }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text("Copy") }, onClick = { menu = false; onCopy() })
-            DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
-        }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onCopy) { Text("Copy") }
+                TextButton(onClick = onDelete) { Text("Delete", color = Color(0xFFC62828)) }
+            }
+        },
+    )
+}
+
+@Composable
+private fun DetailRow(name: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Text(name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(12.dp))
+        Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1.3f))
     }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 private fun credentialTitle(c: Credential): String = when (val f = c.format) {
@@ -351,32 +372,24 @@ private fun credentialTitle(c: Credential): String = when (val f = c.format) {
     is CredentialFormat.MsoMdoc -> f.docType
 }
 
-private fun typeLabel(c: Credential): String = when (val f = c.format) {
-    is CredentialFormat.SdJwtVc -> "SD-JWT VC · ${f.vct}"
-    is CredentialFormat.MsoMdoc -> "mdoc · ${f.docType}"
+private fun formatLabel(format: CredentialFormat): String = when (format) {
+    is CredentialFormat.SdJwtVc -> "SD-JWT VC"
+    is CredentialFormat.MsoMdoc -> "mdoc"
 }
+
+private val cardDateFmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+private fun issuedDate(c: Credential): String = cardDateFmt.format(Date.from(c.createdAt))
+private fun instantDate(i: Instant): String = cardDateFmt.format(Date.from(i))
 
 @Composable
 private fun FormatChip(format: CredentialFormat) {
-    val label = when (format) {
-        is CredentialFormat.SdJwtVc -> "SD-JWT VC"
-        is CredentialFormat.MsoMdoc -> "mdoc"
-    }
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
         Text(
-            label,
+            formatLabel(format),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSecondaryContainer,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
         )
-    }
-}
-
-@Composable
-private fun ClaimRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1.2f))
     }
 }
 
@@ -405,7 +418,7 @@ private fun TrustBadge(trusted: Boolean) {
 }
 
 private fun credentialText(c: Credential): String = buildString {
-    appendLine(typeLabel(c))
+    appendLine("${formatLabel(c.format)} · ${credentialTitle(c)}")
     c.issuer?.displayName?.let { appendLine("Issuer: $it") }
     (c.lifecycle as? Lifecycle.Issued)?.claims?.forEach { appendLine("${it.path.joinToString(".")}: ${it.value.display()}") }
 }

@@ -77,14 +77,25 @@ public final class SessionEncryption {
     }
 
     private static func deriveKeys(_ sharedSecret: [UInt8], _ sessionTranscriptBytes: [UInt8]) throws -> (SymmetricKey, SymmetricKey) {
-        // ISO 18013-5 §9.1.1.4: the HKDF salt is SHA-256(SessionTranscriptBytes), where
-        // SessionTranscriptBytes = #6.24(bstr .cbor SessionTranscript) — i.e. the transcript wrapped in tag 24.
-        let transcriptBytes = try CborEncoder.encode(.tagged(24, .bytes(sessionTranscriptBytes)))
-        let salt = Data(SHA256.hash(data: Data(transcriptBytes)))
+        let salt = try transcriptSalt(sessionTranscriptBytes)
         let ikm = SymmetricKey(data: sharedSecret)
         let skDevice = HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, salt: salt, info: Data("SKDevice".utf8), outputByteCount: 32)
         let skReader = HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, salt: salt, info: Data("SKReader".utf8), outputByteCount: 32)
         return (skDevice, skReader)
+    }
+
+    /// ISO 18013-5 §9.1.3.5 `EMacKey` for verifying `deviceMac`: HKDF-SHA256 over the ECDH secret of the reader's
+    /// `ephemeral` EReaderKey and the mdoc `deviceKey`, salted by the SessionTranscript.
+    public static func deriveEMacKey(ephemeral: EphemeralKeyPair, deviceKey: EcPublicKey, sessionTranscriptBytes: [UInt8]) throws -> [UInt8] {
+        let ikm = SymmetricKey(data: Data(try ephemeral.sharedSecret(deviceKey)))
+        let key = HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, salt: try transcriptSalt(sessionTranscriptBytes),
+                                         info: Data("EMacKey".utf8), outputByteCount: 32)
+        return key.withUnsafeBytes { [UInt8]($0) }
+    }
+
+    // ISO 18013-5 §9.1.1.4: salt = SHA-256(SessionTranscriptBytes), SessionTranscriptBytes = #6.24(bstr .cbor SessionTranscript).
+    private static func transcriptSalt(_ sessionTranscriptBytes: [UInt8]) throws -> Data {
+        Data(SHA256.hash(data: Data(try CborEncoder.encode(.tagged(24, .bytes(sessionTranscriptBytes))))))
     }
 
     private func iv(_ identifier: [UInt8], _ counter: UInt32) -> Data {

@@ -104,14 +104,22 @@ class SessionEncryption private constructor(
         }
 
         private fun deriveKeys(sharedSecret: ByteArray, sessionTranscriptBytes: ByteArray): Pair<ByteArray, ByteArray> {
-            // ISO 18013-5 §9.1.1.4: the HKDF salt is SHA-256(SessionTranscriptBytes), where
-            // SessionTranscriptBytes = #6.24(bstr .cbor SessionTranscript) — i.e. the transcript wrapped in tag 24.
-            val transcriptBytes = CborEncoder.encode(Cbor.Tagged(24uL, Cbor.Bytes(sessionTranscriptBytes)))
-            val salt = MessageDigest.getInstance("SHA-256").digest(transcriptBytes)
+            val salt = transcriptSalt(sessionTranscriptBytes)
             val skDevice = Hkdf.deriveSha256(sharedSecret, salt, "SKDevice".encodeToByteArray(), 32)
             val skReader = Hkdf.deriveSha256(sharedSecret, salt, "SKReader".encodeToByteArray(), 32)
             return skDevice to skReader
         }
+
+        /**
+         * ISO 18013-5 §9.1.3.5 `EMacKey` for verifying `deviceMac`: HKDF-SHA256 over the ECDH secret of the
+         * reader's [ephemeral] EReaderKey and the mdoc [deviceKey], salted by the SessionTranscript.
+         */
+        fun deriveEMacKey(ephemeral: EphemeralKeyPair, deviceKey: EcPublicKey, sessionTranscriptBytes: ByteArray): ByteArray =
+            Hkdf.deriveSha256(ephemeral.sharedSecret(deviceKey), transcriptSalt(sessionTranscriptBytes), "EMacKey".encodeToByteArray(), 32)
+
+        // ISO 18013-5 §9.1.1.4: salt = SHA-256(SessionTranscriptBytes), SessionTranscriptBytes = #6.24(bstr .cbor SessionTranscript).
+        private fun transcriptSalt(sessionTranscriptBytes: ByteArray): ByteArray =
+            MessageDigest.getInstance("SHA-256").digest(CborEncoder.encode(Cbor.Tagged(24uL, Cbor.Bytes(sessionTranscriptBytes))))
     }
 
     private fun iv(identifier: ByteArray, counter: Int): ByteArray {

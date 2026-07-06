@@ -5,6 +5,7 @@ import com.hopae.eudi.wallet.cbor.CborEncoder
 import com.hopae.eudi.wallet.cbor.cose.CoseHeaders
 import com.hopae.eudi.wallet.cbor.cose.CoseSign1
 import com.hopae.eudi.wallet.cbor.cose.CoseSigner
+import com.hopae.eudi.wallet.cbor.cose.EcPublicKey
 import com.hopae.eudi.wallet.spi.SigningAlgorithm
 import com.hopae.eudi.wallet.spi.coseAlgorithm
 import java.time.Instant
@@ -66,16 +67,32 @@ class MdocReader(
      * (via [MdocVerifier]) and the `deviceSignature` over `DeviceAuthentication` bound to
      * [sessionTranscript] (proving the response came from the credential's holder, this session).
      */
-    suspend fun verifyDeviceResponse(deviceResponse: ByteArray, sessionTranscript: Cbor): List<VerifiedDocument> {
+    suspend fun verifyDeviceResponse(
+        deviceResponse: ByteArray,
+        sessionTranscript: Cbor,
+        /**
+         * Derives the ISO 18013-5 §9.1.3.5 `EMacKey` from the mdoc `DeviceKey` (ECDH with the reader's
+         * EReaderKey, then HKDF over the SessionTranscript). Required to verify `deviceMac`; if absent,
+         * a MAC-authenticated document fails verification.
+         */
+        emacKey: (suspend (EcPublicKey) -> ByteArray)? = null,
+    ): List<VerifiedDocument> {
         val trust = issuerTrust ?: throw MdocException("verifyDeviceResponse requires an issuer trust")
         val verifier = MdocVerifier(trust, now)
         return DeviceResponse.decode(deviceResponse).documents.map { doc ->
             val verified = verifier.verify(doc.issuerSigned) // issuerAuth + digests + validity
             val deviceAuthentication = Cbor.Array(listOf(Cbor.Text("DeviceAuthentication"), sessionTranscript, Cbor.Text(doc.docType), doc.deviceNameSpacesBytes))
             val deviceAuthBytes = CborEncoder.encode(Cbor.Tagged(TAG_ENCODED_CBOR, Cbor.Bytes(CborEncoder.encode(deviceAuthentication))))
-            if (!doc.deviceSignature.verify(verified.deviceKey, detachedPayload = deviceAuthBytes)) {
-                throw MdocException("deviceSignature invalid — holder binding failed for ${doc.docType}")
+            val bound = when {
+                doc.deviceSignature != null -> doc.deviceSignature.verify(verified.deviceKey, detachedPayload = deviceAuthBytes)
+                doc.deviceMac != null -> {
+                    val key = emacKey?.invoke(verified.deviceKey)
+                        ?: throw MdocException("deviceMac verification requires the reader ephemeral key (emacKey)")
+                    doc.deviceMac.verify(key, detachedPayload = deviceAuthBytes)
+                }
+                else -> throw MdocException("no device authentication for ${doc.docType}")
             }
+            if (!bound) throw MdocException("device authentication invalid — holder binding failed for ${doc.docType}")
             VerifiedDocument(verified.docType, verified.elements, deviceAuthenticated = true)
         }
     }

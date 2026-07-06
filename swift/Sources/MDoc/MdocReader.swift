@@ -77,7 +77,13 @@ public struct MdocReader {
     /// Verifies each document in a `DeviceResponse`: the issuer signature + digests + validity
     /// and the `deviceSignature` over `DeviceAuthentication` bound to `sessionTranscript`
     /// (proving the response came from the credential's holder, this session).
-    public func verifyDeviceResponse(_ deviceResponse: [UInt8], sessionTranscript: Cbor) async throws -> [VerifiedDocument] {
+    /// - Parameter emacKey: Derives the ISO 18013-5 §9.1.3.5 `EMacKey` from the mdoc `DeviceKey` (ECDH with the
+    ///   reader's EReaderKey, then HKDF over the SessionTranscript). Required to verify `deviceMac`.
+    public func verifyDeviceResponse(
+        _ deviceResponse: [UInt8],
+        sessionTranscript: Cbor,
+        emacKey: ((EcPublicKey) throws -> [UInt8])? = nil
+    ) async throws -> [VerifiedDocument] {
         guard let trust = issuerTrust else { throw MdocError("verifyDeviceResponse requires an issuer trust") }
         let verifier = MdocVerifier(trust: trust, now: now)
         var out: [VerifiedDocument] = []
@@ -85,9 +91,16 @@ public struct MdocReader {
             let verified = try await verifier.verify(doc.issuerSigned) // issuerAuth + digests + validity
             let deviceAuthentication = Cbor.array([.text("DeviceAuthentication"), sessionTranscript, .text(doc.docType), doc.deviceNameSpacesBytes])
             let deviceAuthBytes = try CborEncoder.encode(.tagged(tag24, .bytes(try CborEncoder.encode(deviceAuthentication))))
-            guard doc.deviceSignature.verify(publicKey: verified.deviceKey, detachedPayload: deviceAuthBytes) else {
-                throw MdocError("deviceSignature invalid — holder binding failed for \(doc.docType)")
+            let bound: Bool
+            if let sig = doc.deviceSignature {
+                bound = sig.verify(publicKey: verified.deviceKey, detachedPayload: deviceAuthBytes)
+            } else if let mac = doc.deviceMac {
+                guard let emacKey else { throw MdocError("deviceMac verification requires the reader ephemeral key (emacKey)") }
+                bound = mac.verify(key: try emacKey(verified.deviceKey), detachedPayload: deviceAuthBytes)
+            } else {
+                throw MdocError("no device authentication for \(doc.docType)")
             }
+            guard bound else { throw MdocError("device authentication invalid — holder binding failed for \(doc.docType)") }
             out.append(VerifiedDocument(docType: verified.docType, elements: verified.elements, deviceAuthenticated: true))
         }
         return out

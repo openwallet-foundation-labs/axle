@@ -41,9 +41,8 @@ public struct ProximityReaderService: Sendable {
         let eDeviceKey = try DeviceEngagement.parseEDeviceKey(engagement)
         let eReader = EphemeralKeyPair()
         let transcript = try ProximitySessionTranscript.build(deviceEngagement: engagement, eReaderKey: eReader.publicKey)
-        let enc = try SessionEncryption.forReader(
-            ephemeral: eReader, devicePublicKey: eDeviceKey,
-            sessionTranscriptBytes: try ProximitySessionTranscript.encode(transcript))
+        let transcriptBytes = try ProximitySessionTranscript.encode(transcript)
+        let enc = try SessionEncryption.forReader(ephemeral: eReader, devicePublicKey: eDeviceKey, sessionTranscriptBytes: transcriptBytes)
         let reader = MdocReader(readerAuth: readerAuth, issuerTrust: issuerTrust)
 
         let deviceRequest = try await reader.buildDeviceRequest(documents, sessionTranscript: transcript)
@@ -52,7 +51,12 @@ public struct ProximityReaderService: Sendable {
         let deviceResponse = try enc.decrypt(try SessionMessages.decodeData(try await transport.receive()))
 
         do {
-            if issuerTrust != nil { return try await reader.verifyDeviceResponse(deviceResponse, sessionTranscript: transcript) }
+            if issuerTrust != nil {
+                // Verify deviceSignature or deviceMac (EMacKey via the reader's EReaderKey ↔ mdoc DeviceKey ECDH).
+                return try await reader.verifyDeviceResponse(deviceResponse, sessionTranscript: transcript) { deviceKey in
+                    try SessionEncryption.deriveEMacKey(ephemeral: eReader, deviceKey: deviceKey, sessionTranscriptBytes: transcriptBytes)
+                }
+            }
             return try parseUnverified(deviceResponse)
         } catch {
             // Untrusted issuer or holder-binding failure — still surface what the wallet disclosed, unverified.

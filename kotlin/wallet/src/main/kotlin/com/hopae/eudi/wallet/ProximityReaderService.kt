@@ -36,7 +36,8 @@ class ProximityReaderService internal constructor(
             val eDeviceKey = DeviceEngagement.parseEDeviceKey(engagement)
             val eReader = EphemeralKeyPair.generate()
             val transcript = ProximitySessionTranscript.build(engagement, eReader.publicKey)
-            val enc = SessionEncryption.forReader(eReader, eDeviceKey, ProximitySessionTranscript.encode(transcript))
+            val transcriptBytes = ProximitySessionTranscript.encode(transcript)
+            val enc = SessionEncryption.forReader(eReader, eDeviceKey, transcriptBytes)
             val reader = MdocReader(readerAuth, issuerTrust)
 
             val deviceRequest = reader.buildDeviceRequest(documents, transcript)
@@ -44,7 +45,14 @@ class ProximityReaderService internal constructor(
             val deviceResponse = enc.decrypt(SessionMessages.decodeData(transport.receive()))
 
             return try {
-                if (issuerTrust != null) reader.verifyDeviceResponse(deviceResponse, transcript) else parseUnverified(deviceResponse)
+                if (issuerTrust != null) {
+                    // Verify deviceSignature or deviceMac (EMacKey via the reader's EReaderKey ↔ mdoc DeviceKey ECDH).
+                    reader.verifyDeviceResponse(deviceResponse, transcript) { deviceKey ->
+                        SessionEncryption.deriveEMacKey(eReader, deviceKey, transcriptBytes)
+                    }
+                } else {
+                    parseUnverified(deviceResponse)
+                }
             } catch (e: Throwable) {
                 // Untrusted issuer or holder-binding failure — still surface what the wallet disclosed, marked unverified.
                 parseUnverified(deviceResponse)

@@ -6,7 +6,10 @@ public struct ResponseDocument {
     public let issuerSigned: IssuerSigned
     /// `DeviceNameSpacesBytes` (#6.24) as received — for `DeviceAuthentication` reconstruction.
     public let deviceNameSpacesBytes: Cbor
-    public let deviceSignature: CoseSign1
+    /// COSE_Sign1 device authentication, or nil when the document uses `deviceMac` instead.
+    public let deviceSignature: CoseSign1?
+    /// COSE_Mac0 device authentication (ISO 18013-5 §9.1.3.5), for key-agreement device keys.
+    public let deviceMac: CoseMac0?
 }
 
 /// A wallet's `DeviceResponse` as parsed by the reader/verifier.
@@ -31,8 +34,11 @@ public struct DeviceResponse {
                 guard case let .map(deviceSigned)? = mdocField(docMap, "deviceSigned") else { throw MdocError("missing deviceSigned") }
                 guard let deviceNameSpacesBytes = mdocField(deviceSigned, "nameSpaces") else { throw MdocError("missing deviceSigned nameSpaces") }
                 guard case let .map(deviceAuth)? = mdocField(deviceSigned, "deviceAuth") else { throw MdocError("missing deviceAuth") }
-                guard let sig = mdocField(deviceAuth, "deviceSignature") else { throw MdocError("only deviceSignature (not deviceMac) is supported") }
-                return ResponseDocument(docType: docType, issuerSigned: issuerSigned, deviceNameSpacesBytes: deviceNameSpacesBytes, deviceSignature: try CoseSign1.fromCbor(sig))
+                let deviceSignature = try mdocField(deviceAuth, "deviceSignature").map { try CoseSign1.fromCbor($0) }
+                let deviceMac = try mdocField(deviceAuth, "deviceMac").map { try CoseMac0.fromCbor($0) }
+                if deviceSignature == nil, deviceMac == nil { throw MdocError("deviceAuth has neither deviceSignature nor deviceMac") }
+                return ResponseDocument(docType: docType, issuerSigned: issuerSigned, deviceNameSpacesBytes: deviceNameSpacesBytes,
+                                        deviceSignature: deviceSignature, deviceMac: deviceMac)
             }
         }
         return DeviceResponse(version: version, status: status, documents: documents)

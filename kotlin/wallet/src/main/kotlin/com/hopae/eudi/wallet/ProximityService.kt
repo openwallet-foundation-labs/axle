@@ -14,6 +14,7 @@ import com.hopae.eudi.wallet.mdoc.ReaderAuth
 import com.hopae.eudi.wallet.sdjwt.Base64Url
 import com.hopae.eudi.wallet.proximity.DeviceEngagement
 import com.hopae.eudi.wallet.proximity.EphemeralKeyPair
+import com.hopae.eudi.wallet.proximity.MdocNfcEngagement
 import com.hopae.eudi.wallet.proximity.ProximityException
 import com.hopae.eudi.wallet.proximity.ProximitySessionTranscript
 import com.hopae.eudi.wallet.proximity.SessionEncryption
@@ -48,16 +49,35 @@ class ProximityService internal constructor(
     /** When true, a failed final submission is recorded with ERROR status (opt-in via config). */
     private val recordFailures: Boolean = false,
 ) {
-    /** Starts a proximity session over [transport]: engage → session → reader request → consent → reply. */
-    fun present(transport: ProximityTransport): ProximitySession {
+    /**
+     * Starts a proximity session over [transport]: engage → session → reader request → consent → reply.
+     * With [nfc] = true the engagement is delivered via ISO 18013-5 NFC static handover (the app serves the
+     * Handover Select message from [ProximityState.EngagementReady.handoverNdef]); otherwise it's a QR code.
+     */
+    fun present(transport: ProximityTransport, nfc: Boolean = false): ProximitySession {
         val session = ProximitySession(scope) {
             emit(ProximityState.GeneratingEngagement)
             val eDevice = EphemeralKeyPair.generate()
-            val engagement = DeviceEngagement.qr(eDevice.publicKey, transport.retrievalMethods())
+            // QR: DeviceEngagement carries the BLE method + null handover. NFC: engagement has no connection
+            // methods; the BLE carrier + engagement live in the Handover Select message, which is also hashed
+            // into the SessionTranscript handover.
+            val engagement: ByteArray
+            val handover: Cbor
+            val handoverNdef: ByteArray?
+            if (nfc) {
+                val carrier = transport.nfcCarrier() ?: throw WalletError.Proximity.SessionFailed("transport offers no NFC carrier")
+                engagement = DeviceEngagement.qr(eDevice.publicKey)
+                handoverNdef = MdocNfcEngagement.buildHandoverSelect(engagement, carrier.serviceUuid, carrier.peripheralServerMode)
+                handover = ProximitySessionTranscript.nfcHandover(handoverNdef)
+            } else {
+                engagement = DeviceEngagement.qr(eDevice.publicKey, transport.retrievalMethods())
+                handover = Cbor.Null
+                handoverNdef = null
+            }
             // EngagementReady stays the current state while blocked on receive() — the reader-waiting state.
-            emit(ProximityState.EngagementReady(engagement))
+            emit(ProximityState.EngagementReady(engagement, handoverNdef))
             val establishment = catchingProximity { SessionMessages.decodeEstablishment(transport.receive()) }
-            val transcript = ProximitySessionTranscript.build(engagement, establishment.eReaderKey)
+            val transcript = ProximitySessionTranscript.build(engagement, establishment.eReaderKey, handover)
             val enc = SessionEncryption.forMdoc(eDevice, establishment.eReaderKey, ProximitySessionTranscript.encode(transcript))
             val deviceRequest = catchingProximity { DeviceRequest.decode(enc.decrypt(establishment.encryptedDeviceRequest)) }
 

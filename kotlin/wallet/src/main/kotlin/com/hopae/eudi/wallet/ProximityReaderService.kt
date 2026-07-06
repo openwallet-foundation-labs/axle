@@ -1,5 +1,6 @@
 package com.hopae.eudi.wallet
 
+import com.hopae.eudi.wallet.cbor.Cbor
 import com.hopae.eudi.wallet.mdoc.DeviceResponse
 import com.hopae.eudi.wallet.mdoc.MdocIssuerTrust
 import com.hopae.eudi.wallet.mdoc.MdocReader
@@ -31,11 +32,14 @@ class ProximityReaderService internal constructor(
         transport: ProximityTransport,
         engagement: ByteArray,
         documents: List<RequestedDocument>,
+        /** The NFC Handover Select message when the engagement was delivered by NFC static handover (else null = QR). */
+        handoverNdef: ByteArray? = null,
     ): List<VerifiedDocument> {
         try {
             val eDeviceKey = DeviceEngagement.parseEDeviceKey(engagement)
             val eReader = EphemeralKeyPair.generate()
-            val transcript = ProximitySessionTranscript.build(engagement, eReader.publicKey)
+            val handover = if (handoverNdef != null) ProximitySessionTranscript.nfcHandover(handoverNdef) else Cbor.Null
+            val transcript = ProximitySessionTranscript.build(engagement, eReader.publicKey, handover)
             val transcriptBytes = ProximitySessionTranscript.encode(transcript)
             val enc = SessionEncryption.forReader(eReader, eDeviceKey, transcriptBytes)
             val reader = MdocReader(readerAuth, issuerTrust)

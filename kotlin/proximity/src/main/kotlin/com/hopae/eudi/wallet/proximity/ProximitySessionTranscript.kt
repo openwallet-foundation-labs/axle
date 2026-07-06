@@ -23,6 +23,10 @@ object ProximitySessionTranscript {
 
     /** SessionTranscript bytes fed to session-key derivation (HKDF salt = SHA-256 of these). */
     fun encode(sessionTranscript: Cbor): ByteArray = CborEncoder.encode(sessionTranscript)
+
+    /** The NFC static-handover `Handover` for the SessionTranscript (ISO 18013-5 §9.1.5.1): `[HandoverSelectMessage, null]`. */
+    fun nfcHandover(handoverSelectMessage: ByteArray): Cbor =
+        Cbor.Array(listOf(Cbor.Bytes(handoverSelectMessage), Cbor.Null))
 }
 
 /** BLE connection UUIDs offered in a `DeviceEngagement`; the reader picks a mode it supports (either may be null). */

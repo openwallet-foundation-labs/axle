@@ -14,11 +14,30 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
+    <!-- ISO 18013-5 NFC static handover (Host Card Emulation) -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
+
     <application
         android:allowBackup="true"
         android:label="EUDI Wallet Demo"
         android:supportsRtl="true"
         android:theme="@style/Theme.Material3.DynamicColors.DayNight">
+
+        <!-- ISO 18013-5 NFC static handover: serves the Handover Select NDEF over HCE (Type 4 tag). -->
+        <service
+            android:name=".nfc.NfcEngagementService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/nfc_apduservice" />
+        </service>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

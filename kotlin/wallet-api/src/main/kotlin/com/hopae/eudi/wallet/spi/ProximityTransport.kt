@@ -19,4 +19,10 @@ interface ProximityTransport {
      * `DeviceEngagement` so the reader knows how to connect (e.g. the BLE service UUID). Empty = engagement carries none.
      */
     fun retrievalMethods(): List<ByteArray> = emptyList()
+
+    /** The BLE carrier for NFC static handover (service UUID + mode), or null if this transport doesn't do NFC handover. */
+    fun nfcCarrier(): NfcCarrier? = null
 }
+
+/** The BLE carrier a transport offers for ISO 18013-5 NFC static handover: the 16-byte big-endian service UUID + mode. */
+class NfcCarrier(val serviceUuid: ByteArray, val peripheralServerMode: Boolean)

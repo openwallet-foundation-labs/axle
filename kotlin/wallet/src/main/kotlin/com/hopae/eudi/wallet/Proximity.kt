@@ -48,8 +48,12 @@ class ProximitySelection(val chosen: Map<String, CredentialId>) {
 sealed interface ProximityState {
     data object GeneratingEngagement : ProximityState
 
-    /** Engagement is ready and the wallet is waiting for the reader — the app renders it as a QR / NFC tag. */
-    data class EngagementReady(val deviceEngagement: ByteArray) : ProximityState
+    /**
+     * Engagement is ready and the wallet is waiting for the reader. [deviceEngagement] is rendered as a QR
+     * code (`mdoc:` + base64url); [handoverNdef], when non-null, is the NFC Handover Select message the app
+     * should serve over HCE (NFC static handover) instead of / alongside the QR.
+     */
+    data class EngagementReady(val deviceEngagement: ByteArray, val handoverNdef: ByteArray? = null) : ProximityState
     data class RequestReceived(val request: ProximityRequest) : ProximityState
     data object Submitting : ProximityState
     data object Completed : ProximityState

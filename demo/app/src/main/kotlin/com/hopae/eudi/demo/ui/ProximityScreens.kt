@@ -41,9 +41,13 @@ import androidx.core.content.ContextCompat
 import com.google.zxing.BarcodeFormat
 import com.hopae.eudi.demo.LogStore
 import com.hopae.eudi.demo.PortraitCaptureActivity
+import android.app.Activity
 import com.hopae.eudi.demo.ble.Ble
 import com.hopae.eudi.demo.ble.BleGattClientTransport
 import com.hopae.eudi.demo.ble.BleGattServerTransport
+import com.hopae.eudi.demo.nfc.NfcEngagementService
+import com.hopae.eudi.demo.nfc.NfcReader
+import com.hopae.eudi.wallet.proximity.MdocNfcEngagement
 import com.hopae.eudi.wallet.proximity.DeviceEngagement
 import com.hopae.eudi.wallet.spi.ProximityTransport
 import java.util.UUID
@@ -86,13 +90,13 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
     val context = LocalContext.current
     var status by remember { mutableStateOf("Preparing…") }
     var qr by remember { mutableStateOf<Bitmap?>(null) }
-    var central by remember { mutableStateOf(false) } // false = peripheral server mode, true = central client mode
+    var mode by remember { mutableStateOf(0) } // 0 = QR peripheral, 1 = QR central, 2 = NFC (peripheral)
     var session by remember { mutableStateOf<ProximitySession?>(null) }
     var pending by remember { mutableStateOf<ProximityRequest?>(null) } // reader's request, awaiting the user's consent
     var granted by remember { mutableStateOf(BLE_PERMISSIONS.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }) }
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r -> granted = r.values.all { it } }
 
-    DisposableEffect(granted, central) {
+    DisposableEffect(granted, mode) {
         if (!granted) {
             status = "Grant Bluetooth permission to present"
             permLauncher.launch(BLE_PERMISSIONS)
@@ -100,25 +104,34 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
         }
         qr = null
         pending = null
+        val central = mode == 1
+        val nfc = mode == 2
         val uuid = UUID.randomUUID()
         val uuidBytes = Ble.uuidToBytes(uuid)
         val scope = CoroutineScope(Dispatchers.Main)
-        // Peripheral server mode → we're the GATT server. Central client mode → we're the GATT client (the
-        // reader advertises our UUID); scan for it in parallel while present() shows the QR.
-        val server = if (central) null else BleGattServerTransport(context, uuid, Ble.PERIPHERAL_SERVER, listOf(DeviceEngagement.bleRetrievalMethod(peripheralServerUuid = uuidBytes)))
+        // Peripheral server mode / NFC → we're the GATT server. Central client mode → we're the GATT client (the
+        // reader advertises our UUID); scan for it in parallel. NFC delivers the engagement via HCE (no QR).
+        val server = if (central) null else BleGattServerTransport(context, uuid, Ble.PERIPHERAL_SERVER, if (nfc) emptyList() else listOf(DeviceEngagement.bleRetrievalMethod(peripheralServerUuid = uuidBytes)))
         val client = if (central) BleGattClientTransport(context, uuid, Ble.CENTRAL_CLIENT, listOf(DeviceEngagement.bleRetrievalMethod(centralClientUuid = uuidBytes))) else null
         val transport: ProximityTransport = server ?: client!!
         server?.start()
         if (client != null) scope.launch { runCatching { client.connect() } }
         scope.launch {
             try {
-                val s = wallet.proximity.present(transport)
+                val s = wallet.proximity.present(transport, nfc = nfc)
                 session = s
                 s.state.collect { st ->
                     when (st) {
                         is ProximityState.EngagementReady -> {
-                            qr = encodeQr("mdoc:" + b64(st.deviceEngagement))
-                            status = "Waiting for a reader — show this QR"
+                            val ndef = st.handoverNdef
+                            if (ndef != null) { // NFC static handover — serve over HCE, no QR
+                                NfcEngagementService.ndefMessage = ndef
+                                qr = null
+                                status = "Tap your phone to the reader"
+                            } else {
+                                qr = encodeQr("mdoc:" + b64(st.deviceEngagement))
+                                status = "Waiting for a reader — show this QR"
+                            }
                         }
                         is ProximityState.RequestReceived -> {
                             pending = st.request // ask the user before sending (like OpenID4VP consent)
@@ -137,7 +150,7 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
                 LogStore.log("❌ Proximity holder: ${e.message}")
             }
         }
-        onDispose { scope.cancel(); server?.stop(); client?.stop() }
+        onDispose { NfcEngagementService.ndefMessage = null; scope.cancel(); server?.stop(); client?.stop() }
     }
 
     Dialog(onDismissRequest = onClose) {
@@ -153,8 +166,9 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
                     )
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = !central, onClick = { central = false }, label = { Text("Peripheral") })
-                        FilterChip(selected = central, onClick = { central = true }, label = { Text("Central") })
+                        FilterChip(selected = mode == 0, onClick = { mode = 0 }, label = { Text("QR·Periph") })
+                        FilterChip(selected = mode == 1, onClick = { mode = 1 }, label = { Text("QR·Central") })
+                        FilterChip(selected = mode == 2, onClick = { mode = 2 }, label = { Text("NFC") })
                     }
                     qr?.let { Image(it.asImageBitmap(), contentDescription = "engagement QR", modifier = Modifier.size(260.dp)) }
                     Text(status, style = MaterialTheme.typography.bodyLarge)
@@ -247,6 +261,28 @@ fun ProximityReaderScreen(wallet: Wallet) {
                 setCaptureActivity(PortraitCaptureActivity::class.java)
             })
         }) { Text("Scan wallet QR") }
+        Button(onClick = {
+            if (!granted) { permLauncher.launch(BLE_PERMISSIONS); return@Button }
+            results = emptyList()
+            status = "Hold near the wallet (NFC)…"
+            scope.launch {
+                try {
+                    val ndef = NfcReader.readHandover(context as Activity)
+                    val eng = MdocNfcEngagement.parseHandoverSelect(ndef) ?: run { status = "❌ Not an mdoc NFC tag"; return@launch }
+                    status = "Connecting over BLE…"
+                    val uuids = if (eng.peripheralServerMode) Ble.PERIPHERAL_SERVER else Ble.CENTRAL_CLIENT
+                    val transport = BleGattClientTransport(context, Ble.bytesToUuid(eng.serviceUuid), uuids).also { it.connect() }
+                    status = "Requesting documents…"
+                    val docs = wallet.reader.read(transport, eng.deviceEngagement, readerRequest(), handoverNdef = ndef)
+                    results = docs
+                    status = if (docs.isEmpty()) "No documents returned" else "✅ Read ${docs.size} document(s)"
+                    LogStore.log("Reader read ${docs.size} document(s) over NFC+BLE")
+                } catch (e: Throwable) {
+                    status = "❌ ${e.message}"
+                    LogStore.log("❌ Reader (NFC): ${e.message}")
+                }
+            }
+        }) { Text("Tap to read (NFC)") }
         Text(status, style = MaterialTheme.typography.bodyLarge)
         results.forEach { doc -> ReaderResultCard(doc) }
     }

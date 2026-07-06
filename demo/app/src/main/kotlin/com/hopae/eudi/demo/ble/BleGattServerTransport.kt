@@ -17,6 +17,7 @@ import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
 import com.hopae.eudi.demo.LogStore
+import com.hopae.eudi.wallet.spi.NfcCarrier
 import com.hopae.eudi.wallet.spi.ProximityTransport
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
@@ -73,6 +74,8 @@ class BleGattServerTransport(
     }
 
     override fun retrievalMethods(): List<ByteArray> = advertisedMethods
+
+    override fun nfcCarrier(): NfcCarrier = NfcCarrier(Ble.uuidToBytes(serviceUuid), peripheralServerMode = uuids.state == Ble.PERIPHERAL_SERVER.state)
 
     override suspend fun receive(): ByteArray = incoming.receive()
 

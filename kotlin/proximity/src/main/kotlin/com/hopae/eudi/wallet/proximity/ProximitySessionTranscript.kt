@@ -49,7 +49,13 @@ object DeviceEngagement {
         Cbor.Array(
             listOf(
                 Cbor.int(2), Cbor.int(1), // type 2 = BLE, version 1
-                Cbor.CborMap(listOf(Cbor.int(0) to Cbor.Bool(true), Cbor.int(10) to Cbor.Bytes(serviceUuid))),
+                Cbor.CborMap(
+                    listOf(
+                        Cbor.int(0) to Cbor.Bool(true),  // mdoc peripheral server mode supported (both flags are mandatory)
+                        Cbor.int(1) to Cbor.Bool(false), // mdoc central client mode not supported
+                        Cbor.int(10) to Cbor.Bytes(serviceUuid), // peripheral server mode UUID
+                    ),
+                ),
             ),
         ),
     )

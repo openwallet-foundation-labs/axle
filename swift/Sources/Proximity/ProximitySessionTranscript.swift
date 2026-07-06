@@ -35,7 +35,11 @@ public enum DeviceEngagement {
     public static func bleRetrievalMethod(serviceUuid: [UInt8]) throws -> [UInt8] {
         try CborEncoder.encode(.array([
             .int(2), .int(1), // type 2 = BLE, version 1
-            .map([(.int(0), .bool(true)), (.int(10), .bytes(serviceUuid))]),
+            .map([
+                (.int(0), .bool(true)),   // mdoc peripheral server mode supported (both flags are mandatory)
+                (.int(1), .bool(false)),  // mdoc central client mode not supported
+                (.int(10), .bytes(serviceUuid)), // peripheral server mode UUID
+            ]),
         ]))
     }
 

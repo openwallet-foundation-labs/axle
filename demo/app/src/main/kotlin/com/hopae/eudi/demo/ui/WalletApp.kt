@@ -179,7 +179,7 @@ fun WalletApp(wallet: Wallet) {
                                 Icon(Icons.Filled.Nfc, null, Modifier.size(20.dp))
                             }
                         },
-                        text = { Text("Present") },
+                        text = { Text("Proximity") },
                     )
                     ExtendedFloatingActionButton(
                         onClick = {

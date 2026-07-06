@@ -16,12 +16,14 @@ dependencies {
     // Protocol engines are internal wiring — hidden from the public API.
     implementation(project(":credential-store"))
     implementation(project(":sdjwt"))
-    implementation(project(":mdoc"))
+    // mdoc + proximity are part of the public surface: the reader API (RequestedDocument/VerifiedDocument),
+    // the ISO transports (ProximityTransport authors call DeviceEngagement.bleRetrievalMethod), and HPKE.
+    api(project(":mdoc"))
     implementation(project(":trust"))
     implementation(project(":statuslist"))
     implementation(project(":openid4vci"))
     implementation(project(":openid4vp"))
-    implementation(project(":proximity"))
+    api(project(":proximity"))
 
     testImplementation(kotlin("test"))
     testImplementation(project(":testkit"))

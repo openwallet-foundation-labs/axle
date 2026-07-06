@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Sensors
@@ -160,19 +161,22 @@ fun WalletApp(wallet: Wallet) {
             NavigationBar {
                 NavigationBarItem(selected = tab == 0, onClick = { tab = 0 },
                     icon = { Icon(Icons.Filled.CreditCard, null) }, label = { Text("Credentials") })
-                NavigationBarItem(selected = tab == 1, onClick = { tab = 1; refreshKey++ },
-                    icon = { Icon(Icons.Filled.ReceiptLong, null) }, label = { Text("Transactions") })
-                NavigationBarItem(selected = tab == 2, onClick = { tab = 2 },
-                    icon = { Icon(Icons.Filled.BugReport, null) }, label = { Text("Debug Log") })
-                NavigationBarItem(selected = tab == 3, onClick = { tab = 3 },
+                NavigationBarItem(selected = tab == 1, onClick = { tab = 1 },
                     icon = { Icon(Icons.Filled.Sensors, null) }, label = { Text("Reader") })
+                NavigationBarItem(selected = tab == 2, onClick = { tab = 2; refreshKey++ },
+                    icon = { Icon(Icons.Filled.ReceiptLong, null) }, label = { Text("Transaction Log") })
+                NavigationBarItem(selected = tab == 3, onClick = { tab = 3 },
+                    icon = { Icon(Icons.Filled.BugReport, null) }, label = { Text("Debug Log") })
             }
         },
         floatingActionButton = {
             if (tab == 0) {
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SmallFloatingActionButton(onClick = { showHolder = true }) {
-                        Icon(Icons.Filled.Bluetooth, contentDescription = "Present via BLE")
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Icon(Icons.Filled.Bluetooth, "Present via BLE", Modifier.size(18.dp))
+                            Icon(Icons.Filled.Nfc, "Present via NFC", Modifier.size(18.dp))
+                        }
                     }
                     ExtendedFloatingActionButton(
                         onClick = {
@@ -194,9 +198,9 @@ fun WalletApp(wallet: Wallet) {
         Column(Modifier.padding(padding).fillMaxSize()) {
             when (tab) {
                 0 -> CredentialsScreen(wallet, refreshKey)
-                1 -> TransactionsScreen(wallet, refreshKey)
-                2 -> DebugLogScreen()
-                else -> ProximityReaderScreen(wallet)
+                1 -> ProximityReaderScreen(wallet)
+                2 -> TransactionsScreen(wallet, refreshKey)
+                else -> DebugLogScreen()
             }
         }
     }

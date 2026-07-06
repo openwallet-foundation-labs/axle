@@ -156,7 +156,7 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
     Dialog(onDismissRequest = onClose) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Present via BLE (mdoc)", style = MaterialTheme.typography.titleLarge)
+                Text("Present mdoc (BLE / NFC)", style = MaterialTheme.typography.titleLarge)
                 val req = pending
                 if (req != null) {
                     ProximityConsent(
@@ -248,7 +248,7 @@ fun ProximityReaderScreen(wallet: Wallet) {
     ) {
         Text("Proximity Reader", style = MaterialTheme.typography.titleLarge)
         Text(
-            "Acts as an ISO 18013-5 mdoc reader: scan another wallet's proximity QR and read its mdoc over BLE.",
+            "Acts as an ISO 18013-5 mdoc reader — scan a wallet's QR or tap it over NFC, then read its mdoc over BLE.",
             style = MaterialTheme.typography.bodyMedium,
         )
         Button(onClick = {

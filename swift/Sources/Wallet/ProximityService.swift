@@ -24,7 +24,7 @@ public struct ProximityService {
         let session = ProximitySession { s in
             s.emit(.generatingEngagement)
             let eDevice = EphemeralKeyPair()
-            let engagement = try DeviceEngagement.qr(eDeviceKey: eDevice.publicKey)
+            let engagement = try DeviceEngagement.qr(eDeviceKey: eDevice.publicKey, retrievalMethods: transport.retrievalMethods())
             // engagementReady stays the current state while blocked on receive() — the reader-waiting state.
             s.emit(.engagementReady(deviceEngagement: engagement))
 

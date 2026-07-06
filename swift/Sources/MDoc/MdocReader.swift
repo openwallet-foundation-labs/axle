@@ -28,6 +28,12 @@ public struct VerifiedDocument {
     public let elements: [String: [String: Cbor]]
     /// True once the `deviceSignature` bound to this SessionTranscript verified (holder binding).
     public let deviceAuthenticated: Bool
+
+    public init(docType: String, elements: [String: [String: Cbor]], deviceAuthenticated: Bool) {
+        self.docType = docType
+        self.elements = elements
+        self.deviceAuthenticated = deviceAuthenticated
+    }
 }
 
 /// The verifier/reader side of mdoc (ISO 18013-5): builds `DeviceRequest`s (optionally signing

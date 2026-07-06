@@ -11,4 +11,12 @@ public protocol ProximityTransport: Sendable {
 
     /// Tears down the transport; idempotent.
     func close() async
+
+    /// ISO 18013-5 `DeviceRetrievalMethod` entries (CBOR-encoded) this transport advertises, embedded into the QR
+    /// `DeviceEngagement` so the reader knows how to connect (e.g. the BLE service UUID). Empty = engagement carries none.
+    func retrievalMethods() -> [[UInt8]]
+}
+
+public extension ProximityTransport {
+    func retrievalMethods() -> [[UInt8]] { [] }
 }

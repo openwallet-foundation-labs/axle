@@ -1,5 +1,6 @@
 import CredentialStore
 import Foundation
+import MDoc
 import OpenID4VCI
 import OpenID4VP
 import SdJwt
@@ -16,6 +17,8 @@ public struct Wallet {
     public let issuance: IssuanceService
     public let presentation: PresentationService
     public let proximity: ProximityService
+    /// The reader/verifier side of ISO 18013-5 proximity (request + verify documents from another wallet).
+    public let reader: ProximityReaderService
     /// Audit history of presentations/issuances (ARF/GDPR) — query with `history()` / `query(...)`.
     public let transactions: TransactionLog
     private let ports: WalletPorts
@@ -53,9 +56,12 @@ public struct Wallet {
         let proximity = ProximityService(store: store, txlog: txlog, secureAreas: ports.secureAreas,
                                          readerTrust: readerValidator.map { X5cMdocReaderTrust(validator: $0) },
                                          recordFailures: recordFailures)
+        // Reader side: verify presented mdocs against the same issuer anchors used for status/issuance.
+        let reader = ProximityReaderService(issuerTrust: X5cMdocIssuerTrust(validator: validator))
 
         return Wallet(credentials: CredentialsService(store: store, statusClient: statusClient),
-                      issuance: issuance, presentation: presentation, proximity: proximity, transactions: txlog, ports: ports)
+                      issuance: issuance, presentation: presentation, proximity: proximity, reader: reader,
+                      transactions: txlog, ports: ports)
     }
 }
 

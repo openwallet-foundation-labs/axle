@@ -24,15 +24,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Icon
@@ -93,6 +96,7 @@ private class PendingConsent(val session: PresentationSession, val request: Pres
 fun WalletApp(wallet: Wallet) {
     var tab by remember { mutableStateOf(0) }
     var refreshKey by remember { mutableStateOf(0) }
+    var showHolder by remember { mutableStateOf(false) }
     var offerToConfirm by remember { mutableStateOf<CredentialOffer?>(null) }
     var txCodeFor by remember { mutableStateOf<CredentialOffer?>(null) }
     var consent by remember { mutableStateOf<PendingConsent?>(null) }
@@ -160,23 +164,30 @@ fun WalletApp(wallet: Wallet) {
                     icon = { Icon(Icons.Filled.ReceiptLong, null) }, label = { Text("Transactions") })
                 NavigationBarItem(selected = tab == 2, onClick = { tab = 2 },
                     icon = { Icon(Icons.Filled.BugReport, null) }, label = { Text("Debug Log") })
+                NavigationBarItem(selected = tab == 3, onClick = { tab = 3 },
+                    icon = { Icon(Icons.Filled.Sensors, null) }, label = { Text("Reader") })
             }
         },
         floatingActionButton = {
             if (tab == 0) {
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        scanLauncher.launch(ScanOptions().apply {
-                            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                            setPrompt("Scan a credential offer or verifier request")
-                            setBeepEnabled(false)
-                            setOrientationLocked(false)
-                            setCaptureActivity(PortraitCaptureActivity::class.java)
-                        })
-                    },
-                    icon = { Icon(Icons.Filled.QrCodeScanner, null) },
-                    text = { Text("Scan QR") },
-                )
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SmallFloatingActionButton(onClick = { showHolder = true }) {
+                        Icon(Icons.Filled.Bluetooth, contentDescription = "Present via BLE")
+                    }
+                    ExtendedFloatingActionButton(
+                        onClick = {
+                            scanLauncher.launch(ScanOptions().apply {
+                                setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                setPrompt("Scan a credential offer or verifier request")
+                                setBeepEnabled(false)
+                                setOrientationLocked(false)
+                                setCaptureActivity(PortraitCaptureActivity::class.java)
+                            })
+                        },
+                        icon = { Icon(Icons.Filled.QrCodeScanner, null) },
+                        text = { Text("Scan QR") },
+                    )
+                }
             }
         },
     ) { padding ->
@@ -184,10 +195,13 @@ fun WalletApp(wallet: Wallet) {
             when (tab) {
                 0 -> CredentialsScreen(wallet, refreshKey)
                 1 -> TransactionsScreen(wallet, refreshKey)
-                else -> DebugLogScreen()
+                2 -> DebugLogScreen()
+                else -> ProximityReaderScreen(wallet)
             }
         }
     }
+
+    if (showHolder) ProximityHolderDialog(wallet) { showHolder = false }
 
     offerToConfirm?.let { offer ->
         OfferConfirmDialog(

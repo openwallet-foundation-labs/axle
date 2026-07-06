@@ -450,7 +450,7 @@ private fun FormatChip(format: CredentialFormat) {
 }
 
 @Composable
-private fun InfoBox(title: String, content: @Composable ColumnScope.() -> Unit) {
+internal fun InfoBox(title: String, content: @Composable ColumnScope.() -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp)) {
             Text(title.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -461,7 +461,7 @@ private fun InfoBox(title: String, content: @Composable ColumnScope.() -> Unit) 
 }
 
 @Composable
-private fun TrustBadge(trusted: Boolean) {
+internal fun TrustBadge(trusted: Boolean) {
     val bg = if (trusted) Color(0xFF2E7D32) else Color(0xFFC62828)
     Surface(color = bg, shape = MaterialTheme.shapes.small) {
         Text(

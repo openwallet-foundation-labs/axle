@@ -23,6 +23,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -46,7 +47,9 @@ import com.hopae.eudi.demo.ble.BleGattServerTransport
 import com.hopae.eudi.wallet.proximity.DeviceEngagement
 import com.hopae.eudi.wallet.spi.ProximityTransport
 import java.util.UUID
+import com.hopae.eudi.wallet.ProximityRequest
 import com.hopae.eudi.wallet.ProximitySelection
+import com.hopae.eudi.wallet.ProximitySession
 import com.hopae.eudi.wallet.ProximityState
 import com.hopae.eudi.wallet.Wallet
 import com.hopae.eudi.wallet.cbor.Cbor
@@ -84,6 +87,8 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
     var status by remember { mutableStateOf("Preparing…") }
     var qr by remember { mutableStateOf<Bitmap?>(null) }
     var central by remember { mutableStateOf(false) } // false = peripheral server mode, true = central client mode
+    var session by remember { mutableStateOf<ProximitySession?>(null) }
+    var pending by remember { mutableStateOf<ProximityRequest?>(null) } // reader's request, awaiting the user's consent
     var granted by remember { mutableStateOf(BLE_PERMISSIONS.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }) }
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r -> granted = r.values.all { it } }
 
@@ -94,6 +99,7 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
             return@DisposableEffect onDispose {}
         }
         qr = null
+        pending = null
         val uuid = UUID.randomUUID()
         val uuidBytes = Ble.uuidToBytes(uuid)
         val scope = CoroutineScope(Dispatchers.Main)
@@ -106,22 +112,23 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
         if (client != null) scope.launch { runCatching { client.connect() } }
         scope.launch {
             try {
-                val session = wallet.proximity.present(transport)
-                session.state.collect { st ->
+                val s = wallet.proximity.present(transport)
+                session = s
+                s.state.collect { st ->
                     when (st) {
                         is ProximityState.EngagementReady -> {
                             qr = encodeQr("mdoc:" + b64(st.deviceEngagement))
                             status = "Waiting for a reader — show this QR"
                         }
                         is ProximityState.RequestReceived -> {
-                            status = "Reader connected — responding…"
-                            LogStore.log("Proximity: reader requested ${st.request.documents.size} doc(s); auto-responding")
-                            session.respond(ProximitySelection.auto(st.request))
+                            pending = st.request // ask the user before sending (like OpenID4VP consent)
+                            status = "Reader connected — review the request"
+                            LogStore.log("Proximity: reader requested ${st.request.documents.size} doc(s); awaiting consent")
                         }
-                        ProximityState.Submitting -> status = "Sending response…"
-                        ProximityState.Completed -> status = "✅ Presented to the reader"
-                        ProximityState.Declined -> status = "Declined"
-                        is ProximityState.Failed -> status = "❌ ${st.error.message}"
+                        ProximityState.Submitting -> { pending = null; status = "Sending response…" }
+                        ProximityState.Completed -> { pending = null; status = "✅ Presented to the reader" }
+                        ProximityState.Declined -> { pending = null; status = "Declined" }
+                        is ProximityState.Failed -> { pending = null; status = "❌ ${st.error.message}" }
                         else -> {}
                     }
                 }
@@ -137,15 +144,48 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Present via BLE (mdoc)", style = MaterialTheme.typography.titleLarge)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = !central, onClick = { central = false }, label = { Text("Peripheral") })
-                    FilterChip(selected = central, onClick = { central = true }, label = { Text("Central") })
+                val req = pending
+                if (req != null) {
+                    ProximityConsent(
+                        req,
+                        onShare = { session?.respond(ProximitySelection.auto(req)); pending = null; status = "Sending response…" },
+                        onDecline = { session?.decline(); pending = null; status = "Declined" },
+                    )
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = !central, onClick = { central = false }, label = { Text("Peripheral") })
+                        FilterChip(selected = central, onClick = { central = true }, label = { Text("Central") })
+                    }
+                    qr?.let { Image(it.asImageBitmap(), contentDescription = "engagement QR", modifier = Modifier.size(260.dp)) }
+                    Text(status, style = MaterialTheme.typography.bodyLarge)
+                    Button(onClick = onClose) { Text("Close") }
                 }
-                qr?.let { Image(it.asImageBitmap(), contentDescription = "engagement QR", modifier = Modifier.size(260.dp)) }
-                Text(status, style = MaterialTheme.typography.bodyLarge)
-                Button(onClick = onClose) { Text("Close") }
             }
         }
+    }
+}
+
+/** Consent for an in-person reader's proximity request — what it asked for + a Share/Decline choice. */
+@Composable
+private fun ProximityConsent(req: ProximityRequest, onShare: () -> Unit, onDecline: () -> Unit) {
+    InfoBox("Reader") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(req.reader.commonName ?: "In-person reader", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TrustBadge(req.reader.trusted)
+        }
+    }
+    InfoBox("Will share") {
+        req.documents.forEach { doc ->
+            val missing = doc.candidate == null
+            Text(doc.docType + if (missing) " — no matching credential" else "", style = MaterialTheme.typography.labelMedium)
+            doc.requestedElements.forEach { (ns, elements) ->
+                elements.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+            }
+        }
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(onClick = onDecline, modifier = Modifier.weight(1f)) { Text("Decline") }
+        Button(onClick = onShare, enabled = req.satisfiable, modifier = Modifier.weight(1f)) { Text("Share") }
     }
 }
 

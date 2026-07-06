@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Base64
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import androidx.credentials.DigitalCredential
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.GetDigitalCredentialOption
@@ -15,6 +16,7 @@ import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.lifecycle.lifecycleScope
 import com.hopae.eudi.wallet.PresentationSelection
 import com.hopae.eudi.wallet.PresentationState
+import com.hopae.eudi.wallet.mdoc.DeviceRequest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -45,16 +47,25 @@ class GetCredentialActivity : ComponentActivity() {
         if (mdoc != null) {
             val (proto, data) = mdoc
             LogStore.log("DC API [$proto] request · origin=$origin")
-            lifecycleScope.launch {
-                runCatching {
-                    val response = wallet.proximity.respondDcApiMdoc(data.getString("deviceRequest"), data.getString("encryptionInfo"), origin)
-                    val content = JSONObject().put("protocol", proto).put("data", JSONObject().put("response", response))
-                    PendingIntentHandler.setGetCredentialResponse(resultData, GetCredentialResponse(DigitalCredential(content.toString())))
-                    LogStore.log("✅ DC API (mdoc) response returned to caller")
-                    setResult(RESULT_OK, resultData)
-                }.onFailure { failException(resultData, it.message) }
-                finish()
-            }
+            val items = runCatching {
+                DeviceRequest.decode(Base64.decode(data.getString("deviceRequest"), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)).docRequests.map { dr ->
+                    ConsentItem(dr.docType, dr.requested.flatMap { (_, els) -> els.map { it.identifier } })
+                }
+            }.getOrDefault(emptyList())
+            showConsent(origin, trusted = false, items,
+                onApprove = {
+                    lifecycleScope.launch {
+                        runCatching {
+                            val response = wallet.proximity.respondDcApiMdoc(data.getString("deviceRequest"), data.getString("encryptionInfo"), origin)
+                            val content = JSONObject().put("protocol", proto).put("data", JSONObject().put("response", response))
+                            PendingIntentHandler.setGetCredentialResponse(resultData, GetCredentialResponse(DigitalCredential(content.toString())))
+                            LogStore.log("✅ DC API (mdoc) response returned to caller")
+                            setResult(RESULT_OK, resultData)
+                        }.onFailure { failException(resultData, it.message) }
+                        finish()
+                    }
+                },
+                onDecline = { LogStore.log("DC API (mdoc) declined by user"); failException(resultData, "declined by user"); finish() })
             return
         }
 
@@ -72,20 +83,35 @@ class GetCredentialActivity : ComponentActivity() {
                 if (resolved is PresentationState.Failed) throw resolved.error
                 val presentation = (resolved as PresentationState.RequestResolved).request
                 LogStore.log("DC API verifier=${presentation.verifier.clientId} · satisfiable=${presentation.satisfiable}")
-                session.respond(PresentationSelection.auto(presentation))
-                when (val done = session.state.first { it.isTerminal }) {
-                    is PresentationState.Completed -> {
-                        val response = done.dcApiResponse ?: error("no DC API response produced")
-                        PendingIntentHandler.setGetCredentialResponse(resultData, GetCredentialResponse(DigitalCredential(response)))
-                        LogStore.log("✅ DC API response returned to caller")
-                        setResult(RESULT_OK, resultData)
-                    }
-                    is PresentationState.Failed -> throw done.error
-                    else -> error("unexpected terminal state $done")
+                val items = presentation.queries.map { q ->
+                    ConsentItem(q.queryId, q.candidates.firstOrNull()?.disclosedPaths?.map { it.joinToString(" › ") } ?: listOf("no matching credential"))
                 }
-            }.onFailure { failException(resultData, it.message) }
-            finish()
+                showConsent(presentation.verifier.commonName ?: presentation.verifier.clientId, presentation.verifier.trusted, items,
+                    onApprove = {
+                        lifecycleScope.launch {
+                            runCatching {
+                                session.respond(PresentationSelection.auto(presentation))
+                                when (val done = session.state.first { it.isTerminal }) {
+                                    is PresentationState.Completed -> {
+                                        val response = done.dcApiResponse ?: error("no DC API response produced")
+                                        PendingIntentHandler.setGetCredentialResponse(resultData, GetCredentialResponse(DigitalCredential(response)))
+                                        LogStore.log("✅ DC API response returned to caller")
+                                        setResult(RESULT_OK, resultData)
+                                    }
+                                    is PresentationState.Failed -> throw done.error
+                                    else -> error("unexpected terminal state $done")
+                                }
+                            }.onFailure { failException(resultData, it.message) }
+                            finish()
+                        }
+                    },
+                    onDecline = { LogStore.log("DC API declined by user"); failException(resultData, "declined by user"); finish() })
+            }.onFailure { failException(resultData, it.message); finish() }
         }
+    }
+
+    private fun showConsent(verifier: String, trusted: Boolean, items: List<ConsentItem>, onApprove: () -> Unit, onDecline: () -> Unit) {
+        setContent { DcApiConsentScreen(verifier, trusted, items, onApprove, onDecline) }
     }
 
     /**

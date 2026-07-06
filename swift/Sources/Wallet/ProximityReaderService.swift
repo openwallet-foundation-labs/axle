@@ -18,13 +18,16 @@ public struct ProximityReaderService: Sendable {
     /// Requests `documents` from a wallet over `transport` (the reader is the BLE central) and verifies the
     /// response against `engagement` (the scanned QR). Fully verified when issuer trust + holder binding
     /// check out (`deviceAuthenticated == true`); otherwise the disclosed elements are still returned, unverified.
+    /// - Parameter handoverNdef: the NFC Handover Select message when the engagement was delivered by NFC static
+    ///   handover (else nil = QR); it's bound into the SessionTranscript so both sides agree.
     public func read(
         transport: any ProximityTransport,
         engagement: [UInt8],
-        documents: [RequestedDocument]
+        documents: [RequestedDocument],
+        handoverNdef: [UInt8]? = nil
     ) async throws -> [VerifiedDocument] {
         do {
-            let docs = try await exchange(transport, engagement, documents)
+            let docs = try await exchange(transport, engagement, documents, handoverNdef)
             await transport.close()
             return docs
         } catch {
@@ -36,11 +39,13 @@ public struct ProximityReaderService: Sendable {
     private func exchange(
         _ transport: any ProximityTransport,
         _ engagement: [UInt8],
-        _ documents: [RequestedDocument]
+        _ documents: [RequestedDocument],
+        _ handoverNdef: [UInt8]?
     ) async throws -> [VerifiedDocument] {
         let eDeviceKey = try DeviceEngagement.parseEDeviceKey(engagement)
         let eReader = EphemeralKeyPair()
-        let transcript = try ProximitySessionTranscript.build(deviceEngagement: engagement, eReaderKey: eReader.publicKey)
+        let handover: Cbor = handoverNdef != nil ? ProximitySessionTranscript.nfcHandover(handoverNdef!) : .null
+        let transcript = try ProximitySessionTranscript.build(deviceEngagement: engagement, eReaderKey: eReader.publicKey, handover: handover)
         let transcriptBytes = try ProximitySessionTranscript.encode(transcript)
         let enc = try SessionEncryption.forReader(ephemeral: eReader, devicePublicKey: eDeviceKey, sessionTranscriptBytes: transcriptBytes)
         let reader = MdocReader(readerAuth: readerAuth, issuerTrust: issuerTrust)

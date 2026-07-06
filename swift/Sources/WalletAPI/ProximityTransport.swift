@@ -15,8 +15,22 @@ public protocol ProximityTransport: Sendable {
     /// ISO 18013-5 `DeviceRetrievalMethod` entries (CBOR-encoded) this transport advertises, embedded into the QR
     /// `DeviceEngagement` so the reader knows how to connect (e.g. the BLE service UUID). Empty = engagement carries none.
     func retrievalMethods() -> [[UInt8]]
+
+    /// The BLE carrier for NFC static handover (service UUID + mode), or nil if this transport doesn't do NFC handover.
+    func nfcCarrier() -> NfcCarrier?
 }
 
 public extension ProximityTransport {
     func retrievalMethods() -> [[UInt8]] { [] }
+    func nfcCarrier() -> NfcCarrier? { nil }
+}
+
+/// The BLE carrier a transport offers for ISO 18013-5 NFC static handover: the 16-byte big-endian service UUID + mode.
+public struct NfcCarrier: Sendable {
+    public let serviceUuid: [UInt8]
+    public let peripheralServerMode: Bool
+    public init(serviceUuid: [UInt8], peripheralServerMode: Bool) {
+        self.serviceUuid = serviceUuid
+        self.peripheralServerMode = peripheralServerMode
+    }
 }

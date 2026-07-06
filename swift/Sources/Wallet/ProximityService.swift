@@ -20,16 +20,30 @@ public struct ProximityService {
     var recordFailures: Bool = false
 
     /// Starts a proximity session over `transport`: engage → session → reader request → consent → reply.
-    public func present(_ transport: any ProximityTransport) -> ProximitySession {
+    /// With `nfc` = true the engagement is delivered via ISO 18013-5 NFC static handover (the app serves the
+    /// Handover Select message from `engagementReady`'s `handoverNdef`); otherwise it's a QR code.
+    public func present(_ transport: any ProximityTransport, nfc: Bool = false) -> ProximitySession {
         let session = ProximitySession { s in
             s.emit(.generatingEngagement)
             let eDevice = EphemeralKeyPair()
-            let engagement = try DeviceEngagement.qr(eDeviceKey: eDevice.publicKey, retrievalMethods: transport.retrievalMethods())
+            let engagement: [UInt8]
+            let handover: Cbor
+            let handoverNdef: [UInt8]?
+            if nfc {
+                guard let carrier = transport.nfcCarrier() else { throw ProximityError.sessionFailed("transport offers no NFC carrier") }
+                engagement = try DeviceEngagement.qr(eDeviceKey: eDevice.publicKey)
+                handoverNdef = MdocNfcEngagement.buildHandoverSelect(deviceEngagement: engagement, serviceUuid: carrier.serviceUuid, peripheralServerMode: carrier.peripheralServerMode)
+                handover = ProximitySessionTranscript.nfcHandover(handoverNdef!)
+            } else {
+                engagement = try DeviceEngagement.qr(eDeviceKey: eDevice.publicKey, retrievalMethods: transport.retrievalMethods())
+                handover = .null
+                handoverNdef = nil
+            }
             // engagementReady stays the current state while blocked on receive() — the reader-waiting state.
-            s.emit(.engagementReady(deviceEngagement: engagement))
+            s.emit(.engagementReady(deviceEngagement: engagement, handoverNdef: handoverNdef))
 
             let establishment = try await catchingProximity { try SessionMessages.decodeEstablishment(try await transport.receive()) }
-            let transcript = try ProximitySessionTranscript.build(deviceEngagement: engagement, eReaderKey: establishment.eReaderKey)
+            let transcript = try ProximitySessionTranscript.build(deviceEngagement: engagement, eReaderKey: establishment.eReaderKey, handover: handover)
             let enc = try SessionEncryption.forMdoc(
                 ephemeral: eDevice, readerPublicKey: establishment.eReaderKey,
                 sessionTranscriptBytes: try ProximitySessionTranscript.encode(transcript))

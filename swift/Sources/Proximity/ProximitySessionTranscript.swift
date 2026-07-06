@@ -15,6 +15,11 @@ public enum ProximitySessionTranscript {
 
     /// SessionTranscript bytes fed to session-key derivation (HKDF salt = SHA-256 of these).
     public static func encode(_ sessionTranscript: Cbor) throws -> [UInt8] { try CborEncoder.encode(sessionTranscript) }
+
+    /// The NFC static-handover `Handover` for the SessionTranscript (ISO 18013-5 §9.1.5.1): `[HandoverSelectMessage, null]`.
+    public static func nfcHandover(_ handoverSelectMessage: [UInt8]) -> Cbor {
+        .array([.bytes(handoverSelectMessage), .null])
+    }
 }
 
 /// BLE connection UUIDs offered in a `DeviceEngagement`; the reader picks a mode it supports (either may be nil).

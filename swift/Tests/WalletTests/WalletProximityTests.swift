@@ -68,7 +68,7 @@ final class WalletProximityTests: XCTestCase {
         var terminal: ProximityState?
         for await state in session.states {
             switch state {
-            case let .engagementReady(engagement):
+            case let .engagementReady(engagement, _):
                 // reader: establish the encrypted session and send a DeviceRequest for family_name + given_name
                 let eReader = EphemeralKeyPair()
                 let eDeviceKey = try DeviceEngagement.parseEDeviceKey(engagement)
@@ -147,7 +147,7 @@ final class WalletProximityTests: XCTestCase {
         var terminal: ProximityState?
         for await state in session.states {
             switch state {
-            case let .engagementReady(engagement):
+            case let .engagementReady(engagement, _):
                 let eReader = EphemeralKeyPair()
                 let t = try ProximitySessionTranscript.build(deviceEngagement: engagement, eReaderKey: eReader.publicKey)
                 let rs = try SessionEncryption.forReader(ephemeral: eReader, devicePublicKey: try DeviceEngagement.parseEDeviceKey(engagement),

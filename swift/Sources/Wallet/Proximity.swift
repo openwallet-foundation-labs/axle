@@ -46,7 +46,7 @@ public struct ProximitySelection {
 public enum ProximityState {
     case generatingEngagement
     /// Engagement is ready and the wallet is waiting for the reader — the app renders it as a QR / NFC tag.
-    case engagementReady(deviceEngagement: [UInt8])
+    case engagementReady(deviceEngagement: [UInt8], handoverNdef: [UInt8]? = nil)
     case requestReceived(ProximityRequest)
     case submitting
     case completed

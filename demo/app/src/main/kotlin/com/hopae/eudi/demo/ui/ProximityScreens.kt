@@ -20,6 +20,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,15 +40,18 @@ import androidx.core.content.ContextCompat
 import com.google.zxing.BarcodeFormat
 import com.hopae.eudi.demo.LogStore
 import com.hopae.eudi.demo.PortraitCaptureActivity
-import com.hopae.eudi.demo.ble.BleHolderTransport
-import com.hopae.eudi.demo.ble.BleReaderTransport
+import com.hopae.eudi.demo.ble.Ble
+import com.hopae.eudi.demo.ble.BleGattClientTransport
+import com.hopae.eudi.demo.ble.BleGattServerTransport
+import com.hopae.eudi.wallet.proximity.DeviceEngagement
+import com.hopae.eudi.wallet.spi.ProximityTransport
+import java.util.UUID
 import com.hopae.eudi.wallet.ProximitySelection
 import com.hopae.eudi.wallet.ProximityState
 import com.hopae.eudi.wallet.Wallet
 import com.hopae.eudi.wallet.cbor.Cbor
 import com.hopae.eudi.wallet.mdoc.RequestedDocument
 import com.hopae.eudi.wallet.mdoc.VerifiedDocument
-import com.hopae.eudi.wallet.proximity.DeviceEngagement
 import com.journeyapps.barcodescanner.BarcodeEncoder
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -79,20 +83,29 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
     val context = LocalContext.current
     var status by remember { mutableStateOf("Preparing…") }
     var qr by remember { mutableStateOf<Bitmap?>(null) }
+    var central by remember { mutableStateOf(false) } // false = peripheral server mode, true = central client mode
     var granted by remember { mutableStateOf(BLE_PERMISSIONS.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }) }
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r -> granted = r.values.all { it } }
 
-    DisposableEffect(granted) {
+    DisposableEffect(granted, central) {
         if (!granted) {
             status = "Grant Bluetooth permission to present"
             permLauncher.launch(BLE_PERMISSIONS)
             return@DisposableEffect onDispose {}
         }
-        val transport = BleHolderTransport(context)
+        qr = null
+        val uuid = UUID.randomUUID()
+        val uuidBytes = Ble.uuidToBytes(uuid)
         val scope = CoroutineScope(Dispatchers.Main)
+        // Peripheral server mode → we're the GATT server. Central client mode → we're the GATT client (the
+        // reader advertises our UUID); scan for it in parallel while present() shows the QR.
+        val server = if (central) null else BleGattServerTransport(context, uuid, Ble.PERIPHERAL_SERVER, listOf(DeviceEngagement.bleRetrievalMethod(peripheralServerUuid = uuidBytes)))
+        val client = if (central) BleGattClientTransport(context, uuid, Ble.CENTRAL_CLIENT, listOf(DeviceEngagement.bleRetrievalMethod(centralClientUuid = uuidBytes))) else null
+        val transport: ProximityTransport = server ?: client!!
+        server?.start()
+        if (client != null) scope.launch { runCatching { client.connect() } }
         scope.launch {
             try {
-                transport.start()
                 val session = wallet.proximity.present(transport)
                 session.state.collect { st ->
                     when (st) {
@@ -117,13 +130,17 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
                 LogStore.log("❌ Proximity holder: ${e.message}")
             }
         }
-        onDispose { scope.cancel(); transport.stop() }
+        onDispose { scope.cancel(); server?.stop(); client?.stop() }
     }
 
     Dialog(onDismissRequest = onClose) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Present via BLE (mdoc)", style = MaterialTheme.typography.titleLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !central, onClick = { central = false }, label = { Text("Peripheral") })
+                    FilterChip(selected = central, onClick = { central = true }, label = { Text("Central") })
+                }
                 qr?.let { Image(it.asImageBitmap(), contentDescription = "engagement QR", modifier = Modifier.size(260.dp)) }
                 Text(status, style = MaterialTheme.typography.bodyLarge)
                 Button(onClick = onClose) { Text("Close") }
@@ -146,13 +163,19 @@ fun ProximityReaderScreen(wallet: Wallet) {
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         val content = result.contents ?: run { status = "Scan cancelled"; return@rememberLauncherForActivityResult }
         val engagement = decodeEngagement(content) ?: run { status = "❌ Not an mdoc proximity QR"; return@rememberLauncherForActivityResult }
-        val uuid = DeviceEngagement.parseBleUuid(engagement) ?: run { status = "❌ Engagement carries no BLE method"; return@rememberLauncherForActivityResult }
+        val ble = DeviceEngagement.parseBle(engagement) ?: run { status = "❌ Engagement carries no BLE method"; return@rememberLauncherForActivityResult }
         results = emptyList()
         status = "Connecting over BLE…"
         scope.launch {
             try {
-                val transport = BleReaderTransport(context, BleHolderTransport.bytesToUuid(uuid))
-                transport.connect()
+                // Match the holder's mode: peripheral server → we're the GATT client; central client → we're the GATT server.
+                val peripheral = ble.peripheralServerUuid
+                val central = ble.centralClientUuid
+                val transport: ProximityTransport = when {
+                    peripheral != null -> BleGattClientTransport(context, Ble.bytesToUuid(peripheral), Ble.PERIPHERAL_SERVER).also { it.connect() }
+                    central != null -> BleGattServerTransport(context, Ble.bytesToUuid(central), Ble.CENTRAL_CLIENT).also { it.start() }
+                    else -> { status = "❌ Engagement carries no BLE UUID"; return@launch }
+                }
                 status = "Requesting documents…"
                 val docs = wallet.reader.read(transport, engagement, readerRequest())
                 results = docs

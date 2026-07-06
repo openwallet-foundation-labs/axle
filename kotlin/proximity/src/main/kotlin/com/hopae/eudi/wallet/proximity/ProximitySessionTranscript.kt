@@ -25,6 +25,9 @@ object ProximitySessionTranscript {
     fun encode(sessionTranscript: Cbor): ByteArray = CborEncoder.encode(sessionTranscript)
 }
 
+/** BLE connection UUIDs offered in a `DeviceEngagement`; the reader picks a mode it supports (either may be null). */
+class BleRetrieval(val peripheralServerUuid: ByteArray?, val centralClientUuid: ByteArray?)
+
 /** A minimal QR-code `DeviceEngagement` (ISO/IEC 18013-5 §8.2.1.1): version + EDeviceKey. */
 object DeviceEngagement {
 
@@ -42,33 +45,30 @@ object DeviceEngagement {
     }
 
     /**
-     * An ISO/IEC 18013-5 §8.3.3.1.1 BLE **mdoc peripheral server mode** `DeviceRetrievalMethod`:
-     * `[2, 1, {0: true, 10: <16-byte service UUID>}]`. Advertise it in [qr] so the reader connects over BLE.
+     * An ISO/IEC 18013-5 §8.3.3.1.1 BLE `DeviceRetrievalMethod` `[2, 1, {…}]`. Both mode flags (keys 0 and 1)
+     * are mandatory; the UUID goes at key 10 (peripheral server mode) and/or 11 (central client mode). Pass the
+     * UUID(s) for the mode(s) offered; advertise the result in [qr] so the reader connects over BLE.
      */
-    fun bleRetrievalMethod(serviceUuid: ByteArray): ByteArray = CborEncoder.encode(
-        Cbor.Array(
-            listOf(
-                Cbor.int(2), Cbor.int(1), // type 2 = BLE, version 1
-                Cbor.CborMap(
-                    listOf(
-                        Cbor.int(0) to Cbor.Bool(true),  // mdoc peripheral server mode supported (both flags are mandatory)
-                        Cbor.int(1) to Cbor.Bool(false), // mdoc central client mode not supported
-                        Cbor.int(10) to Cbor.Bytes(serviceUuid), // peripheral server mode UUID
-                    ),
-                ),
-            ),
-        ),
-    )
+    fun bleRetrievalMethod(peripheralServerUuid: ByteArray? = null, centralClientUuid: ByteArray? = null): ByteArray {
+        val opts = mutableListOf<Pair<Cbor, Cbor>>(
+            Cbor.int(0) to Cbor.Bool(peripheralServerUuid != null), // mdoc peripheral server mode supported
+            Cbor.int(1) to Cbor.Bool(centralClientUuid != null),    // mdoc central client mode supported
+        )
+        peripheralServerUuid?.let { opts.add(Cbor.int(10) to Cbor.Bytes(it)) }
+        centralClientUuid?.let { opts.add(Cbor.int(11) to Cbor.Bytes(it)) }
+        return CborEncoder.encode(Cbor.Array(listOf(Cbor.int(2), Cbor.int(1), Cbor.CborMap(opts))))
+    }
 
-    /** The BLE peripheral-server-mode service UUID (16 bytes) from a QR `DeviceEngagement`, or null — the reader side. */
-    fun parseBleUuid(engagement: ByteArray): ByteArray? {
+    /** The BLE connection UUIDs (peripheral server / central client mode) from a QR `DeviceEngagement`, or null — reader side. */
+    fun parseBle(engagement: ByteArray): BleRetrieval? {
         val map = CborDecoder.decode(engagement) as? Cbor.CborMap ?: return null
         val methods = map.entries.firstOrNull { (k, _) -> (k as? Cbor.UInt)?.value == 2uL }?.second as? Cbor.Array ?: return null
         for (m in methods.items) {
             val arr = m as? Cbor.Array ?: continue
             if ((arr.items.getOrNull(0) as? Cbor.UInt)?.value != 2uL) continue // BLE
             val opts = arr.items.getOrNull(2) as? Cbor.CborMap ?: continue
-            (opts.entries.firstOrNull { (k, _) -> (k as? Cbor.UInt)?.value == 10uL }?.second as? Cbor.Bytes)?.let { return it.value }
+            fun uuid(key: ULong) = (opts.entries.firstOrNull { (k, _) -> (k as? Cbor.UInt)?.value == key }?.second as? Cbor.Bytes)?.value
+            return BleRetrieval(uuid(10uL), uuid(11uL))
         }
         return null
     }

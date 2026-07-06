@@ -17,24 +17,26 @@ import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
 import com.hopae.eudi.demo.LogStore
-import com.hopae.eudi.wallet.proximity.DeviceEngagement
 import com.hopae.eudi.wallet.spi.ProximityTransport
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
 import java.util.UUID
 import kotlin.math.min
 
 /**
- * ISO/IEC 18013-5 §8.3.3.1.1 BLE **mdoc peripheral server mode** transport — the holder acts as the GATT
- * server and advertises a random service UUID; the reader connects as a central. Implements the SDK's
- * [ProximityTransport] so `wallet.proximity.present(transport)` drives the message exchange.
+ * The GATT **server** side of an ISO/IEC 18013-5 BLE mdoc session: advertises [serviceUuid], receives framed
+ * messages on Client2Server, and sends framed messages via Server2Client notifications. Used by the holder in
+ * peripheral server mode ([Ble.PERIPHERAL_SERVER]) and by the reader in central client mode ([Ble.CENTRAL_CLIENT]).
  */
 @SuppressLint("MissingPermission")
-class BleHolderTransport(private val context: Context) : ProximityTransport {
+class BleGattServerTransport(
+    private val context: Context,
+    private val serviceUuid: UUID,
+    private val uuids: BleModeUuids = Ble.PERIPHERAL_SERVER,
+    private val advertisedMethods: List<ByteArray> = emptyList(),
+) : ProximityTransport {
     private val manager = context.getSystemService(BluetoothManager::class.java)
-    private val serviceUuid: UUID = UUID.randomUUID()
 
     private var gattServer: BluetoothGattServer? = null
     private var stateChar: BluetoothGattCharacteristic? = null
@@ -45,13 +47,14 @@ class BleHolderTransport(private val context: Context) : ProximityTransport {
     private val incoming = Channel<ByteArray>(Channel.UNLIMITED)
     private val assembling = ByteArrayOutputStream()
     private var notifySent: CompletableDeferred<Boolean>? = null
+    private val connected = CompletableDeferred<Unit>() // a peer subscribed + wrote STATE_START
 
-    /** Starts the GATT server + advertising. Call before [present]; the advertised UUID goes into the QR. */
+    /** Starts the GATT server + advertising. Call before driving the session. */
     fun start() {
         val service = BluetoothGattService(serviceUuid, BluetoothGattService.SERVICE_TYPE_PRIMARY)
-        stateChar = char(STATE, BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE)
-        val c2s = char(CLIENT2SERVER, BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE)
-        s2cChar = char(SERVER2CLIENT, BluetoothGattCharacteristic.PROPERTY_NOTIFY)
+        stateChar = char(uuids.state, BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE)
+        val c2s = char(uuids.client2Server, BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE)
+        s2cChar = char(uuids.server2Client, BluetoothGattCharacteristic.PROPERTY_NOTIFY)
         service.addCharacteristic(stateChar)
         service.addCharacteristic(c2s)
         service.addCharacteristic(s2cChar)
@@ -66,14 +69,15 @@ class BleHolderTransport(private val context: Context) : ProximityTransport {
         val data = AdvertiseData.Builder().setIncludeTxPowerLevel(false)
             .addServiceUuid(ParcelUuid(serviceUuid)).build()
         manager.adapter.bluetoothLeAdvertiser?.startAdvertising(settings, data, advertiseCallback)
-        LogStore.log("BLE holder advertising · service=$serviceUuid")
+        LogStore.log("BLE server advertising · service=$serviceUuid")
     }
 
-    override fun retrievalMethods(): List<ByteArray> = listOf(DeviceEngagement.bleRetrievalMethod(uuidToBytes(serviceUuid)))
+    override fun retrievalMethods(): List<ByteArray> = advertisedMethods
 
     override suspend fun receive(): ByteArray = incoming.receive()
 
     override suspend fun send(message: ByteArray) {
+        connected.await() // in central client mode the reader sends first, before the holder has connected
         val maxChunk = min(512, mtu - 3) - 1 // room for the 0x00/0x01 prefix
         var offset = 0
         while (offset < message.size) {
@@ -85,13 +89,14 @@ class BleHolderTransport(private val context: Context) : ProximityTransport {
             notify(s2cChar!!, chunk)
             offset += size
         }
-        LogStore.log("BLE holder sent ${message.size}B response")
+        LogStore.log("BLE server sent ${message.size}B")
     }
 
     override suspend fun close() = stop()
 
     /** Synchronous teardown, safe to call from a Compose `onDispose`. */
     fun stop() {
+        if (!connected.isCompleted) connected.completeExceptionally(IllegalStateException("transport closed"))
         runCatching { if (device != null) stateChar?.let { notifyNoWait(it, byteArrayOf(0x02)) } } // STATE_END
         runCatching { manager.adapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) }
         runCatching { gattServer?.close() }
@@ -121,14 +126,14 @@ class BleHolderTransport(private val context: Context) : ProximityTransport {
     private fun char(uuid: UUID, properties: Int): BluetoothGattCharacteristic {
         val c = BluetoothGattCharacteristic(uuid, properties, BluetoothGattCharacteristic.PERMISSION_WRITE or BluetoothGattCharacteristic.PERMISSION_READ)
         if (properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) {
-            c.addDescriptor(BluetoothGattDescriptor(CCCD, BluetoothGattDescriptor.PERMISSION_WRITE))
+            c.addDescriptor(BluetoothGattDescriptor(Ble.CCCD, BluetoothGattDescriptor.PERMISSION_WRITE))
         }
         return c
     }
 
     private val callback = object : BluetoothGattServerCallback() {
         override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
-            this@BleHolderTransport.mtu = mtu
+            this@BleGattServerTransport.mtu = mtu
         }
 
         override fun onCharacteristicWriteRequest(
@@ -137,12 +142,13 @@ class BleHolderTransport(private val context: Context) : ProximityTransport {
         ) {
             if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             when (characteristic.uuid) {
-                STATE -> if (value.size == 1 && value[0].toInt() == 0x01) { // STATE_START
-                    this@BleHolderTransport.device = device
+                uuids.state -> if (value.size == 1 && value[0].toInt() == 0x01) { // STATE_START
+                    this@BleGattServerTransport.device = device
+                    if (!connected.isCompleted) connected.complete(Unit)
                     runCatching { manager.adapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) }
-                    LogStore.log("BLE holder: reader connected")
+                    LogStore.log("BLE server: peer connected")
                 }
-                CLIENT2SERVER -> {
+                uuids.client2Server -> {
                     if (value.isEmpty()) return
                     assembling.write(value, 1, value.size - 1)
                     if (value[0].toInt() == 0x00) { // last chunk
@@ -168,18 +174,5 @@ class BleHolderTransport(private val context: Context) : ProximityTransport {
 
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartFailure(errorCode: Int) { LogStore.log("❌ BLE advertise failed: $errorCode") }
-    }
-
-    companion object {
-        val STATE: UUID = UUID.fromString("00000001-a123-48ce-896b-4c76973373e6")
-        val CLIENT2SERVER: UUID = UUID.fromString("00000002-a123-48ce-896b-4c76973373e6")
-        val SERVER2CLIENT: UUID = UUID.fromString("00000003-a123-48ce-896b-4c76973373e6")
-        val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-
-        fun uuidToBytes(uuid: UUID): ByteArray =
-            ByteBuffer.allocate(16).putLong(uuid.mostSignificantBits).putLong(uuid.leastSignificantBits).array()
-
-        fun bytesToUuid(bytes: ByteArray): UUID =
-            ByteBuffer.wrap(bytes).let { UUID(it.long, it.long) }
     }
 }

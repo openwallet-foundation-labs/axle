@@ -26,12 +26,20 @@ import java.util.UUID
 import kotlin.math.min
 
 /**
- * ISO/IEC 18013-5 §8.3.3.1.1 BLE **mdoc peripheral server mode** transport — the reader is the GATT
- * central. Scans for the holder's advertised [serviceUuid], connects, subscribes, and exchanges framed
- * messages. Implements [ProximityTransport] so `wallet.reader.read(transport, ...)` drives the exchange.
+ * The GATT **client** side of an ISO/IEC 18013-5 BLE mdoc session: scans for [serviceUuid], connects,
+ * subscribes, sends framed messages by writing Client2Server, and receives via Server2Client notifications.
+ * Used by the reader in peripheral server mode ([Ble.PERIPHERAL_SERVER]) and the holder in central client mode
+ * ([Ble.CENTRAL_CLIENT]). [connect] must be called before driving the session.
  */
 @SuppressLint("MissingPermission")
-class BleReaderTransport(private val context: Context, private val serviceUuid: UUID) : ProximityTransport {
+class BleGattClientTransport(
+    private val context: Context,
+    private val serviceUuid: UUID,
+    private val uuids: BleModeUuids = Ble.PERIPHERAL_SERVER,
+    private val advertisedMethods: List<ByteArray> = emptyList(), // set when a holder uses this in central client mode
+) : ProximityTransport {
+    override fun retrievalMethods(): List<ByteArray> = advertisedMethods
+
     private val manager = context.getSystemService(BluetoothManager::class.java)
     private var gatt: BluetoothGatt? = null
     private var stateChar: BluetoothGattCharacteristic? = null
@@ -44,21 +52,21 @@ class BleReaderTransport(private val context: Context, private val serviceUuid: 
     private val connectedSignal = CompletableDeferred<Boolean>()
     private var pending: CompletableDeferred<Boolean>? = null
 
-    /** Scans, connects, subscribes to notifications, negotiates MTU, and signals start. Call before [read]. */
+    /** Scans, connects, subscribes to notifications, negotiates MTU, and signals start. */
     suspend fun connect() {
         val device = scan()
         gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
         withTimeout(15_000) { connectedSignal.await() }
         awaitOp { gatt!!.requestMtu(517) }
         awaitOp { gatt!!.discoverServices() }
-        val service = gatt!!.getService(serviceUuid) ?: error("holder service $serviceUuid not found")
-        stateChar = service.getCharacteristic(BleHolderTransport.STATE)
-        c2sChar = service.getCharacteristic(BleHolderTransport.CLIENT2SERVER)
-        s2cChar = service.getCharacteristic(BleHolderTransport.SERVER2CLIENT)
+        val service = gatt!!.getService(serviceUuid) ?: error("peer service $serviceUuid not found")
+        stateChar = service.getCharacteristic(uuids.state)
+        c2sChar = service.getCharacteristic(uuids.client2Server)
+        s2cChar = service.getCharacteristic(uuids.server2Client)
         enableNotify(stateChar!!)
         enableNotify(s2cChar!!)
         writeChar(stateChar!!, byteArrayOf(0x01), BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) // STATE_START
-        LogStore.log("BLE reader connected + subscribed (mtu=$mtu)")
+        LogStore.log("BLE client connected + subscribed (mtu=$mtu)")
     }
 
     private suspend fun scan(): BluetoothDevice {
@@ -73,7 +81,7 @@ class BleReaderTransport(private val context: Context, private val serviceUuid: 
         val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(serviceUuid)).build()
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
         scanner.startScan(listOf(filter), settings, cb)
-        LogStore.log("BLE reader scanning for $serviceUuid")
+        LogStore.log("BLE client scanning for $serviceUuid")
         return try {
             withTimeout(20_000) { found.await() }
         } finally {
@@ -93,7 +101,7 @@ class BleReaderTransport(private val context: Context, private val serviceUuid: 
             writeChar(c2sChar!!, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
             offset += size
         }
-        LogStore.log("BLE reader sent ${message.size}B request")
+        LogStore.log("BLE client sent ${message.size}B")
     }
 
     override suspend fun receive(): ByteArray = incoming.receive()
@@ -119,7 +127,7 @@ class BleReaderTransport(private val context: Context, private val serviceUuid: 
 
     private suspend fun enableNotify(c: BluetoothGattCharacteristic) {
         gatt!!.setCharacteristicNotification(c, true)
-        val cccd = c.getDescriptor(BleHolderTransport.CCCD)
+        val cccd = c.getDescriptor(Ble.CCCD)
         val enable = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
         awaitOp {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -150,7 +158,7 @@ class BleReaderTransport(private val context: Context, private val serviceUuid: 
         }
 
         override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
-            this@BleReaderTransport.mtu = mtu
+            this@BleGattClientTransport.mtu = mtu
             pending?.complete(status == BluetoothGatt.GATT_SUCCESS)
         }
 
@@ -160,7 +168,7 @@ class BleReaderTransport(private val context: Context, private val serviceUuid: 
 
         override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray) {
             when (c.uuid) {
-                BleHolderTransport.SERVER2CLIENT -> {
+                uuids.server2Client -> {
                     if (value.isEmpty()) return
                     assembling.write(value, 1, value.size - 1)
                     if (value[0].toInt() == 0x00) { // last chunk
@@ -168,8 +176,8 @@ class BleReaderTransport(private val context: Context, private val serviceUuid: 
                         assembling.reset()
                     }
                 }
-                BleHolderTransport.STATE -> if (value.size == 1 && value[0].toInt() == 0x02) { // STATE_END
-                    LogStore.log("BLE reader: holder ended session")
+                uuids.state -> if (value.size == 1 && value[0].toInt() == 0x02) { // STATE_END
+                    LogStore.log("BLE client: peer ended session")
                 }
             }
         }

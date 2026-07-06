@@ -17,6 +17,16 @@ public enum ProximitySessionTranscript {
     public static func encode(_ sessionTranscript: Cbor) throws -> [UInt8] { try CborEncoder.encode(sessionTranscript) }
 }
 
+/// BLE connection UUIDs offered in a `DeviceEngagement`; the reader picks a mode it supports (either may be nil).
+public struct BleRetrieval {
+    public let peripheralServerUuid: [UInt8]?
+    public let centralClientUuid: [UInt8]?
+    public init(peripheralServerUuid: [UInt8]?, centralClientUuid: [UInt8]?) {
+        self.peripheralServerUuid = peripheralServerUuid
+        self.centralClientUuid = centralClientUuid
+    }
+}
+
 /// A minimal QR-code `DeviceEngagement` (ISO/IEC 18013-5 §8.2.1.1): version + EDeviceKey.
 public enum DeviceEngagement {
 
@@ -32,19 +42,18 @@ public enum DeviceEngagement {
 
     /// An ISO/IEC 18013-5 §8.3.3.1.1 BLE **mdoc peripheral server mode** `DeviceRetrievalMethod`:
     /// `[2, 1, {0: true, 10: <16-byte service UUID>}]`. Advertise it in `qr` so the reader connects over BLE.
-    public static func bleRetrievalMethod(serviceUuid: [UInt8]) throws -> [UInt8] {
-        try CborEncoder.encode(.array([
-            .int(2), .int(1), // type 2 = BLE, version 1
-            .map([
-                (.int(0), .bool(true)),   // mdoc peripheral server mode supported (both flags are mandatory)
-                (.int(1), .bool(false)),  // mdoc central client mode not supported
-                (.int(10), .bytes(serviceUuid)), // peripheral server mode UUID
-            ]),
-        ]))
+    public static func bleRetrievalMethod(peripheralServerUuid: [UInt8]? = nil, centralClientUuid: [UInt8]? = nil) throws -> [UInt8] {
+        var opts: [(Cbor, Cbor)] = [
+            (.int(0), .bool(peripheralServerUuid != nil)), // mdoc peripheral server mode supported
+            (.int(1), .bool(centralClientUuid != nil)),    // mdoc central client mode supported
+        ]
+        if let p = peripheralServerUuid { opts.append((.int(10), .bytes(p))) }
+        if let c = centralClientUuid { opts.append((.int(11), .bytes(c))) }
+        return try CborEncoder.encode(.array([.int(2), .int(1), .map(opts)]))
     }
 
-    /// The BLE peripheral-server-mode service UUID (16 bytes) from a QR `DeviceEngagement`, or nil — the reader side.
-    public static func parseBleUuid(_ engagement: [UInt8]) -> [UInt8]? {
+    /// The BLE connection UUIDs (peripheral server / central client mode) from a QR `DeviceEngagement`, or nil — reader side.
+    public static func parseBle(_ engagement: [UInt8]) -> BleRetrieval? {
         guard case let .map(entries) = try? CborDecoder.decode(engagement),
               let methods = entries.first(where: { if case let .uint(k) = $0.0 { return k == 2 }; return false })?.1,
               case let .array(items) = methods else { return nil }
@@ -52,8 +61,12 @@ public enum DeviceEngagement {
             guard case let .array(arr) = m, arr.count >= 3,
                   case let .uint(type) = arr[0], type == 2,
                   case let .map(opts) = arr[2] else { continue }
-            if let uuid = opts.first(where: { if case let .uint(k) = $0.0 { return k == 10 }; return false })?.1,
-               case let .bytes(b) = uuid { return b }
+            func uuid(_ key: UInt64) -> [UInt8]? {
+                if let v = opts.first(where: { if case let .uint(k) = $0.0 { return k == key }; return false })?.1,
+                   case let .bytes(b) = v { return b }
+                return nil
+            }
+            return BleRetrieval(peripheralServerUuid: uuid(10), centralClientUuid: uuid(11))
         }
         return nil
     }

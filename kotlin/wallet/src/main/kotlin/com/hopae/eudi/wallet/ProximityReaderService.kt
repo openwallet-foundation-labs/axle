@@ -10,6 +10,7 @@ import com.hopae.eudi.wallet.mdoc.VerifiedDocument
 import com.hopae.eudi.wallet.proximity.DeviceEngagement
 import com.hopae.eudi.wallet.proximity.EphemeralKeyPair
 import com.hopae.eudi.wallet.proximity.ProximitySessionTranscript
+import com.hopae.eudi.wallet.proximity.ProximityException
 import com.hopae.eudi.wallet.proximity.SessionEncryption
 import com.hopae.eudi.wallet.proximity.SessionMessages
 import com.hopae.eudi.wallet.spi.ProximityTransport
@@ -35,18 +36,24 @@ class ProximityReaderService internal constructor(
         /** The NFC Handover Select message when the engagement was delivered by NFC static handover (else null = QR). */
         handoverNdef: ByteArray? = null,
     ): List<VerifiedDocument> {
-        try {
-            val eDeviceKey = DeviceEngagement.parseEDeviceKey(engagement)
-            val eReader = EphemeralKeyPair.generate()
-            val handover = if (handoverNdef != null) ProximitySessionTranscript.nfcHandover(handoverNdef) else Cbor.Null
-            val transcript = ProximitySessionTranscript.build(engagement, eReader.publicKey, handover)
-            val transcriptBytes = ProximitySessionTranscript.encode(transcript)
-            val enc = SessionEncryption.forReader(eReader, eDeviceKey, transcriptBytes)
-            val reader = MdocReader(readerAuth, issuerTrust)
+        // Session setup runs before the try: if it throws there is no session yet to terminate.
+        val eDeviceKey = DeviceEngagement.parseEDeviceKey(engagement)
+        val eReader = EphemeralKeyPair.generate()
+        val handover = if (handoverNdef != null) ProximitySessionTranscript.nfcHandover(handoverNdef) else Cbor.Null
+        val transcript = ProximitySessionTranscript.build(engagement, eReader.publicKey, handover)
+        val transcriptBytes = ProximitySessionTranscript.encode(transcript)
+        val enc = SessionEncryption.forReader(eReader, eDeviceKey, transcriptBytes)
+        val reader = MdocReader(readerAuth, issuerTrust)
 
+        try {
             val deviceRequest = reader.buildDeviceRequest(documents, transcript)
             transport.send(SessionMessages.encodeEstablishment(eReader.publicKey, enc.encrypt(deviceRequest)))
-            val deviceResponse = enc.decrypt(SessionMessages.decodeData(transport.receive()))
+
+            // ISO 18013-5 Table 20: the mdoc may answer with an error/termination status instead of data.
+            val frame = SessionMessages.decodeSessionData(transport.receive())
+            val encryptedResponse = frame.data
+                ?: throw ProximityException("mdoc returned status ${frame.status} without a DeviceResponse")
+            val deviceResponse = enc.decrypt(encryptedResponse)
 
             return try {
                 if (issuerTrust != null) {
@@ -62,6 +69,9 @@ class ProximityReaderService internal constructor(
                 parseUnverified(deviceResponse)
             }
         } finally {
+            // §9.1.1.4: signal termination, destroy session keys, close. Best-effort on the wire.
+            runCatching { transport.send(SessionMessages.encodeStatus(SessionMessages.Status.SESSION_TERMINATION)) }
+            enc.destroy()
             runCatching { transport.close() }
         }
     }

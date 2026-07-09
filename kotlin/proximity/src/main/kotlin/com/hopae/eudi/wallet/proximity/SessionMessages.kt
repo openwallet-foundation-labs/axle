@@ -16,6 +16,13 @@ import com.hopae.eudi.wallet.cbor.cose.EcPublicKey
 object SessionMessages {
     private const val TAG_ENCODED_CBOR = 24uL
 
+    /** SessionData status codes (ISO 18013-5 Table 20). A status message must not also carry `data`. */
+    object Status {
+        const val SESSION_ENCRYPTION_ERROR = 10L
+        const val CBOR_DECODING_ERROR = 11L
+        const val SESSION_TERMINATION = 20L
+    }
+
     fun encodeEstablishment(eReaderKey: EcPublicKey, encryptedDeviceRequest: ByteArray): ByteArray {
         val eReaderKeyBytes = Cbor.Tagged(TAG_ENCODED_CBOR, Cbor.Bytes(CborEncoder.encode(CoseKey.encode(eReaderKey))))
         return CborEncoder.encode(
@@ -44,10 +51,26 @@ object SessionMessages {
         return CborEncoder.encode(Cbor.CborMap(entries))
     }
 
-    fun decodeData(bytes: ByteArray): ByteArray {
+    /** A `data`-less SessionData carrying only a status code — e.g. session termination (§9.1.1.4). */
+    fun encodeStatus(status: Long): ByteArray =
+        CborEncoder.encode(Cbor.CborMap(listOf(Cbor.Text("status") to Cbor.int(status))))
+
+    /**
+     * A decoded SessionData frame: the encrypted [data] (absent for a status-only message) and the
+     * optional [status] code. Table 20 requires 10/11/20 to omit `data`; the receiver terminates on any.
+     */
+    class SessionData(val data: ByteArray?, val status: Long?)
+
+    fun decodeSessionData(bytes: ByteArray): SessionData {
         val map = CborDecoder.decode(bytes).asMap("SessionData")
-        return (map.field("data") as? Cbor.Bytes)?.value ?: throw ProximityException("missing data")
+        val data = (map.field("data") as? Cbor.Bytes)?.value
+        val status = (map.field("status"))?.let { (it as? Cbor.UInt)?.value?.toLong() }
+        return SessionData(data, status)
     }
+
+    /** The encrypted response payload, or an error when the frame is a bare status (no `data`). */
+    fun decodeData(bytes: ByteArray): ByteArray =
+        decodeSessionData(bytes).data ?: throw ProximityException("SessionData has no data")
 
     private fun Cbor.asMap(what: String): Cbor.CborMap =
         this as? Cbor.CborMap ?: throw ProximityException("$what must be a map")

@@ -55,7 +55,7 @@ public struct ProximityService {
             switch await s.awaitDecision(request) {
             case .none:
                 try await recordDeclined(request)
-                await transport.close()
+                await terminate(transport, enc)
                 s.emit(.declined)
             case let .some(selection):
                 s.emit(.submitting)
@@ -68,16 +68,27 @@ public struct ProximityService {
                 } catch {
                     // Only the final submission failed — record the attempt with .error status (opt-in).
                     if recordFailures { try? await recordError(request, selection) }
-                    await transport.close()
+                    await terminate(transport, enc)
                     throw error
                 }
                 try await recordSuccess(request, selection)
-                await transport.close()
+                await terminate(transport, enc)
                 s.emit(.completed)
             }
         }
         session.launch()
         return session
+    }
+
+    /// ISO 18013-5 §9.1.1.4 session termination: send the status-20 termination code, destroy the session
+    /// keys, and close the channel. Best-effort on the wire — an already-dead transport must not turn a
+    /// completed presentation into a failure — but the keys are always destroyed.
+    private func terminate(_ transport: any ProximityTransport, _ enc: SessionEncryption) async {
+        if let frame = try? SessionMessages.encodeStatus(SessionMessages.Status.sessionTermination) {
+            try? await transport.send(frame)
+        }
+        enc.destroy()
+        await transport.close()
     }
 
     private func buildRequest(_ deviceRequest: DeviceRequest, _ transcript: Cbor, _ session: SessionEncryption) async throws -> ProximityRequest {

@@ -100,7 +100,7 @@ Only what is 🟡/⬜ is listed; everything else in the tables above verified cl
 |---|---|---|
 | Single-purpose mdoc auth key | §9.1.3.4 | 🟡 "A single mdoc authentication key shall not be used to produce both MACs and signatures during its lifetime." Both mechanisms are implemented and selected by `PresentationConfig.proximityDeviceAuth`, but a reused (`KeyUse.Rotate`) DeviceKey can MAC over proximity while signing over DC API / OpenID4VP, since those paths have no EReaderKey. `KeyUse.OneTime` batch keys satisfy the clause structurally; pinning the mechanism to the key is the general fix. **Deliberate — see [Deliberate non-goals](#deliberate-non-goals)** |
 | NFC negotiated handover | §8.2.2.1/§9.1.5.1 | ⬜ static handover only (`[Hs, null]` hardcoded); no ReaderEngagement / Handover Request |
-| Session termination | §9.1.1.4 | ⬜ status 20 never sent, `status` ignored on decode, session keys not destroyed; BLE `End` only in the demo client |
+| Session termination | §9.1.1.4 | ✅ holder + reader send the status-20 termination frame after the exchange, destroy the session keys (`SessionEncryption.destroy`), and close; the received `status` is decoded (Table 20 10/11/20). BLE `End` command remains a demo-transport concern |
 | BLE / NFC transports | §8.3.3.1 | 🟡 core SDK exposes a transport port only; GATT (both modes, MTU chunking) + NFC APDU live in the **Android demo**; **no iOS/Swift transport**; BLE Ident characteristic absent |
 | MSO digest algorithms | §9.1.2.5 | 🟡 SHA-256 only (readers must also support SHA-384/512) |
 | Ephemeral-key curves | §9.1.5.2 Table 22 | 🟡 P-256 only |

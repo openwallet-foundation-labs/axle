@@ -106,6 +106,11 @@ final class WalletProximityTests: XCTestCase {
         let deviceAuthBytes = try CborEncoder.encode(.tagged(24, .bytes(try CborEncoder.encode(deviceAuth))))
         XCTAssertTrue(deviceSignature.verify(publicKey: deviceKey.publicKey, detachedPayload: deviceAuthBytes), "device signature over proximity transcript")
 
+        // §9.1.1.4: after the response the holder sends a status-20 termination frame (no data).
+        let termination = try SessionMessages.decodeSessionData(await toReader.receive())
+        XCTAssertEqual(SessionMessages.Status.sessionTermination, termination.status)
+        XCTAssertNil(termination.data, "a termination frame carries no data")
+
         let entries = await logStore.all()
         XCTAssertEqual(.success, entries.first?.status)
     }

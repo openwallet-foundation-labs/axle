@@ -72,19 +72,32 @@ class SessionEncryption private constructor(
 ) {
     private var sendCounter = 0
     private var recvCounter = 0
+    private var destroyed = false
 
     fun encrypt(plaintext: ByteArray): ByteArray {
+        check(!destroyed) { "session keys destroyed" }
         sendCounter++
         return gcm(sendKey, iv(sendIdentifier, sendCounter), plaintext, Cipher.ENCRYPT_MODE)
     }
 
     fun decrypt(ciphertext: ByteArray): ByteArray {
+        check(!destroyed) { "session keys destroyed" }
         recvCounter++
         return try {
             gcm(recvKey, iv(recvIdentifier, recvCounter), ciphertext, Cipher.DECRYPT_MODE)
         } catch (e: Exception) {
             throw ProximityException("session message authentication failed: ${e.message}")
         }
+    }
+
+    /**
+     * ISO 18013-5 §9.1.1.4: on session termination the session keys are destroyed. Zeroes `SKDevice`
+     * and `SKReader`; idempotent, and any further encrypt/decrypt then fails fast.
+     */
+    fun destroy() {
+        sendKey.fill(0)
+        recvKey.fill(0)
+        destroyed = true
     }
 
     companion object {

@@ -26,14 +26,7 @@ public struct ProximityReaderService: Sendable {
         documents: [RequestedDocument],
         handoverNdef: [UInt8]? = nil
     ) async throws -> [VerifiedDocument] {
-        do {
-            let docs = try await exchange(transport, engagement, documents, handoverNdef)
-            await transport.close()
-            return docs
-        } catch {
-            await transport.close()
-            throw error
-        }
+        try await exchange(transport, engagement, documents, handoverNdef)
     }
 
     private func exchange(
@@ -42,6 +35,7 @@ public struct ProximityReaderService: Sendable {
         _ documents: [RequestedDocument],
         _ handoverNdef: [UInt8]?
     ) async throws -> [VerifiedDocument] {
+        // Session setup runs before the session begins: if it throws there is nothing to terminate.
         let eDeviceKey = try DeviceEngagement.parseEDeviceKey(engagement)
         let eReader = EphemeralKeyPair()
         let handover: Cbor = handoverNdef != nil ? ProximitySessionTranscript.nfcHandover(handoverNdef!) : .null
@@ -53,8 +47,45 @@ public struct ProximityReaderService: Sendable {
         let deviceRequest = try await reader.buildDeviceRequest(documents, sessionTranscript: transcript)
         try await transport.send(try SessionMessages.encodeEstablishment(
             eReaderKey: eReader.publicKey, encryptedDeviceRequest: try enc.encrypt(deviceRequest)))
-        let deviceResponse = try enc.decrypt(try SessionMessages.decodeData(try await transport.receive()))
 
+        return try await withTermination(transport, enc) {
+            // ISO 18013-5 Table 20: the mdoc may answer with an error/termination status instead of data.
+            let frame = try SessionMessages.decodeSessionData(try await transport.receive())
+            guard let encryptedResponse = frame.data else {
+                throw ProximityError.sessionFailed("mdoc returned status \(String(describing: frame.status)) without a DeviceResponse")
+            }
+            let deviceResponse = try enc.decrypt(encryptedResponse)
+            return try await verify(reader, deviceResponse, transcript, eReader, transcriptBytes)
+        }
+    }
+
+    /// §9.1.1.4: run `body`, then always signal termination, destroy the session keys, and close.
+    private func withTermination(
+        _ transport: any ProximityTransport, _ enc: SessionEncryption,
+        _ body: () async throws -> [VerifiedDocument]
+    ) async throws -> [VerifiedDocument] {
+        do {
+            let result = try await body()
+            await terminate(transport, enc)
+            return result
+        } catch {
+            await terminate(transport, enc)
+            throw error
+        }
+    }
+
+    private func terminate(_ transport: any ProximityTransport, _ enc: SessionEncryption) async {
+        if let frame = try? SessionMessages.encodeStatus(SessionMessages.Status.sessionTermination) {
+            try? await transport.send(frame)
+        }
+        enc.destroy()
+        await transport.close()
+    }
+
+    private func verify(
+        _ reader: MdocReader, _ deviceResponse: [UInt8], _ transcript: Cbor,
+        _ eReader: EphemeralKeyPair, _ transcriptBytes: [UInt8]
+    ) async throws -> [VerifiedDocument] {
         do {
             if issuerTrust != nil {
                 // Verify deviceSignature or deviceMac (EMacKey via the reader's EReaderKey ↔ mdoc DeviceKey ECDH).

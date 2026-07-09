@@ -44,6 +44,7 @@ import kotlinx.coroutines.withTimeout
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** Phase D: ISO 18013-5 proximity presentation over an in-memory transport (BLE/NFC stand-in). */
@@ -130,6 +131,11 @@ class WalletProximityTest {
         val deviceAuth = Cbor.Array(listOf(Cbor.Text("DeviceAuthentication"), transcript, Cbor.Text(docType), deviceNsBytes))
         val deviceAuthBytes = CborEncoder.encode(Cbor.Tagged(24uL, Cbor.Bytes(CborEncoder.encode(deviceAuth))))
         assertTrue(deviceSignature.verify(deviceKey.publicKey, detachedPayload = deviceAuthBytes), "device signature over proximity transcript")
+
+        // §9.1.1.4: after the response the holder sends a status-20 termination frame (no data).
+        val termination = SessionMessages.decodeSessionData(transport.readerReceive())
+        assertEquals(SessionMessages.Status.SESSION_TERMINATION, termination.status)
+        assertNull(termination.data, "a termination frame carries no data")
 
         val terminal = withTimeout(15_000) { session.state.first { it.isTerminal } }
         assertTrue(terminal is ProximityState.Completed, "terminal: $terminal")

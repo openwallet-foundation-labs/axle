@@ -30,9 +30,9 @@ public struct EphemeralKeyPair {
 /// The 12-byte IV is an 8-byte per-direction identifier (`…01` mdoc, `…00` reader) plus a 4-byte
 /// big-endian message counter starting at 1.
 public final class SessionEncryption {
-    private let sendKey: SymmetricKey
+    private var sendKey: SymmetricKey?
     private let sendIdentifier: [UInt8]
-    private let recvKey: SymmetricKey
+    private var recvKey: SymmetricKey?
     private let recvIdentifier: [UInt8]
     private var sendCounter: UInt32 = 0
     private var recvCounter: UInt32 = 0
@@ -46,12 +46,14 @@ public final class SessionEncryption {
     }
 
     public func encrypt(_ plaintext: [UInt8]) throws -> [UInt8] {
+        guard let sendKey else { throw ProximityError("session keys destroyed") }
         sendCounter += 1
         let box = try AES.GCM.seal(plaintext, using: sendKey, nonce: try AES.GCM.Nonce(data: iv(sendIdentifier, sendCounter)))
         return [UInt8](box.ciphertext) + [UInt8](box.tag)
     }
 
     public func decrypt(_ message: [UInt8]) throws -> [UInt8] {
+        guard let recvKey else { throw ProximityError("session keys destroyed") }
         recvCounter += 1
         guard message.count >= 16 else { throw ProximityError("session message too short") }
         let box: AES.GCM.SealedBox
@@ -62,6 +64,13 @@ public final class SessionEncryption {
         } catch {
             throw ProximityError("session message authentication failed")
         }
+    }
+
+    /// ISO 18013-5 §9.1.1.4: on session termination the session keys are destroyed. Drops `SKDevice` and
+    /// `SKReader`; idempotent, and any further encrypt/decrypt then fails fast.
+    public func destroy() {
+        sendKey = nil
+        recvKey = nil
     }
 
     /// Wallet (mdoc) side: sends with SKDevice, receives reader messages with SKReader.

@@ -89,7 +89,7 @@ class ProximityService internal constructor(
             when (val selection = awaitDecision(request)) {
                 null -> {
                     recordDeclined(request)
-                    transport.close()
+                    terminate(transport, enc)
                     emit(ProximityState.Declined)
                 }
                 else -> {
@@ -104,11 +104,11 @@ class ProximityService internal constructor(
                     } catch (e: Throwable) {
                         // Only the final submission failed — record the attempt with ERROR status (opt-in).
                         if (recordFailures) runCatching { recordError(request, selection) }
-                        transport.close()
+                        terminate(transport, enc)
                         throw e
                     }
                     recordSuccess(request, selection)
-                    transport.close()
+                    terminate(transport, enc)
                     emit(ProximityState.Completed)
                 }
             }
@@ -160,6 +160,17 @@ class ProximityService internal constructor(
         }
         val rp = RelyingParty(reader.commonName ?: origin, reader.commonName ?: origin, reader.trusted, reader.certificateChainDer)
         txlog.recordPresentation(rp, documents, TransactionStatus.SUCCESS)
+    }
+
+    /**
+     * ISO 18013-5 §9.1.1.4 session termination: send the status-20 termination code, destroy the session
+     * keys, and close the channel. Best-effort on the wire — an already-dead transport must not turn a
+     * completed presentation into a failure — but the keys are always destroyed.
+     */
+    private suspend fun terminate(transport: ProximityTransport, enc: SessionEncryption) {
+        runCatching { transport.send(SessionMessages.encodeStatus(SessionMessages.Status.SESSION_TERMINATION)) }
+        enc.destroy()
+        runCatching { transport.close() }
     }
 
     private suspend fun buildRequest(deviceRequest: DeviceRequest, transcript: Cbor, session: SessionEncryption): ProximityRequest {

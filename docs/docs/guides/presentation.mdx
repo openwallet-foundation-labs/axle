@@ -164,22 +164,43 @@ The response is **holder-bound**: it is signed by the credential's holder key, w
 - **mdoc** — a `DeviceResponse` whose device signature is computed over the OpenID4VP
   `SessionTranscript`, binding the response to this exact request.
 
+### Verifier-driven unbound presentations (`require_cryptographic_holder_binding`)
+
+Holder binding is on by default. When the verifier sets `require_cryptographic_holder_binding: false`
+(OpenID4VP §6.1), the SDK presents the SD-JWT VC **without a KB-JWT** — an unbound presentation. This is
+verifier-driven and automatic; you take no action. Dropping the KB-JWT also drops its replay protection,
+and any `transaction_data` in the request forces binding back on regardless.
+
+### Transaction data (§8.4)
+
+When the verifier includes `transaction_data`, the SDK binds each entry to exactly one of its referenced
+credentials.
+
+- **SD-JWT VC** — a `sha-256` hash of the entry goes into the KB-JWT automatically; no host action.
+- **mdoc** — supply a `WalletConfig.presentation.mdocTransactionDataBinder`, a function mapping a
+  `TransactionData` entry to a device-signed data element `(namespace, elementId, value)` (the mapping is
+  transaction-data-type specific). Without it, an mdoc-bound `transaction_data` is rejected with
+  `invalid_transaction_data`.
+
+The SDK also rejects malformed entries, unknown `credential_ids`, and — for mdoc — elements the MSO
+`keyAuthorizations` did not authorize.
+
 ## Selection: automatic or explicit
 
-`PresentationSelection.auto(request)` picks the first candidate for each required query — ideal once the
-user has approved a single obvious match. For a real consent UI, build the selection explicitly by
-mapping each `queryId` to the `credentialId` the user chose:
+`PresentationSelection.auto(request)` picks all matching candidates for a `multiple` query and the first
+candidate otherwise — ideal once the user has approved an obvious match. For a real consent UI, build the
+selection explicitly by mapping each `queryId` to the list of `credentialId`s the user chose:
 
 <Tabs groupId="lang">
 <TabItem value="kotlin" label="Kotlin">
 
 ```kotlin
-// Automatic: first candidate for each required query
+// Automatic: all candidates for a `multiple` query, first otherwise
 session.respond(PresentationSelection.auto(request))
 
-// Explicit: map each query to the chosen credential
-val chosen: Map<String, CredentialId> = request.queries.associate { query ->
-    query.queryId to query.candidates.first().credentialId
+// Explicit: map each query to the chosen credential(s)
+val chosen: Map<String, List<CredentialId>> = request.queries.associate { query ->
+    query.queryId to listOf(query.candidates.first().credentialId)
 }
 session.respond(PresentationSelection(chosen = chosen))
 ```
@@ -188,19 +209,23 @@ session.respond(PresentationSelection(chosen = chosen))
 <TabItem value="swift" label="Swift">
 
 ```swift
-// Automatic: first candidate for each required query
+// Automatic: all candidates for a `multiple` query, first otherwise
 session.respond(PresentationSelection.auto(request))
 
-// Explicit: map each query to the chosen credential
-var chosen: [String: CredentialId] = [:]
+// Explicit: map each query to the chosen credential(s)
+var chosen: [String: [CredentialId]] = [:]
 for query in request.queries {
-    chosen[query.queryId] = query.candidates.first!.credentialId
+    chosen[query.queryId] = [query.candidates.first!.credentialId]
 }
 session.respond(PresentationSelection(chosen: chosen))
 ```
 
 </TabItem>
 </Tabs>
+
+The value is a **list** because OpenID4VP DCQL `multiple: true` (§6.1) lets a single query return several
+credentials; a `multiple: false` (default) query still takes exactly one. `QueryPresentation` exposes
+`multiple: Boolean` so a consent UI can let the user pick several for a `multiple` query.
 
 Presenting a credential issued with `KeyUse.OneTime` consumes one of its instances (for unlinkability);
 `Rotate` credentials are reused across presentations.

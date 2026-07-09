@@ -240,6 +240,9 @@ Everything below the session API is done for you — you never touch these wire 
 - **PAR + PKCE + DPoP** (RFC 9449) — pushed authorization requests, code-verifier binding, and
   proof-of-possession JWTs on every token and credential call.
 - **Key attestation** — proof-of-possession and key-attestation JWTs per HAIP §8.2.1.1.
+- **Credential identifiers (§8.2)** — when the token response's `authorization_details` bind concrete
+  `credential_identifiers` to a configuration, the SDK requests by `credential_identifier` instead of
+  `credential_configuration_id`, transparently.
 - **Batch issuance** — request N instances of a credential in one shot (see key policy below).
 - **Deferred** (§9) — polls the deferred endpoint until the credential is ready.
 - **Notification** (§10) — sends the `credential_accepted` notification automatically.

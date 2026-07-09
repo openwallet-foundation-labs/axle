@@ -167,22 +167,43 @@ for await state in session.states {
 - **mdoc** — 디바이스 서명이 OpenID4VP `SessionTranscript` 위에서 계산되는 `DeviceResponse`를 생성해,
   응답을 바로 이 요청에 바인딩합니다.
 
+### verifier 주도의 비바인딩 제시 (`require_cryptographic_holder_binding`)
+
+소지자 바인딩은 기본적으로 켜져 있습니다. verifier가 `require_cryptographic_holder_binding: false`
+(OpenID4VP §6.1)를 설정하면, SDK는 SD-JWT VC를 **KB-JWT 없이** 제시합니다 — 비바인딩 제시입니다. 이는
+verifier 주도이며 자동으로 처리되므로 여러분이 할 일은 없습니다. KB-JWT를 빼면 그 재생(replay) 보호도 함께
+사라지며, 요청에 `transaction_data`가 있으면 그와 무관하게 바인딩이 다시 강제됩니다.
+
+### 트랜잭션 데이터 (§8.4)
+
+verifier가 `transaction_data`를 포함하면, SDK는 각 항목을 그것이 참조하는 크리덴셜 중 정확히 하나에
+바인딩합니다.
+
+- **SD-JWT VC** — 항목의 `sha-256` 해시가 KB-JWT에 자동으로 들어갑니다. 호스트가 할 일은 없습니다.
+- **mdoc** — `WalletConfig.presentation.mdocTransactionDataBinder`를 제공해야 합니다. 이는
+  `TransactionData` 항목을 디바이스 서명 데이터 엘리먼트 `(namespace, elementId, value)`로 매핑하는
+  함수이며(이 매핑은 트랜잭션 데이터 타입별로 다릅니다), 없으면 mdoc에 바인딩되는 `transaction_data`는
+  `invalid_transaction_data`로 거부됩니다.
+
+또한 SDK는 형식이 잘못된 항목, 알 수 없는 `credential_ids`, 그리고 (mdoc의 경우) MSO `keyAuthorizations`가
+허가하지 않은 엘리먼트를 거부합니다.
+
 ## 선택: 자동 또는 명시적
 
-`PresentationSelection.auto(request)`는 각 필수 쿼리에 대해 첫 번째 후보를 선택합니다 — 사용자가 명백한
-단일 매칭을 이미 승인한 경우에 적합합니다. 실제 동의 UI에서는 각 `queryId`를 사용자가 선택한
-`credentialId`에 매핑해 선택을 명시적으로 구성합니다.
+`PresentationSelection.auto(request)`는 `multiple` 쿼리에 대해서는 매칭되는 모든 후보를, 그 외의 쿼리에
+대해서는 첫 번째 후보를 선택합니다 — 사용자가 명백한 매칭을 이미 승인한 경우에 적합합니다. 실제 동의
+UI에서는 각 `queryId`를 사용자가 선택한 `credentialId` 목록에 매핑해 선택을 명시적으로 구성합니다.
 
 <Tabs groupId="lang">
 <TabItem value="kotlin" label="Kotlin">
 
 ```kotlin
-// Automatic: first candidate for each required query
+// Automatic: all candidates for a `multiple` query, first otherwise
 session.respond(PresentationSelection.auto(request))
 
-// Explicit: map each query to the chosen credential
-val chosen: Map<String, CredentialId> = request.queries.associate { query ->
-    query.queryId to query.candidates.first().credentialId
+// Explicit: map each query to the chosen credential(s)
+val chosen: Map<String, List<CredentialId>> = request.queries.associate { query ->
+    query.queryId to listOf(query.candidates.first().credentialId)
 }
 session.respond(PresentationSelection(chosen = chosen))
 ```
@@ -191,19 +212,24 @@ session.respond(PresentationSelection(chosen = chosen))
 <TabItem value="swift" label="Swift">
 
 ```swift
-// Automatic: first candidate for each required query
+// Automatic: all candidates for a `multiple` query, first otherwise
 session.respond(PresentationSelection.auto(request))
 
-// Explicit: map each query to the chosen credential
-var chosen: [String: CredentialId] = [:]
+// Explicit: map each query to the chosen credential(s)
+var chosen: [String: [CredentialId]] = [:]
 for query in request.queries {
-    chosen[query.queryId] = query.candidates.first!.credentialId
+    chosen[query.queryId] = [query.candidates.first!.credentialId]
 }
 session.respond(PresentationSelection(chosen: chosen))
 ```
 
 </TabItem>
 </Tabs>
+
+값이 **목록**인 이유는 OpenID4VP DCQL의 `multiple: true`(§6.1)가 하나의 쿼리로 여러 크리덴셜을 반환할 수
+있게 해주기 때문입니다. `multiple: false`(기본값) 쿼리는 여전히 정확히 하나만 받습니다. `QueryPresentation`은
+`multiple: Boolean`을 노출하므로, 동의 UI는 `multiple` 쿼리에 대해 사용자가 여러 개를 고르도록 허용할 수
+있습니다.
 
 `KeyUse.OneTime`으로 발급된 크리덴셜을 제시하면 그 인스턴스 하나가 소모됩니다(연결 불가능성 확보를
 위함). `Rotate` 크리덴셜은 여러 제시에 걸쳐 재사용됩니다.

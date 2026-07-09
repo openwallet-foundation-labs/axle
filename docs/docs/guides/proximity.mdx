@@ -332,7 +332,9 @@ for doc in verified {
 </Tabs>
 
 With issuer trust anchors configured, `deviceAuthenticated` reflects a verified issuer + holder
-binding; without them the reader still returns the disclosed elements, marked unverified.
+binding; without them the reader still returns the disclosed elements, marked unverified. MSO
+value-digest verification supports SHA-256, SHA-384 and SHA-512 (as readers must per §9.1.2.5),
+automatically following the MSO `digestAlgorithm`.
 
 ## Reader authentication
 
@@ -477,18 +479,21 @@ verifies both; the holder side is a one-line config choice:
 <TabItem value="kotlin" label="Kotlin">
 
 ```kotlin
-WalletConfig(presentation = PresentationConfig(proximityDeviceAuth = ProximityDeviceAuth.Mac))
+WalletConfig(presentation = PresentationConfig(mdocDeviceAuth = MdocDeviceAuthMode.Mac))
 ```
 
 </TabItem>
 <TabItem value="swift" label="Swift">
 
 ```swift
-WalletConfig(presentation: PresentationConfig(proximityDeviceAuth: .mac))
+WalletConfig(presentation: PresentationConfig(mdocDeviceAuth: .mac))
 ```
 
 </TabItem>
 </Tabs>
+
+`mdocDeviceAuth` governs the device-auth form for **both** proximity and OpenID4VP mdoc presentations,
+not proximity alone.
 
 | | `deviceSignature` (default) | `deviceMac` |
 | --- | --- | --- |
@@ -503,7 +508,7 @@ a MAC is **non-transferable**: the reader cannot later prove to a third party th
 A signature can be shown to anyone, which is exactly what some deployments want and others do not.
 
 :::warning The DeviceKey must support ECDH
-`ProximityDeviceAuth.Mac` requires a key-agreement `DeviceKey`. On Android Keystore and the Secure
+`MdocDeviceAuthMode.Mac` requires a key-agreement `DeviceKey`. On Android Keystore and the Secure
 Enclave the key purpose is fixed at creation, so a wallet holding sign-only credentials must re-issue
 them before switching. The SDK checks `SecureArea.capabilities.keyAgreement` and fails the session with
 a clear error rather than silently falling back to a signature.
@@ -513,12 +518,21 @@ a clear error rather than silently falling back to a signature.
 > A single mdoc authentication key shall not be used to produce both MACs and signatures during its
 > lifetime.
 
-Only the proximity path has an `EReaderKey`, so **the DC API (`org-iso-mdoc`) and OpenID4VP mdoc paths
-always sign**, whatever `proximityDeviceAuth` says. With the default `KeyUse.Rotate` policy the same
-DeviceKey is reused, so a wallet set to `Mac` that also presents over those paths makes one key do both
-— which the clause forbids, and which quietly undoes the deniability that `Mac` was chosen for.
+Over OpenID4VP the mdoc can MAC **only** for an encrypted response whose `deviceauth_alg_values` requests
+it (ISO 18013-7 B.4.5) — the verifier's response-encryption key doubles as the `EReaderKey` for the ECDH.
+The `org-iso-mdoc` HPKE DC API path has no such key and still **always signs**. With the default
+`KeyUse.Rotate` policy the same DeviceKey is reused, so a wallet set to `Mac` that also presents
+bound-and-signing over another channel makes one key do both — which the clause forbids, and which
+quietly undoes the deniability that `Mac` was chosen for.
 
 Issue the credential with `KeyUse.OneTime` and a batch (`CredentialPolicy(batchSize = n, use = OneTime)`)
 to satisfy the clause structurally: each DeviceKey is consumed by exactly one presentation, so it can
 never produce both. This is also what HAIP recommends for unlinkability.
+:::
+
+:::note Session-key curve
+The proximity session's ephemeral key (`EDeviceKey`/`EReaderKey`) uses `EcCurve.P256` by default; set
+`WalletConfig.presentation.proximitySessionCurve` to `.P384` or `.P521` (Swift `.p256`/`.p384`/`.p521`)
+per ISO 18013-5 §9.1.5.2 Table 22. As reader, the SDK automatically matches whatever curve the mdoc
+offers.
 :::

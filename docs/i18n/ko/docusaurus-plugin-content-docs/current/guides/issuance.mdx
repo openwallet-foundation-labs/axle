@@ -238,6 +238,9 @@ func onRedirect(_ redirectUri: String) {
 - **PAR + PKCE + DPoP** (RFC 9449) — 푸시 인가 요청, code-verifier 바인딩, 모든 토큰·크리덴셜 호출에
   대한 소유 증명(proof-of-possession) JWT.
 - **키 어테스테이션** — HAIP §8.2.1.1에 따른 소유 증명 및 키 어테스테이션 JWT.
+- **크리덴셜 식별자 (§8.2)** — 토큰 응답의 `authorization_details`가 구체적인 `credential_identifiers`를
+  구성에 바인딩하면, SDK는 `credential_configuration_id` 대신 `credential_identifier`로 요청을 투명하게
+  전환합니다.
 - **배치 발급** — 하나의 요청으로 크리덴셜 인스턴스 N개를 요청합니다(아래 키 정책 참고).
 - **지연(Deferred)** (§9) — 크리덴셜이 준비될 때까지 지연 엔드포인트를 폴링합니다.
 - **알림(Notification)** (§10) — `credential_accepted` 알림을 자동으로 전송합니다.

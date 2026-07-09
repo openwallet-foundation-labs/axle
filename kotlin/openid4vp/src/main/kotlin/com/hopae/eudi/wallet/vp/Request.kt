@@ -79,7 +79,9 @@ class AuthorizationRequestResolver(
             val signedRequest = c.str("request")
             // OpenID4VP 1.0 signed DC API: data is {"request": "<JWS>"} (JAR); the claims live in the JWS.
             if (signedRequest != null) verifySignedDcApi(signedRequest, origin)
-            else c to VerifierInfo(c.str("client_id") ?: origin, "web-origin", null, null, trusted = false)
+            // Unsigned (Appendix A.3.1): the Origin *is* the verifier's identity. The wallet MUST ignore
+            // any `client_id` and any `expected_origins` such a request carries.
+            else c to VerifierInfo(origin, "web-origin", null, null, trusted = false)
         } else {
             verifySignedDcApi(trimmed, origin) // bare JWS
         }
@@ -114,12 +116,34 @@ class AuthorizationRequestResolver(
         val jws = Jws.parse(jwt)
         val claims = JsonValue.parse(jws.payloadBytes.decodeToString()) as? JsonValue.Obj
             ?: throw VpException.InvalidRequest("signed DC API request payload must be JSON")
-        val clientId = claims.str("client_id") ?: origin
+        checkExpectedOrigins(claims, origin)
+        // Appendix A.2: client_id MUST be present in a signed request — it selects the Client Identifier Prefix.
+        val clientId = claims.str("client_id")
+            ?: throw VpException.InvalidRequest("signed DC API request has no client_id")
         // OpenID4VP 1.0: the scheme is the client_id prefix (no separate client_id_scheme parameter).
         val scheme = clientIdScheme(clientId)
         val verifier = trust?.verifyRequestObject(jws, clientId, scheme)
             ?: VerifierInfo(clientId, scheme, jws.x5c, null, trusted = false)
         return claims to verifier
+    }
+
+    /**
+     * OpenID4VP Appendix A.2 — `expected_origins` is REQUIRED in signed DC API requests: the wallet MUST
+     * compare it against the platform-supplied Origin "to detect replay of the request from a malicious
+     * Verifier", and MUST error when no entry matches. A signature proves *who authored* a request, not
+     * *where it may be used*; the signed list and the platform Origin come from two channels the calling
+     * page controls neither of. Absent or empty is rejected — the guarantee cannot be evaluated.
+     */
+    private fun checkExpectedOrigins(claims: JsonValue.Obj, origin: String) {
+        val entries = (claims["expected_origins"] as? JsonValue.Arr)?.items
+            ?: throw VpException.InvalidRequest("signed DC API request has no expected_origins")
+        if (entries.isEmpty()) throw VpException.InvalidRequest("expected_origins must be a non-empty array")
+        val origins = entries.map {
+            (it as? JsonValue.Str)?.value ?: throw VpException.InvalidRequest("expected_origins entries must be strings")
+        }
+        if (origin !in origins) {
+            throw VpException.InvalidRequest("origin '$origin' does not match expected_origins $origins")
+        }
     }
 
     private suspend fun verifySigned(jwt: String, clientId: String, scheme: String): Pair<JsonValue.Obj, VerifierInfo> {

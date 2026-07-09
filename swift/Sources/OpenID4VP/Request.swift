@@ -102,9 +102,9 @@ public struct AuthorizationRequestResolver {
                 (claims, verifier) = try await verifySignedDcApi(signedRequest, origin)
             } else {
                 claims = envelope
-                var clientId = origin
-                if case let .str(c)? = envelope["client_id"] { clientId = c }
-                verifier = VerifierInfo(clientId: clientId, clientIdScheme: "web-origin", certificateChainDer: nil, commonName: nil, trusted: false)
+                // Unsigned (Appendix A.3.1): the Origin *is* the verifier's identity. The wallet MUST ignore
+                // any `client_id` and any `expected_origins` such a request carries.
+                verifier = VerifierInfo(clientId: origin, clientIdScheme: "web-origin", certificateChainDer: nil, commonName: nil, trusted: false)
             }
         } else {
             (claims, verifier) = try await verifySignedDcApi(trimmed, origin) // bare JWS
@@ -153,8 +153,11 @@ public struct AuthorizationRequestResolver {
         guard let text = String(bytes: jws.payloadBytes, encoding: .utf8),
               let claims = try? JsonValue.parse(text), case .obj = claims
         else { throw VpError.invalidRequest("signed DC API request payload must be JSON") }
-        var clientId = origin
-        if case let .str(cid)? = claims["client_id"] { clientId = cid }
+        try checkExpectedOrigins(claims, origin)
+        // Appendix A.2: client_id MUST be present in a signed request — it selects the Client Identifier Prefix.
+        guard case let .str(clientId)? = claims["client_id"] else {
+            throw VpError.invalidRequest("signed DC API request has no client_id")
+        }
         // OpenID4VP 1.0: the scheme is the client_id prefix (no separate client_id_scheme parameter).
         let scheme = clientIdScheme(clientId)
         let verifier: VerifierInfo
@@ -164,6 +167,25 @@ public struct AuthorizationRequestResolver {
             verifier = VerifierInfo(clientId: clientId, clientIdScheme: scheme, certificateChainDer: jws.x5c, commonName: nil, trusted: false)
         }
         return (claims, verifier)
+    }
+
+    /// OpenID4VP Appendix A.2 — `expected_origins` is REQUIRED in signed DC API requests: the wallet MUST
+    /// compare it against the platform-supplied Origin "to detect replay of the request from a malicious
+    /// Verifier", and MUST error when no entry matches. A signature proves *who authored* a request, not
+    /// *where it may be used*; the signed list and the platform Origin come from two channels the calling
+    /// page controls neither of. Absent or empty is rejected — the guarantee cannot be evaluated.
+    private func checkExpectedOrigins(_ claims: JsonValue, _ origin: String) throws {
+        guard case let .arr(entries)? = claims["expected_origins"] else {
+            throw VpError.invalidRequest("signed DC API request has no expected_origins")
+        }
+        if entries.isEmpty { throw VpError.invalidRequest("expected_origins must be a non-empty array") }
+        let origins: [String] = try entries.map {
+            guard case let .str(value) = $0 else { throw VpError.invalidRequest("expected_origins entries must be strings") }
+            return value
+        }
+        guard origins.contains(origin) else {
+            throw VpError.invalidRequest("origin '\(origin)' does not match expected_origins \(origins)")
+        }
     }
 
     private func parseSignedRequest(_ jwt: String, _ clientId: String, _ scheme: String) async throws -> (JsonValue, VerifierInfo) {

@@ -177,6 +177,30 @@ android:apk-key-hash:<base64url SHA-256 of signingCertificateHistory[0]>
 The SDK binds this origin into the mdoc `SessionTranscript` (ISO 18013-7 Annex C) / SD-JWT KB-JWT, so the
 response is cryptographically bound to the caller that requested it.
 
+### `expected_origins` — request replay protection
+
+Binding the *response* to the origin does not stop the *request* from being replayed. A signed request
+object is a bearer artifact: a malicious site can present one captured from a legitimate verifier, and
+its signature still verifies — so the wallet would show that verifier's trusted identity for a request
+the attacker initiated.
+
+OpenID4VP Appendix A.2 closes this with `expected_origins`, and the SDK enforces it:
+
+| Request | Rule |
+| --- | --- |
+| **signed** (`{"request":"<JWS>"}` or a bare JWS) | `expected_origins` is **REQUIRED**. The SDK rejects the request unless it is a non-empty array containing the platform-supplied origin. `client_id` is also required. |
+| **unsigned** (plain JSON) | The origin *is* the verifier's identity. The SDK **ignores** both `expected_origins` and any `client_id` present. |
+
+Both inputs come from channels the calling page cannot control: the origin is supplied by the platform,
+and `expected_origins` sits inside the signature-protected payload. A mismatch raises
+`VpException.InvalidRequest` / `VpError.invalidRequest` (OpenID4VP's `invalid_request`).
+
+:::note Self-asserted, not proof of ownership
+`expected_origins` prevents replay of *someone else's* signed request. It does not prove the verifier
+owns those origins — an attacker with a valid certificate can sign their own request listing their own
+origin. Whether to trust that `client_id` is the trust framework's job (`readerAnchorsDer`).
+:::
+
 ## 6. Test
 
 1. Registration runs on app start (log `registered N credential(s)`), so the wallet is now a provider.

@@ -175,6 +175,29 @@ android:apk-key-hash:<base64url SHA-256 of signingCertificateHistory[0]>
 SDK는 이 origin을 mdoc `SessionTranscript`(ISO 18013-7 Annex C) / SD-JWT KB-JWT에 바인딩하므로,
 응답은 요청한 호출자에 암호학적으로 묶입니다.
 
+### `expected_origins` — 요청 재생 방어
+
+**응답**을 origin에 바인딩해도 **요청**의 재생은 막지 못합니다. 서명된 요청 객체는 bearer 아티팩트라서,
+악성 사이트가 정상 verifier에게서 캡처한 요청을 그대로 제시해도 서명은 여전히 검증됩니다 — 그러면 지갑은
+공격자가 개시한 요청에 대해 그 verifier의 신뢰된 신원을 표시하게 됩니다.
+
+OpenID4VP Appendix A.2가 `expected_origins`로 이를 막고, SDK가 이를 강제합니다:
+
+| 요청 | 규칙 |
+| --- | --- |
+| **서명됨** (`{"request":"<JWS>"}` 또는 bare JWS) | `expected_origins`는 **필수**. 플랫폼이 준 origin을 담은 비어 있지 않은 배열이 아니면 거부합니다. `client_id`도 필수. |
+| **미서명** (평문 JSON) | origin이 곧 verifier의 신원. `expected_origins`와 `client_id`가 있어도 **무시**합니다. |
+
+두 입력 모두 호출 페이지가 조작할 수 없는 경로에서 옵니다: origin은 플랫폼이 주입하고,
+`expected_origins`는 서명으로 보호되는 payload 안에 있습니다. 불일치 시
+`VpException.InvalidRequest` / `VpError.invalidRequest`(OpenID4VP의 `invalid_request`)가 발생합니다.
+
+:::note 자기 주장일 뿐, 소유 증명이 아님
+`expected_origins`는 *남의* 서명 요청 재생을 막습니다. verifier가 그 origin을 소유한다는 증명은 아니며,
+유효한 인증서를 가진 공격자는 자기 origin을 넣어 자기 요청에 서명할 수 있습니다. 그 `client_id`를 신뢰할지는
+트러스트 프레임워크(`readerAnchorsDer`)의 몫입니다.
+:::
+
 ## 6. 테스트
 
 1. 등록은 앱 시작 시 실행됩니다(로그 `registered N credential(s)`) — 이제 지갑이 프로바이더입니다.

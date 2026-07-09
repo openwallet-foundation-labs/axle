@@ -37,8 +37,8 @@ Legend: ✅ implemented · 🟡 partial · ⬜ not yet.
 
 | Spec | Anchor version | Status |
 |---|---|---|
-| OpenID4VP | 1.0 Final (2025-07-09), DCQL | ✅ `openid4vp` — DCQL engine (null wildcard, values, claim_sets, credential_sets), JAR request resolution, `vp_token` (SD-JWT+KB-JWT and mdoc `DeviceResponse`), `direct_post` + `direct_post.jwt` (JWE — §8.3 `alg`-matched key selection, `kid` echo, `apv`-bound nonce), reader trust for signed requests, DC API `expected_origins` replay check (Appendix A.2), JAR hardening (`typ`, request-object `client_id` equality, `wallet_nonce`, case-sensitive `request_uri_method`), §8.5 Authorization Error Responses (`VpErrorCode` taxonomy + `reportError`; decline reports `access_denied` and follows the verifier's `redirect_uri`). Gaps: DCQL `multiple`/`trusted_authorities`/`require_cryptographic_holder_binding`, `transaction_data` partial — see audit below |
-| ISO/IEC 18013-5 device retrieval | :2021 §9 | 🟡 `proximity` / `Proximity` — QR **and NFC static handover** engagement, ECDH session keys (HKDF, salt = SHA-256 of the tag-24 SessionTranscript), `SessionEstablishment`/`SessionData` framing, encrypted exchange, reader authentication; **holder and reader** sides (`wallet.reader`). Device auth: `deviceSignature` **and `deviceMac`** end-to-end (holder derives the EMacKey via the `SecureArea` key-agreement port; opt in with `PresentationConfig.proximityDeviceAuth`). BLE (both modes) + NFC APDU transports are **Android demo host adapters only — no iOS transport**. **Live device-to-device interop with Multipaz** (BLE both modes + NFC, see `INTEROP.md`) |
+| OpenID4VP | 1.0 Final (2025-07-09), DCQL | ✅ `openid4vp` — DCQL engine (null wildcard, values, claim_sets, credential_sets), JAR request resolution, `vp_token` (SD-JWT+KB-JWT and mdoc `DeviceResponse` — `deviceSignature` or, when the verifier's `deviceauth_alg_values` requests it, `deviceMac` per ISO 18013-7 B.4.5), `direct_post` + `direct_post.jwt` (JWE — §8.3 `alg`-matched key selection, `kid` echo, `apv`-bound nonce), reader trust for signed requests, DC API `expected_origins` replay check (Appendix A.2), JAR hardening (`typ`, request-object `client_id` equality, `wallet_nonce`, case-sensitive `request_uri_method`), §8.5 Authorization Error Responses (`VpErrorCode` taxonomy + `reportError`; decline reports `access_denied` and follows the verifier's `redirect_uri`). Gaps: DCQL `multiple`/`trusted_authorities`/`require_cryptographic_holder_binding`, `transaction_data` partial — see audit below |
+| ISO/IEC 18013-5 device retrieval | :2021 §9 | 🟡 `proximity` / `Proximity` — QR **and NFC static handover** engagement, ECDH session keys (HKDF, salt = SHA-256 of the tag-24 SessionTranscript), `SessionEstablishment`/`SessionData` framing, encrypted exchange, reader authentication; **holder and reader** sides (`wallet.reader`). Device auth: `deviceSignature` **and `deviceMac`** end-to-end (holder derives the EMacKey via the `SecureArea` key-agreement port; `PresentationConfig.mdocDeviceAuth` — one knob shared with the OpenID4VP mdoc path). BLE (both modes) + NFC APDU transports are **Android demo host adapters only — no iOS transport**. **Live device-to-device interop with Multipaz** (BLE both modes + NFC, see `INTEROP.md`) |
 | ISO/IEC 18013-7 / DC API handover | :2025 Annex C | ✅ origin-bound mdoc `SessionTranscript` + **HPKE-sealed `org-iso-mdoc` response** for the Digital Credentials API. Annex B follows OpenID4VP 1.0 Final's handover, which superseded the TS-literal `OID4VPHandover`; Annex A (website REST retrieval) is a [deliberate non-goal](#deliberate-non-goals) |
 | W3C Digital Credentials API | browser-mediated (dc_api / dc_api.jwt) | ✅ `wallet.presentation.startDcApi` — no HTTP, response object returned to the platform |
 
@@ -87,17 +87,54 @@ Only what is 🟡/⬜ is listed; everything else in the tables above verified cl
 | Gap | Spec ref | Detail |
 |---|---|---|
 | DCQL `multiple` | §6.1/§8.1 | ⬜ not parsed; vp_token structurally always emits one presentation per query |
-| DCQL `trusted_authorities` | §6.1.1 | ⬜ not parsed or matched |
+| DCQL `trusted_authorities` | §6.1.1, §15.10 | ⬜ not parsed or matched. Three types with very different costs: `aki` is self-contained, `etsi_tl`/`openid_federation` need standing trust infrastructure. Matching is `SHOULD` and the Verifier re-validates issuer trust regardless (§6.1), so the feature buys data minimization, not security — see [implementation notes](#dcql-trusted_authorities--implementation-notes) |
 | DCQL `require_cryptographic_holder_binding` | §6.1 | ⬜ wallet always binds (KB-JWT / device signature); unbound presentations unsupported |
 | Client ID prefixes `verifier_attestation` / `decentralized_identifier` / `openid_federation` | §5.9.3/§12 | ⬜ trust verifier handles x509_san_dns/x509_hash/redirect_uri only |
 | `fragment` response mode | §8 | ⬜ rejected as unsupported |
 | `transaction_data` | §8.4/B.3.3 | 🟡 SD-JWT VC KB-JWT hashes wired; no unsupported-type rejection, no `credential_ids` binding, no mdoc path, no test coverage |
 
+#### DCQL trusted_authorities — implementation notes
+
+Scoped ahead of time so the work is shovel-ready when the [trust cluster](#trust--deliberately-sequenced-last)
+comes up at the end of the roadmap.
+
+Matching is an OR of an OR (§6.1.1): a credential matches if any value of its chain matches any entry
+of `values` in any entry of the array. The array is attached per Credential Query, so different
+requested credentials can carry different trust conditions.
+
+| Type | What the value is | How it matches | Trust infra needed |
+|---|---|---|---|
+| `aki` | base64url of the AKI `keyIdentifier` (RFC 5280 §4.2.1.1) | read the AKI extension of every cert in the credential's chain, base64url it, compare | none — byte compare |
+| `etsi_tl` | identifier (URL) of an ETSI TS 119 612 Trusted List | ≥1 cert of the chain must appear in that list **or its cascading lists** | pre-resolved TL cert set |
+| `openid_federation` | Entity Identifier, usually a Trust Anchor | a valid trust path from the credential's issuer to that anchor must be constructible | pre-resolved federation paths |
+
+The chain is already reachable from `trust`'s x5c adapters: SD-JWT VC carries it as `x5c` in the JWS
+header, mdoc as `x5chain` (CBOR label 33) in the `IssuerAuth` `COSE_Sign1` protected header.
+
+Traps to pin with tests when this lands:
+
+- **Read the AKI bytes; never derive them.** The 20-byte SHA-1-of-issuer-public-key form is RFC 5280's
+  *method 1* convention, not a matching rule. A CA may emit method 2 (truncated 60-bit) or an arbitrary
+  identifier, and computing the digest ourselves would silently mismatch.
+- **Walk the whole chain, not just the leaf.** §6.1.1.1 explicitly allows a credential to carry the full
+  X.509 chain or only parts of it.
+- `keyIdentifier` is ASN.1-OPTIONAL. Absent → no match, never an exception.
+- **Never fetch a Verifier-supplied URL** (§15.10). `etsi_tl` / `openid_federation` values are cache keys,
+  not fetch targets; an unresolvable value is a no-match. Retrieving them at request time leaks wallet
+  usage to whoever hosts the URL, and a per-request unique URL becomes a tracking beacon.
+- Matching is `SHOULD` (§6.1), so no-matching an unresolvable type stays conformant. A credential that
+  fails to match is treated as **absent from the wallet** (§6.4.2) — it must never surface in selection.
+
+Interop caveat: `eudi-lib-ios-openid4vp-swift` decodes these entries with the keys
+`trusted_authority_type` / `trusted_authority_values` rather than the spec's `type` / `values` — its own
+`OpenId4VPSpec` constants and its Kotlin sibling both use the spec names, and it ships no fixture for the
+field. Spec-compliant requests fail to decode there, so it is not a usable interop oracle for this field.
+
 ### ISO/IEC 18013-5:2021 — coverage: data model & session crypto solid, transports thin
 
 | Gap | Spec ref | Detail |
 |---|---|---|
-| Single-purpose mdoc auth key | §9.1.3.4 | 🟡 "A single mdoc authentication key shall not be used to produce both MACs and signatures during its lifetime." Both mechanisms are implemented and selected by `PresentationConfig.proximityDeviceAuth`, but a reused (`KeyUse.Rotate`) DeviceKey can MAC over proximity while signing over DC API / OpenID4VP, since those paths have no EReaderKey. `KeyUse.OneTime` batch keys satisfy the clause structurally; pinning the mechanism to the key is the general fix. **Deliberate — see [Deliberate non-goals](#deliberate-non-goals)** |
+| Single-purpose mdoc auth key | §9.1.3.4 | 🟡 "A single mdoc authentication key shall not be used to produce both MACs and signatures during its lifetime." Both mechanisms are implemented and selected by `PresentationConfig.mdocDeviceAuth`, but a reused (`KeyUse.Rotate`) DeviceKey can MAC on one channel while signing on another — MAC needs an EReaderKey, which proximity always has and OpenID4VP has only for an encrypted response (unencrypted OID4VP / plain DC API always sign). `KeyUse.OneTime` batch keys satisfy the clause structurally; pinning the mechanism to the key is the general fix. **Deliberate — see [Deliberate non-goals](#deliberate-non-goals)** |
 | NFC negotiated handover | §8.2.2.1/§9.1.5.1 | ⬜ static handover only (`[Hs, null]` hardcoded); no ReaderEngagement / Handover Request |
 | Session termination | §9.1.1.4 | ✅ holder + reader send the status-20 termination frame after the exchange, destroy the session keys (`SessionEncryption.destroy`), and close; the received `status` is decoded (Table 20 10/11/20). BLE `End` command remains a demo-transport concern |
 | BLE / NFC transports | §8.3.3.1 | 🟡 core SDK exposes a transport port only; GATT (both modes, MTU chunking) + NFC APDU live in the **Android demo**; **no iOS/Swift transport**; BLE Ident characteristic absent |
@@ -112,7 +149,7 @@ Only what is 🟡/⬜ is listed; everything else in the tables above verified cl
 
 | Gap | Spec ref | Detail |
 |---|---|---|
-| mdoc MAC auth in OID4VP | B.4.5 | ⬜ the OID4VP mdoc path signs only (proximity does both) |
+| mdoc MAC auth in OID4VP | B.4.5 | ✅ `HeldMdoc` produces a `deviceMac` when the verifier requests it via `deviceauth_alg_values` (OpenID4VP §B.2.2): the `EMacKey` comes from ECDH between the mdoc `DeviceKey` and the verifier's response-encryption key (the `EReaderKey`, B.4.5), curve-matched, reusing `MdocDeviceAuth.emacKey`. Selection: forced when only MAC is accepted, else the `mdocDeviceAuth` preference (default `deviceSignature`). Needs an encrypted response (no enc key ⇒ signs) |
 | Annex B curve set | B.5.2 Table B.8 | 🟡 P-256/384/521 only; no Brainpool / Curve25519/448 (P-256 satisfies the mdoc-side minimum) |
 | Verifier-side HPKE decryption | C.4 Table C.3 | ⬜ `Hpke` seals only; no `open` (wallet-side complete, reader/verifier side cannot unseal) |
 | Origin abort | C.5 | 🟡 origin is a required parameter folded into the transcript, but no explicit empty-origin abort |
@@ -135,11 +172,30 @@ Not gaps to be closed later — decisions. Recorded so the matrix cannot be read
 | Item | Status |
 |---|---|
 | SD-JWT VC Type Metadata (§4: vct resolution, `extends`, display, claim metadata, schema) + `vct#integrity` | ⬜ largest single gap; §4.7 is a step of the verification algorithm |
-| OpenID4VP hardening: DCQL `multiple`/`trusted_authorities`, `require_cryptographic_holder_binding` | ⬜ |
+| OpenID4VP hardening: DCQL `multiple`, `require_cryptographic_holder_binding` | ⬜ the trust-free half of the OpenID4VP gap; `trusted_authorities` is sequenced with the trust cluster below |
 | iOS proximity transport (CoreBluetooth / CoreNFC) + BLE Ident characteristic + session termination (status 20) | ⬜ Android demo adapters only |
 | OpenID4VCI: `attestation` proof type, `credential_identifiers` | ⬜ |
 | NFC negotiated handover (18013-5 §8.2.2.1) | ⬜ |
-| LOTL Level 2 · CRL / OCSP real-time revocation | ⬜ trust hardening |
 | Wallet Provider backend end-to-end (WUA issue → verify loop) | 🟡 backend exists (`wallet-provider/`); e2e loop closure pending |
 | BLE / NFC transport production hardening | 🟡 demo adapters + live Multipaz interop done; reconnect / timeout / MTU / cancellation hardening pending |
 | Shared mdoc golden vectors (MSO / DeviceResponse / SessionTranscript / deviceMac) | ⬜ cross-language equivalence currently via round-trip tests + live interop |
+
+### Trust — deliberately sequenced last
+
+Everything that needs standing trust infrastructure — a resolved trusted-list cache, federation paths,
+revocation feeds — lands after the rest of the roadmap. The reason is dependency direction, not effort.
+Each item is a *filter* over credentials the SDK can already issue, present, and verify, and none of them
+is the security boundary: the Verifier validates issuer trust independently (OpenID4VP §6.1), and DCQL
+matching is `SHOULD`. Building them early would mean carrying a cache-refresh, list-signature, and
+revocation surface before the flows that consume it are frozen.
+
+Within the cluster, `aki` goes first — it is the only member that needs no cache and can be tested
+offline against a generated chain.
+
+| Item | Status |
+|---|---|
+| DCQL `trusted_authorities` — `aki` | ⬜ self-contained byte compare; no cache, offline-testable |
+| DCQL `trusted_authorities` — `etsi_tl` | ⬜ needs the TL cert-set cache (LOTL + cascading member-state lists) |
+| DCQL `trusted_authorities` — `openid_federation` | ⬜ needs federation path resolution; shares a resolver with the client-ID prefix below |
+| Client ID prefixes `verifier_attestation` / `decentralized_identifier` / `openid_federation` | ⬜ trust verifier handles x509_san_dns / x509_hash / redirect_uri only |
+| LOTL Level 2 · CRL / OCSP real-time revocation | ⬜ |

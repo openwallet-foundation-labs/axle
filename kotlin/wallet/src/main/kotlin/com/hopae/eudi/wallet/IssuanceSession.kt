@@ -48,10 +48,10 @@ class IssuanceSession internal constructor(
     }
 
     /** Pauses the flow at [IssuanceState.TxCodeRequired] until [submitTxCode]. */
-    internal suspend fun awaitTxCode(): String {
+    internal suspend fun awaitTxCode(txCode: TxCodeSpec?): String {
         val deferred = CompletableDeferred<String>()
         txCodeContinuation = deferred
-        emit(IssuanceState.TxCodeRequired)
+        emit(IssuanceState.TxCodeRequired(txCode))
         return deferred.await()
     }
 

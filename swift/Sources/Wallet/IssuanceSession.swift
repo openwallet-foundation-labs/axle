@@ -50,10 +50,10 @@ public final class IssuanceSession: @unchecked Sendable {
     }
 
     /// Pauses the flow at `.txCodeRequired` until `submitTxCode`.
-    func awaitTxCode() async -> String {
+    func awaitTxCode(_ txCode: TxCodeSpec?) async -> String {
         await withCheckedContinuation { cont in
             locked { txCodeContinuation = cont }
-            emit(.txCodeRequired)
+            emit(.txCodeRequired(txCode))
         }
     }
 

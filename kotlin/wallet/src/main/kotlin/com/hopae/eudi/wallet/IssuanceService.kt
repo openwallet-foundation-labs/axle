@@ -91,7 +91,7 @@ class IssuanceService internal constructor(
 
     private suspend fun issueFromOffer(session: IssuanceSession, offer: CredentialOffer, request: IssuanceRequest, keys: IssuanceKeys): CredentialResponse =
         if (offer.raw.preAuthorizedCode != null) {
-            val txCode = request.txCode ?: if (offer.requiresTxCode) session.awaitTxCode() else null
+            val txCode = request.txCode ?: if (offer.requiresTxCode) session.awaitTxCode(offer.txCode) else null
             catchingVci { vci.issueWithPreAuthorizedCode(offer.raw, request.configurationId, keys, txCode) }
         } else {
             authorizationCodeFlow(session, offer.raw.credentialIssuer, request.configurationId, offer.raw.authorizationCodeIssuerState, keys)

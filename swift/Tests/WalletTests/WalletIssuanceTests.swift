@@ -35,6 +35,31 @@ final class WalletIssuanceTests: XCTestCase {
         return session.currentState
     }
 
+    /// §4.1.1: the input hints reach the host through `.txCodeRequired` so it can render + warn
+    /// (advisory, never blocking).
+    func testTxCodeHintsReachTheHost() async throws {
+        let (wallet, mock, _) = try await makeWallet()
+        let offer = try await wallet.issuance.resolveOffer(mock.credentialOfferJson)
+
+        // No txCode in the request → the session pauses and surfaces the hints.
+        let session = wallet.issuance.start(.fromOffer(offer, configurationId: "eu.europa.ec.eudi.pid.1"))
+        var spec: TxCodeSpec??
+        for await state in session.states {
+            if case let .txCodeRequired(s) = state {
+                spec = .some(s)
+                session.submitTxCode("1234")
+            }
+            if state.isTerminal { break }
+        }
+
+        let hints = try XCTUnwrap(spec ?? nil, "TxCodeRequired must carry the spec")
+        XCTAssertEqual(4, hints.length)
+        XCTAssertEqual("numeric", hints.inputMode)
+        XCTAssertTrue(hints.validate("12").contains { $0.contains("4 characters") }, "short code warns")
+        XCTAssertTrue(hints.validate("abcd").contains { $0.contains("digits") }, "non-numeric warns")
+        XCTAssertTrue(hints.validate("1234").isEmpty, "a conformant code is clean")
+    }
+
     func testPreAuthorizedIssuanceStoresCredential() async throws {
         let (wallet, mock, _) = try await makeWallet()
         let offer = try await wallet.issuance.resolveOffer(mock.credentialOfferJson)

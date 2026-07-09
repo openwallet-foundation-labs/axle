@@ -78,7 +78,7 @@ public struct IssuanceService {
             if let provided = request.txCode {
                 txCode = provided
             } else if offer.requiresTxCode {
-                txCode = await s.awaitTxCode()
+                txCode = await s.awaitTxCode(offer.txCode)
             } else {
                 txCode = nil
             }

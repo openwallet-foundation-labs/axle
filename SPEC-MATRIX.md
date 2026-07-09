@@ -80,7 +80,7 @@ Only what is 🟡/⬜ is listed; everything else in the tables above verified cl
 | `attestation` proof type | §8.2.1.3 | ⬜ only `jwt` proofs sent (key attestation rides in the `key_attestation` JOSE header, which **is** implemented) |
 | `credential_identifier(s)` issuance flow | §3.4/§6.2/§8.2 | ⬜ requests always use `credential_configuration_id`; token-response `authorization_details` parsed-but-ignored (Kotlin) / not parsed (Swift) |
 | Deferred `interval` backoff | §8.3/§9.2 | ⬜ not parsed or honored (REQUIRED alongside `transaction_id`) |
-| `tx_code` constraints | §4.1.1 | 🟡 length/input_mode advertised values not validated against the supplied code |
+| `tx_code` input hints | §4.1.1 | ✅ exposed to the host as `TxCodeSpec` (length / input_mode / description) on `CredentialOffer` and `IssuanceState.TxCodeRequired`; `validate(code)` returns advisory violations. Not enforced by the SDK — the hints are for rendering, and a mismatch is the issuer's call, not ours (headless: no input screen to gate) |
 | `mso_mdoc` format | §3.3.1 | 🟡 opaque-string passthrough; live-tested Kotlin only, untested in Swift |
 
 ### OpenID4VP 1.0 — coverage: core solid

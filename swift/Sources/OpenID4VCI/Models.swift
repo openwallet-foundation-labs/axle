@@ -27,10 +27,34 @@ private extension JsonValue {
 
 /// Credential offer (OpenID4VCI §4.1).
 public struct CredentialOffer {
+    /// The Transaction Code input hints from a Credential Offer (OpenID4VCI §4.1.1). These describe how
+    /// the wallet should render the code-entry screen; they are guidance, not a wire constraint, so the
+    /// SDK never rejects a supplied code on their basis — `violations` lets the host surface a warning.
     public struct TxCodeSpec {
         public let length: Int?
         public let inputMode: String?
         public let description: String?
+
+        public init(length: Int?, inputMode: String?, description: String?) {
+            self.length = length
+            self.inputMode = inputMode
+            self.description = description
+        }
+
+        /// The ways `code` departs from these hints (empty = consistent). Advisory only: `input_mode`
+        /// `numeric` means digits only, `text` accepts anything, and `length` is the expected character
+        /// count. Never throws — a wallet may warn, or send the code regardless and let the issuer decide.
+        public func violations(_ code: String) -> [String] {
+            var out: [String] = []
+            let mode = inputMode ?? "numeric" // §4.1.1: numeric is the default
+            if mode == "numeric" && !code.allSatisfy(\.isNumber) {
+                out.append("transaction code must contain only digits (input_mode=numeric)")
+            }
+            if let length, code.count != length {
+                out.append("transaction code should be \(length) characters, got \(code.count)")
+            }
+            return out
+        }
     }
 
     public let credentialIssuer: String

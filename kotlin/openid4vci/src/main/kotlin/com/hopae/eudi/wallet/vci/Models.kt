@@ -18,7 +18,25 @@ class CredentialOffer(
     val txCode: TxCodeSpec?,
     val authorizationCodeIssuerState: String?,
 ) {
-    class TxCodeSpec(val length: Int?, val inputMode: String?, val description: String?)
+    /**
+     * The Transaction Code input hints from a Credential Offer (OpenID4VCI §4.1.1). These describe how
+     * the wallet should render the code-entry screen; they are guidance, not a wire constraint, so the
+     * SDK never rejects a supplied code on their basis — [violations] lets the host surface a warning.
+     */
+    class TxCodeSpec(val length: Int?, val inputMode: String?, val description: String?) {
+        /**
+         * The ways [code] departs from these hints (empty = consistent). Advisory only: `input_mode`
+         * `numeric` means digits only, `text` accepts anything, and `length` is the expected character
+         * count. Never throws — a wallet may warn, or send the code regardless and let the issuer decide.
+         */
+        fun violations(code: String): List<String> = buildList {
+            val mode = inputMode ?: "numeric" // §4.1.1: numeric is the default
+            if (mode == "numeric" && !code.all { it.isDigit() }) {
+                add("transaction code must contain only digits (input_mode=numeric)")
+            }
+            length?.let { if (code.length != it) add("transaction code should be $it characters, got ${code.length}") }
+        }
+    }
 
     companion object {
         fun parse(json: String): CredentialOffer =

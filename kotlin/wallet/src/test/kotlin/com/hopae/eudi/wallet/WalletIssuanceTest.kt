@@ -93,6 +93,15 @@ class WalletIssuanceTest {
 
         val txState = withTimeout(15_000) { session.state.first { it is IssuanceState.TxCodeRequired || it.isTerminal } }
         assertTrue(txState is IssuanceState.TxCodeRequired, "expected TxCodeRequired, got $txState")
+
+        // §4.1.1: the input hints reach the host so it can render + warn (advisory, never blocking).
+        val spec = txState.txCode
+        assertEquals(4, spec?.length)
+        assertEquals("numeric", spec?.inputMode)
+        assertTrue(spec!!.validate("12").any { "4 characters" in it }, "short code warns")
+        assertTrue(spec.validate("abcd").any { "digits" in it }, "non-numeric warns")
+        assertTrue(spec.validate("1234").isEmpty(), "a conformant code is clean")
+
         session.submitTxCode("1234")
 
         val terminal = withTimeout(15_000) { session.state.first { it.isTerminal } }

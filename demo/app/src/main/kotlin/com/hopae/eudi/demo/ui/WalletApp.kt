@@ -291,7 +291,11 @@ private suspend fun runIssuance(
         session.state.first { s ->
             LogStore.log("  issuance → ${s::class.simpleName}")
             when (s) {
-                is IssuanceState.TxCodeRequired -> txCode?.let { session.submitTxCode(it) }
+                is IssuanceState.TxCodeRequired -> txCode?.let { code ->
+                    // §4.1.1 hints are advisory: warn on a mismatch, then submit anyway (issuer decides).
+                    s.txCode?.validate(code)?.forEach { LogStore.log("⚠️ tx_code: $it") }
+                    session.submitTxCode(code)
+                }
                 is IssuanceState.AuthorizationRequired -> openAuth(s.authorizationUrl, session)
                 is IssuanceState.Completed -> LogStore.log("✅ Issued ${s.result.issued.size} credential(s)")
                 is IssuanceState.Failed -> LogStore.log("❌ ${s.error.message}")

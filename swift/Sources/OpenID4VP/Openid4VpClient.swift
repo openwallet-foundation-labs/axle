@@ -23,6 +23,9 @@ public struct PresentationSelection {
     }
 }
 
+/// The only JWE key-agreement `alg` this SDK implements; §8.3 requires the JWE `alg` to equal the chosen JWK's.
+private let ecdhEs = "ECDH-ES"
+
 public struct SubmitResult {
     public let redirectUri: String?
 }
@@ -83,9 +86,11 @@ public struct Openid4VpClient {
             return .obj([("vp_token", vpToken)])
         case "dc_api.jwt":
             guard let recipient = verifierEncryptionKey(request) else {
-                throw VpError.invalidRequest("dc_api.jwt but no verifier encryption key in client_metadata")
+                throw VpError.invalidRequest("dc_api.jwt but no ECDH-ES verifier encryption key in client_metadata")
             }
-            let jwe = try Jwe.encryptEcdhEs(plaintext: [UInt8](JsonValue.obj([("vp_token", vpToken)]).serialize().utf8), recipient: recipient, enc: encValue(request))
+            let jwe = try Jwe.encryptEcdhEs(
+                plaintext: [UInt8](JsonValue.obj([("vp_token", vpToken)]).serialize().utf8),
+                recipient: recipient.publicKey, enc: encValue(request), apv: apv(request), kid: recipient.kid)
             return .obj([("response", .str(jwe))])
         default:
             throw VpError.unsupported("respondDcApi requires a dc_api response_mode, got \(request.responseMode)")
@@ -127,7 +132,7 @@ public struct Openid4VpClient {
         let iat = clock()
         // Encrypted responses (direct_post.jwt / dc_api.jwt) bind the verifier's encryption key in the mdoc handover.
         let jwkThumbprint: [UInt8]? = request.responseMode.hasSuffix(".jwt")
-            ? verifierEncryptionKey(request).map { ecJwkThumbprint($0) } : nil
+            ? verifierEncryptionKey(request).map { ecJwkThumbprint($0.publicKey) } : nil
 
         var vpEntries: [(String, JsonValue)] = []
         for (queryId, credentialId) in selection.chosen {
@@ -157,11 +162,13 @@ public struct Openid4VpClient {
     private func submitDirectPostJwt(_ request: ResolvedRequest, _ vpToken: JsonValue) async throws -> SubmitResult {
         guard let responseUri = request.responseUri else { throw VpError.invalidRequest("direct_post.jwt needs response_uri") }
         guard let recipient = verifierEncryptionKey(request) else {
-            throw VpError.invalidRequest("direct_post.jwt but no verifier encryption key in client_metadata")
+            throw VpError.invalidRequest("direct_post.jwt but no ECDH-ES verifier encryption key in client_metadata")
         }
         var entries: [(String, JsonValue)] = [("vp_token", vpToken)]
         if let state = request.state { entries.append(("state", .str(state))) }
-        let jwe = try Jwe.encryptEcdhEs(plaintext: [UInt8](JsonValue.obj(entries).serialize().utf8), recipient: recipient, enc: encValue(request))
+        let jwe = try Jwe.encryptEcdhEs(
+            plaintext: [UInt8](JsonValue.obj(entries).serialize().utf8),
+            recipient: recipient.publicKey, enc: encValue(request), apv: apv(request), kid: recipient.kid)
         return try await post(responseUri, "response=\(enc(jwe))")
     }
 
@@ -181,11 +188,30 @@ public struct Openid4VpClient {
         return SubmitResult(redirectUri: nil)
     }
 
-    private func verifierEncryptionKey(_ request: ResolvedRequest) -> EcPublicKey? {
-        guard let jwks = request.clientMetadata?["jwks"], case let .arr(keys)? = jwks["keys"] else { return nil }
-        let encKey = keys.first { if case .str("enc")? = $0["use"] { return true } else { return false } } ?? keys.first
-        return encKey.flatMap { JwkEc.fromJson($0) }
+    /// The verifier's chosen encryption key, with the `kid` §8.3 makes the wallet echo back.
+    private struct VerifierEncryptionKey {
+        let publicKey: EcPublicKey
+        let kid: String?
     }
+
+    /// Selects the verifier's response-encryption key from `client_metadata.jwks` (OpenID4VP §8.3).
+    /// The spec requires `alg` on every JWK and requires the JWE `alg` to equal the chosen key's, so we
+    /// only consider `ECDH-ES` keys — the one key-agreement algorithm this SDK implements. `use: enc`
+    /// keys win over unmarked ones.
+    private func verifierEncryptionKey(_ request: ResolvedRequest) -> VerifierEncryptionKey? {
+        guard let jwks = request.clientMetadata?["jwks"], case let .arr(keys)? = jwks["keys"] else { return nil }
+        let usable = keys.filter { if case .str(ecdhEs)? = $0["alg"] { return true }; return false }
+        let chosen = usable.first { if case .str("enc")? = $0["use"] { return true }; return false } ?? usable.first
+        guard let chosen, let publicKey = JwkEc.fromJson(chosen) else { return nil }
+        var kid: String?
+        if case let .str(k)? = chosen["kid"] { kid = k }
+        return VerifierEncryptionKey(publicKey: publicKey, kid: kid)
+    }
+
+    /// ISO 18013-7 B.5.3: the mdoc sets `apv` to the base64url of the request `nonce`. `apu` would carry
+    /// the `mdocGeneratedNonce` of the TS-literal B.4.4 handover, which OpenID4VP 1.0 Final replaced —
+    /// so there is no `apu` to send. Both are ConcatKDF inputs and part of the AEAD tag either way.
+    private func apv(_ request: ResolvedRequest) -> [UInt8] { [UInt8](request.nonce.utf8) }
 
     private func encValue(_ request: ResolvedRequest) -> JweEnc {
         if case let .arr(items)? = request.clientMetadata?["encrypted_response_enc_values_supported"],

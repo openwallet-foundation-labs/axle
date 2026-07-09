@@ -37,6 +37,8 @@ class VpE2eTest {
     private val now = 1_700_000_000L
 
     /** Verifier: holds an EC encryption key, builds the request, receives & verifies the response. */
+    private companion object { const val ENC_KID = "verifier-enc-key-1" }
+
     private class MockVerifier(
         val area: SoftwareSecureArea,
         val issuerPublic: EcPublicKey,
@@ -56,7 +58,10 @@ class VpE2eTest {
             val pub = encKp.public as ECPublicKey
             fun fixed(b: BigInteger): ByteArray { val s = b.toByteArray().dropWhile { it == 0.toByte() }.toByteArray(); return ByteArray(32 - s.size) + s }
             val ec = EcPublicKey(EcCurve.P256, fixed(pub.w.affineX), fixed(pub.w.affineY))
-            encPubJwk = JwkEc.toJson(ec).let { JsonValue.Obj(it.entries + ("use" to JsonValue.Str("enc"))) }
+            encPubJwk = JwkEc.toJson(ec).let {
+            // §8.3: `alg` MUST be present on the JWK; the wallet echoes `kid` into the JWE header.
+            JsonValue.Obj(it.entries + ("use" to JsonValue.Str("enc")) + ("alg" to JsonValue.Str("ECDH-ES")) + ("kid" to JsonValue.Str(ENC_KID)))
+        }
             encPrivD = fixed((encKp.private as ECPrivateKey).s)
         }
 

@@ -107,6 +107,36 @@ final class WalletPresentationTests: XCTestCase {
         wallet.close()
     }
 
+    /// OpenID4VP §8.3: the wallet encrypts to a `client_metadata.jwks` key whose `alg` it matches, and
+    /// repeats that key's `kid` in the JWE header so the verifier knows which private key to use.
+    /// ISO 18013-7 B.5.3 additionally binds the request `nonce` into `apv`; `apu` would carry the
+    /// `mdocGeneratedNonce` of the superseded B.4.4 handover, so it is absent.
+    func testEncryptedResponseEchoesKidAndBindsNonceInApv() async throws {
+        let area = SoftwareSecureArea()
+        let storage = InMemoryStorageDriver()
+        let issuerPublic = try await seedPid(area, storage)
+        let verifier = MockVerifier(issuerPublic: issuerPublic)
+        let wallet = Wallet.create(config: WalletConfig(),
+                                   ports: WalletPorts(secureAreas: [area], storage: storage, http: verifier))
+
+        let session = wallet.presentation.start(await verifier.requestUri("direct_post.jwt"))
+        var terminal: PresentationState?
+        for await state in session.states {
+            if case let .requestResolved(request) = state { session.respond(.auto(request)) }
+            if state.isTerminal { terminal = state; break }
+        }
+        guard case .completed = terminal else { return XCTFail("terminal: \(String(describing: terminal))") }
+
+        let claims = await verifier.verifiedClaims
+        XCTAssertNotNil(claims, "the verifier decrypted and verified the response")
+        let kid = await verifier.seenJweKid
+        let apv = await verifier.seenJweApv
+        let nonce = await verifier.nonce
+        XCTAssertEqual(MockVerifier.encKid, kid)
+        XCTAssertEqual(nonce, apv)
+        wallet.close()
+    }
+
     /// DC API has no response_uri: the refusal goes back to the platform, never to a verifier endpoint (§15.9.2).
     func testDeclineOverDcApiReportsNothing() async throws {
         let area = SoftwareSecureArea()

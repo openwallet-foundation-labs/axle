@@ -102,10 +102,11 @@ class MdocDcApiTest {
     fun dcApiJwtReturnsEncryptedResponse() = runBlocking {
         val (held, _) = heldMdoc()
         val client = Openid4VpClient(noHttp, clock = { 1_700_000_000 })
-        // a real verifier encryption key (P-256, use=enc) in client_metadata
+        // a real verifier encryption key in client_metadata; §8.3 requires `alg` on the JWK
         val area = SoftwareSecureArea()
         val encKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256)).publicKey
-        val jwks = """{"jwks":{"keys":[{"kty":"EC","crv":"P-256","use":"enc","x":"${Base64Url.encode(encKey.x)}","y":"${Base64Url.encode(encKey.y)}"}]},"encrypted_response_enc_values_supported":["A128GCM"]}"""
+        val jwks = """{"jwks":{"keys":[{"kty":"EC","crv":"P-256","use":"enc","alg":"ECDH-ES","kid":"dc-enc-1",""" +
+            """"x":"${Base64Url.encode(encKey.x)}","y":"${Base64Url.encode(encKey.y)}"}]},"encrypted_response_enc_values_supported":["A128GCM"]}"""
         val request = client.resolveDcApiRequest(dcApiRequest("dc_api.jwt", jwks), origin)
 
         val matches = client.match(request, listOf(held))
@@ -113,5 +114,12 @@ class MdocDcApiTest {
         val jwe = (response["response"] as JsonValue.Str).value
         assertEquals(5, jwe.split(".").size, "dc_api.jwt response is a compact JWE")
         assertTrue(response["vp_token"] == null, "encrypted response must not expose vp_token in the clear")
+
+        // §8.3: the chosen key's kid is echoed; 18013-7 B.5.3: apv carries the request nonce.
+        val header = JsonValue.parse(Base64Url.decodeToString(jwe.substringBefore('.'))) as JsonValue.Obj
+        assertEquals("ECDH-ES", (header["alg"] as JsonValue.Str).value)
+        assertEquals("dc-enc-1", (header["kid"] as JsonValue.Str).value)
+        assertEquals("dcapi-nonce", Base64Url.decodeToString((header["apv"] as JsonValue.Str).value))
+        assertTrue(header["apu"] == null, "no mdocGeneratedNonce in the OID4VP 1.0 Final handover")
     }
 }

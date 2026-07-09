@@ -2,6 +2,7 @@ package com.hopae.eudi.wallet.vp
 
 import com.hopae.eudi.wallet.cbor.cose.EcCurve
 import com.hopae.eudi.wallet.cbor.cose.EcPublicKey
+import com.hopae.eudi.wallet.sdjwt.Base64Url
 import com.hopae.eudi.wallet.sdjwt.JsonValue
 import com.hopae.eudi.wallet.sdjwt.JwkEc
 import com.hopae.eudi.wallet.sdjwt.Jwe
@@ -37,6 +38,10 @@ class MockVerifier(
 
     var verifiedClaims: JsonValue.Obj? = null
 
+    /** JWE header values the wallet sent on an encrypted response (§8.3 `kid`, 18013-7 B.5.3 `apv`). */
+    var seenJweKid: String? = null; private set
+    var seenJweApv: String? = null; private set
+
     /** The Authorization Error Response the wallet POSTed instead of a `vp_token` (§8.5), if any. */
     class ErrorResponse(val error: String, val description: String?, val state: String?)
     var errorResponse: ErrorResponse? = null
@@ -46,7 +51,10 @@ class MockVerifier(
         val pub = encKp.public as ECPublicKey
         fun fixed(b: BigInteger): ByteArray { val s = b.toByteArray().dropWhile { it == 0.toByte() }.toByteArray(); return ByteArray(32 - s.size) + s }
         val ec = EcPublicKey(EcCurve.P256, fixed(pub.w.affineX), fixed(pub.w.affineY))
-        encPubJwk = JwkEc.toJson(ec).let { JsonValue.Obj(it.entries + ("use" to JsonValue.Str("enc"))) }
+        encPubJwk = JwkEc.toJson(ec).let {
+            // §8.3: `alg` MUST be present on the JWK; the wallet echoes `kid` into the JWE header.
+            JsonValue.Obj(it.entries + ("use" to JsonValue.Str("enc")) + ("alg" to JsonValue.Str("ECDH-ES")) + ("kid" to JsonValue.Str(ENC_KID)))
+        }
         encPrivD = fixed((encKp.private as ECPrivateKey).s)
     }
 
@@ -87,8 +95,14 @@ class MockVerifier(
             return HttpResponse(200, listOf("Content-Type" to "application/json"), """{"redirect_uri":"https://verifier.example/done"}""".encodeToByteArray())
         }
         val vpTokenJson = when {
-            form["response"] != null -> Jwe.decryptEcdhEs(form["response"]!!, encPrivD, EcCurve.P256).decodeToString()
-                .let { JsonValue.parse(it) as JsonValue.Obj }.let { it["vp_token"] as JsonValue.Obj }
+            form["response"] != null -> {
+                // §8.3: the wallet must echo our kid; 18013-7 B.5.3: apv carries the request nonce.
+                val header = JsonValue.parse(Base64Url.decodeToString(form["response"]!!.substringBefore('.'))) as JsonValue.Obj
+                seenJweKid = (header["kid"] as? JsonValue.Str)?.value
+                seenJweApv = (header["apv"] as? JsonValue.Str)?.value?.let { Base64Url.decodeToString(it) }
+                Jwe.decryptEcdhEs(form["response"]!!, encPrivD, EcCurve.P256).decodeToString()
+                    .let { JsonValue.parse(it) as JsonValue.Obj }.let { it["vp_token"] as JsonValue.Obj }
+            }
             form["vp_token"] != null -> JsonValue.parse(form["vp_token"]!!) as JsonValue.Obj
             else -> error("no vp_token in response")
         }
@@ -103,6 +117,9 @@ class MockVerifier(
 
     companion object {
         const val DEFAULT_PID_QUERY = """{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{"vct_values":["urn:eudi:pid:1"]},"claims":[{"path":["family_name"]},{"path":["given_name"]}]}]}"""
+
+        /** The `kid` of the verifier's encryption JWK; §8.3 makes the wallet repeat it in the JWE header. */
+        const val ENC_KID = "verifier-enc-key-1"
         private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
     }
 }

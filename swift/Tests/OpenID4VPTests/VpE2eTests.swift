@@ -32,7 +32,7 @@ final class VpE2eTests: XCTestCase {
             let raw = priv.publicKey.rawRepresentation
             let ec = EcPublicKey(curve: .p256, x: [UInt8](raw.prefix(32)), y: [UInt8](raw.suffix(32)))
             if case let .obj(entries) = JwkEc.toJson(ec) {
-                encPubJwk = .obj(entries + [("use", .str("enc"))])
+                encPubJwk = .obj(entries + [("use", .str("enc")), ("alg", .str("ECDH-ES")), ("kid", .str("verifier-enc-key-1"))])
             } else {
                 encPubJwk = JwkEc.toJson(ec)
             }

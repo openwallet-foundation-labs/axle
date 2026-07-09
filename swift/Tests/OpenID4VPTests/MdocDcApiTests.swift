@@ -91,7 +91,8 @@ final class MdocDcApiTests: XCTestCase {
         let client = Openid4VpClient(http: NoHttp(), clock: { 1_700_000_000 })
         let area = SoftwareSecureArea()
         let encKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256)).publicKey
-        let jwks = "{\"jwks\":{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"use\":\"enc\",\"x\":\"\(Base64Url.encode(encKey.x))\",\"y\":\"\(Base64Url.encode(encKey.y))\"}]},\"encrypted_response_enc_values_supported\":[\"A128GCM\"]}"
+        // §8.3 requires `alg` on the JWK; the wallet echoes `kid` into the JWE header.
+        let jwks = "{\"jwks\":{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"use\":\"enc\",\"alg\":\"ECDH-ES\",\"kid\":\"dc-enc-1\",\"x\":\"\(Base64Url.encode(encKey.x))\",\"y\":\"\(Base64Url.encode(encKey.y))\"}]},\"encrypted_response_enc_values_supported\":[\"A128GCM\"]}"
         let request = try await client.resolveDcApiRequest(dcApiRequest("dc_api.jwt", clientMetadata: jwks), origin: origin)
 
         let matches = client.match(request, held: [held])
@@ -99,5 +100,18 @@ final class MdocDcApiTests: XCTestCase {
         guard case let .str(jwe)? = response["response"] else { return XCTFail("no encrypted response") }
         XCTAssertEqual(5, jwe.split(separator: ".", omittingEmptySubsequences: false).count) // compact JWE (empty CEK for ECDH-ES)
         XCTAssertNil(response["vp_token"])
+
+        // §8.3: the chosen key's kid is echoed; 18013-7 B.5.3: apv carries the request nonce.
+        guard case let .obj(hdr) = try JsonValue.parse(try Base64Url.decodeToString(String(jwe.split(separator: ".")[0]))) else {
+            return XCTFail("bad JWE header")
+        }
+        let header = JsonValue.obj(hdr)
+        guard case let .str(alg)? = header["alg"], case let .str(kid)? = header["kid"], case let .str(apv)? = header["apv"] else {
+            return XCTFail("missing alg/kid/apv")
+        }
+        XCTAssertEqual("ECDH-ES", alg)
+        XCTAssertEqual("dc-enc-1", kid)
+        XCTAssertEqual("dcapi-nonce", try Base64Url.decodeToString(apv))
+        XCTAssertNil(header["apu"], "no mdocGeneratedNonce in the OID4VP 1.0 Final handover")
     }
 }

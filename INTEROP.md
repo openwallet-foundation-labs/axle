@@ -242,8 +242,30 @@ DC API request: signed · client_id=x509_hash:f1drGLOIT4… · expected_origins=
 
 Note the reference wallets do **not** implement this check — Multipaz's verifier emits
 `expected_origins` but its wallet carries a `// TODO: handle expected_origins`, and the EUDI reference
-libraries never mention the parameter. `verifier.eudiw.dev`'s signed DC API request has not yet been
-inspected for it.
+libraries never mention the parameter.
+
+The same request also carries `"typ": "oauth-authz-req+jwt"`, so the OpenID4VP §5 JAR typing rule the
+SDK enforces holds for real DC API requests too.
+
+## Encrypted Authorization Responses (OpenID4VP §8.3 / 18013-7 B.5.3)
+
+`verifier.eudiw.dev` publishes exactly one encryption key in `client_metadata`:
+
+```json
+{"kty":"EC","crv":"P-256","use":"enc","alg":"ECDH-ES","kid":"83832fca-3424-4565-b7c8-38b6cea31f8d"}
+```
+
+`alg` is present, as §8.3 requires ("The `alg` parameter MUST be present in the JWKs"), so the wallet
+selects the key by matching `alg`, encrypts with that same `alg`, and repeats its `kid` in the JWE
+header. `apv` carries the request `nonce` (18013-7 B.5.3); there is no `apu`, which would have held the
+`mdocGeneratedNonce` of the superseded B.4.4 handover.
+
+`tools/headless-interop/run-vp.sh` confirms the verifier still decrypts once those headers are added:
+
+```
+verifier: client_id=x509_hash:LTHlBmrN… scheme=x509_hash trusted=true cn=EUDI Remote Verifier
+*** PRESENTED TO TRUSTED VERIFIER ***
+```
 
 The demo logs the request shape (`GetCredentialActivity.logRequestShape`) so a rejection can be told
 apart from a verifier that simply omits the parameter. Beware that the demo's `extractOpenId4Vp`

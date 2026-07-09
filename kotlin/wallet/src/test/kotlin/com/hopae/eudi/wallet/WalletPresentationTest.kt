@@ -33,6 +33,7 @@ import kotlinx.coroutines.withTimeout
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -102,6 +103,32 @@ class WalletPresentationTest {
         assertTrue(entry.documents.any { it.type == "urn:eudi:pid:1" && it.format == "dc+sd-jwt" })
         val loggedPaths = entry.documents.flatMap { it.claims.map { c -> c.path } }
         assertTrue(loggedPaths.containsAll(listOf(listOf("family_name"), listOf("given_name"))))
+        wallet.close()
+    }
+
+    /**
+     * OpenID4VP §8.3: the wallet encrypts to a `client_metadata.jwks` key whose `alg` it matches, and
+     * repeats that key's `kid` in the JWE header so the verifier knows which private key to use.
+     * ISO 18013-7 B.5.3 additionally binds the request `nonce` into `apv`; `apu` would carry the
+     * `mdocGeneratedNonce` of the superseded B.4.4 handover, so it is absent.
+     */
+    @Test
+    fun encryptedResponseEchoesKidAndBindsNonceInApv() = runBlocking {
+        val area = SoftwareSecureArea()
+        val storage = InMemoryStorageDriver()
+        val issuerPublic = seedPid(area, storage)
+        val verifier = MockVerifier(issuerPublic)
+        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, verifier))
+
+        val session = wallet.presentation.start(verifier.requestUri("direct_post.jwt"))
+        val resolved = withTimeout(15_000) { session.state.first { it is PresentationState.RequestResolved } }
+        session.respond(PresentationSelection.auto((resolved as PresentationState.RequestResolved).request))
+        val terminal = withTimeout(15_000) { session.state.first { it.isTerminal } }
+        assertTrue(terminal is PresentationState.Completed, "terminal: $terminal")
+
+        assertNotNull(verifier.verifiedClaims, "the verifier decrypted and verified the response")
+        assertEquals(MockVerifier.ENC_KID, verifier.seenJweKid)
+        assertEquals(verifier.nonce, verifier.seenJweApv)
         wallet.close()
     }
 

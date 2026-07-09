@@ -23,6 +23,9 @@ class PresentationSelection(val chosen: Map<String, String>) {
     }
 }
 
+/** The only JWE key-agreement `alg` this SDK implements; §8.3 requires the JWE `alg` to equal the chosen JWK's. */
+private const val ECDH_ES = "ECDH-ES"
+
 /** Outcome of submitting the presentation. */
 class SubmitResult(val redirectUri: String?)
 
@@ -85,9 +88,12 @@ class Openid4VpClient(
             "dc_api" -> JsonValue.Obj(listOf("vp_token" to vpToken))
             "dc_api.jwt" -> {
                 val recipient = verifierEncryptionKey(request)
-                    ?: throw VpException.InvalidRequest("dc_api.jwt but no verifier encryption key in client_metadata")
+                    ?: throw VpException.InvalidRequest("dc_api.jwt but no ECDH-ES verifier encryption key in client_metadata")
                 val response = JsonValue.Obj(listOf("vp_token" to vpToken))
-                val jwe = Jwe.encryptEcdhEs(response.serialize().encodeToByteArray(), recipient, encValue(request))
+                val jwe = Jwe.encryptEcdhEs(
+                    response.serialize().encodeToByteArray(), recipient.publicKey, encValue(request),
+                    apv = apv(request), kid = recipient.kid,
+                )
                 JsonValue.Obj(listOf("response" to JsonValue.Str(jwe)))
             }
             else -> throw VpException.Unsupported("respondDcApi requires a dc_api response_mode, got ${request.responseMode}")
@@ -131,7 +137,7 @@ class Openid4VpClient(
         val iat = clock()
         // Encrypted responses (direct_post.jwt / dc_api.jwt) bind the verifier's encryption key in the mdoc handover.
         val jwkThumbprint = if (request.responseMode.endsWith(".jwt")) {
-            verifierEncryptionKey(request)?.let { ecJwkThumbprint(it) }
+            verifierEncryptionKey(request)?.let { ecJwkThumbprint(it.publicKey) }
         } else null
 
         val vpEntries = mutableListOf<Pair<String, JsonValue>>()
@@ -166,7 +172,7 @@ class Openid4VpClient(
 
     private suspend fun submitDirectPostJwt(request: ResolvedRequest, vpToken: JsonValue.Obj): SubmitResult {
         val recipient = verifierEncryptionKey(request)
-            ?: throw VpException.InvalidRequest("direct_post.jwt but no verifier encryption key in client_metadata")
+            ?: throw VpException.InvalidRequest("direct_post.jwt but no ECDH-ES verifier encryption key in client_metadata")
         val enc = encValue(request)
         val response = JsonValue.Obj(
             buildList {
@@ -174,7 +180,10 @@ class Openid4VpClient(
                 request.state?.let { add("state" to JsonValue.Str(it)) }
             }
         )
-        val jwe = Jwe.encryptEcdhEs(response.serialize().encodeToByteArray(), recipient, enc)
+        val jwe = Jwe.encryptEcdhEs(
+            response.serialize().encodeToByteArray(), recipient.publicKey, enc,
+            apv = apv(request), kid = recipient.kid,
+        )
         val form = "response=" + enc(jwe)
         return post(request.responseUri ?: throw VpException.InvalidRequest("direct_post.jwt needs response_uri"), form)
     }
@@ -194,12 +203,30 @@ class Openid4VpClient(
         return SubmitResult(redirectUri = (body?.get("redirect_uri") as? JsonValue.Str)?.value)
     }
 
-    private fun verifierEncryptionKey(request: ResolvedRequest): com.hopae.eudi.wallet.cbor.cose.EcPublicKey? {
+    /** The verifier's chosen encryption key, with the `kid` §8.3 makes the wallet echo back. */
+    private class VerifierEncryptionKey(val publicKey: com.hopae.eudi.wallet.cbor.cose.EcPublicKey, val kid: String?)
+
+    /**
+     * Selects the verifier's response-encryption key from `client_metadata.jwks` (OpenID4VP §8.3).
+     * The spec requires `alg` on every JWK and requires the JWE `alg` to equal the chosen key's, so we
+     * only consider `ECDH-ES` keys — the one key-agreement algorithm this SDK implements. `use: enc`
+     * keys win over unmarked ones.
+     */
+    private fun verifierEncryptionKey(request: ResolvedRequest): VerifierEncryptionKey? {
         val jwks = request.clientMetadata?.get("jwks") as? JsonValue.Obj ?: return null
         val keys = (jwks["keys"] as? JsonValue.Arr)?.items?.filterIsInstance<JsonValue.Obj>() ?: return null
-        val encKey = keys.firstOrNull { (it["use"] as? JsonValue.Str)?.value == "enc" } ?: keys.firstOrNull()
-        return encKey?.let { JwkEc.fromJson(it) }
+        val usable = keys.filter { (it["alg"] as? JsonValue.Str)?.value == ECDH_ES }
+        val chosen = usable.firstOrNull { (it["use"] as? JsonValue.Str)?.value == "enc" } ?: usable.firstOrNull() ?: return null
+        val publicKey = JwkEc.fromJson(chosen) ?: return null
+        return VerifierEncryptionKey(publicKey, (chosen["kid"] as? JsonValue.Str)?.value)
     }
+
+    /**
+     * ISO 18013-7 B.5.3: the mdoc sets `apv` to the base64url of the request `nonce`. `apu` would carry
+     * the `mdocGeneratedNonce` of the TS-literal B.4.4 handover, which OpenID4VP 1.0 Final replaced —
+     * so there is no `apu` to send. Both are ConcatKDF inputs and part of the AEAD tag either way.
+     */
+    private fun apv(request: ResolvedRequest): ByteArray = request.nonce.encodeToByteArray()
 
     private fun encValue(request: ResolvedRequest): JweEnc {
         val id = (request.clientMetadata?.get("encrypted_response_enc_values_supported") as? JsonValue.Arr)

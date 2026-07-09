@@ -15,6 +15,13 @@ public actor MockVerifier: HttpTransport {
     private let encPrivD: [UInt8]
     public private(set) var verifiedClaims: JsonValue?
 
+    /// The `kid` of the verifier's encryption JWK; §8.3 makes the wallet repeat it in the JWE header.
+    public static let encKid = "verifier-enc-key-1"
+
+    /// JWE header values the wallet sent on an encrypted response (§8.3 `kid`, 18013-7 B.5.3 `apv`).
+    public private(set) var seenJweKid: String?
+    public private(set) var seenJweApv: String?
+
     /// The Authorization Error Response the wallet POSTed instead of a `vp_token` (§8.5), if any.
     public struct ErrorResponse: Sendable {
         public let error: String
@@ -33,7 +40,8 @@ public actor MockVerifier: HttpTransport {
         let raw = priv.publicKey.rawRepresentation
         let ec = EcPublicKey(curve: .p256, x: [UInt8](raw.prefix(32)), y: [UInt8](raw.suffix(32)))
         if case let .obj(entries) = JwkEc.toJson(ec) {
-            encPubJwk = .obj(entries + [("use", .str("enc"))])
+            // §8.3: `alg` MUST be present on the JWK; the wallet echoes `kid` into the JWE header.
+            encPubJwk = .obj(entries + [("use", .str("enc")), ("alg", .str("ECDH-ES")), ("kid", .str(MockVerifier.encKid))])
         } else {
             encPubJwk = JwkEc.toJson(ec)
         }
@@ -83,6 +91,12 @@ public actor MockVerifier: HttpTransport {
         }
         let vpToken: JsonValue
         if let response = form["response"] {
+            // §8.3: the wallet must echo our kid; 18013-7 B.5.3: apv carries the request nonce.
+            if case let .obj(hdr)? = try? JsonValue.parse(try Base64Url.decodeToString(String(response.split(separator: ".")[0]))) {
+                let header = JsonValue.obj(hdr)
+                if case let .str(k)? = header["kid"] { seenJweKid = k }
+                if case let .str(a)? = header["apv"] { seenJweApv = try? Base64Url.decodeToString(a) }
+            }
             let dec = try Jwe.decryptEcdhEs(response, recipientPrivateD: encPrivD)
             vpToken = try JsonValue.parse(String(bytes: dec, encoding: .utf8)!)["vp_token"]!
         } else {

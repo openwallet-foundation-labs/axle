@@ -203,6 +203,30 @@ cd kotlin && EUDI_SIGNED_METADATA=1 ./gradlew :trust:test \
 validates the chain, enforces the §12.2.3 rules, and takes the payload as the metadata;
 `IgnoreSigned` (the default) asks for `application/json` and never sees a JWT.
 
+## Digital Credentials API — `expected_origins` (OpenID4VP Appendix A.2)
+
+The wallet rejects a **signed** DC API request that does not carry an `expected_origins` array
+containing the platform-supplied Origin — the spec's defence against replaying a legitimate verifier's
+signed request from a malicious site. Verified on-device (Samsung SM-F731N, Chrome) against
+**`digital-credentials.dev`**, which is conformant:
+
+```
+DC API protocols offered: [openid4vp-v1-signed]
+DC API using protocol: openid4vp-v1-signed
+DC API request · origin=https://digital-credentials.dev
+DC API request: signed · client_id=x509_hash:f1drGLOIT4… · expected_origins=["https://digital-credentials.dev"]
+✅ DC API response returned to caller
+```
+
+Note the reference wallets do **not** implement this check — Multipaz's verifier emits
+`expected_origins` but its wallet carries a `// TODO: handle expected_origins`, and the EUDI reference
+libraries never mention the parameter. `verifier.eudiw.dev`'s signed DC API request has not yet been
+inspected for it.
+
+The demo logs the request shape (`GetCredentialActivity.logRequestShape`) so a rejection can be told
+apart from a verifier that simply omits the parameter. Beware that the demo's `extractOpenId4Vp`
+prefers `openid4vp-v1-unsigned`: a verifier offering both protocols never exercises the signed path.
+
 ## Proximity (ISO 18013-5) — device-to-device interop with Multipaz
 
 Separate from the headless remote flows above, the proximity stack was verified **phone-to-phone**

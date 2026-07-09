@@ -43,6 +43,59 @@ final class MdocReaderTests: XCTestCase {
                    issuerTrust: TestIssuerTrust(key: p.issuer.publicKey), now: { [verifyTime] in verifyTime })
     }
 
+    /// ISO 18013-5 §9.1.3.5: a key-agreement DeviceKey authenticates with `deviceMac` instead of a signature.
+    /// The EMacKey is HKDF'd from a DeviceKey/EReaderKey ECDH secret both sides can compute; here it stands in
+    /// as an opaque key so this test stays independent of the Proximity module's derivation.
+    func testDeviceMacRoundTrip() async throws {
+        let p = try await Party()
+        let issuerSigned = try IssuerSigned.decode(try await mdoc(p))
+        let st = try MdocSessionTranscript.dcApiIsoMdoc(encryptionInfoBase64: "ZW5j", origin: "https://reader.example")
+        let emacKey = (0..<32).map { UInt8(($0 * 7 + 1) & 0xff) }
+
+        let deviceResponse = try await MdocPresenter.deviceResponse(
+            issuerSigned: issuerSigned, docType: docType, disclosed: [namespace: ["family_name"]],
+            sessionTranscript: st, deviceAuth: .mac(emacKey: emacKey))
+
+        // The wire carries deviceMac, not deviceSignature.
+        let doc = try DeviceResponse.decode(deviceResponse).documents.first!
+        XCTAssertNotNil(doc.deviceMac)
+        XCTAssertNil(doc.deviceSignature)
+
+        let verified = try await readerFacade(p).verifyDeviceResponse(deviceResponse, sessionTranscript: st) { _ in emacKey }.first!
+        XCTAssertTrue(verified.deviceAuthenticated)
+        XCTAssertEqual(.text("Han"), verified.elements[namespace]?["family_name"])
+    }
+
+    /// A reader that cannot derive the EMacKey cannot verify a MAC-authenticated response.
+    func testDeviceMacWithoutEmacKeyRejected() async throws {
+        let p = try await Party()
+        let issuerSigned = try IssuerSigned.decode(try await mdoc(p))
+        let st = try MdocSessionTranscript.dcApiIsoMdoc(encryptionInfoBase64: "ZW5j", origin: "https://reader.example")
+        let deviceResponse = try await MdocPresenter.deviceResponse(
+            issuerSigned: issuerSigned, docType: docType, disclosed: [namespace: ["family_name"]],
+            sessionTranscript: st, deviceAuth: .mac(emacKey: [UInt8](repeating: 3, count: 32)))
+
+        do {
+            _ = try await readerFacade(p).verifyDeviceResponse(deviceResponse, sessionTranscript: st)
+            XCTFail("deviceMac without an EMacKey must not verify")
+        } catch is MdocError {}
+    }
+
+    /// A MAC keyed with the wrong EMacKey must not verify — the holder binding fails.
+    func testDeviceMacWithWrongKeyRejected() async throws {
+        let p = try await Party()
+        let issuerSigned = try IssuerSigned.decode(try await mdoc(p))
+        let st = try MdocSessionTranscript.dcApiIsoMdoc(encryptionInfoBase64: "ZW5j", origin: "https://reader.example")
+        let deviceResponse = try await MdocPresenter.deviceResponse(
+            issuerSigned: issuerSigned, docType: docType, disclosed: [namespace: ["family_name"]],
+            sessionTranscript: st, deviceAuth: .mac(emacKey: [UInt8](repeating: 3, count: 32)))
+
+        do {
+            _ = try await readerFacade(p).verifyDeviceResponse(deviceResponse, sessionTranscript: st) { _ in [UInt8](repeating: 9, count: 32) }
+            XCTFail("a wrong EMacKey must not verify")
+        } catch is MdocError {}
+    }
+
     func testReaderWalletRoundTrip() async throws {
         let p = try await Party()
         let issuerSigned = try IssuerSigned.decode(try await mdoc(p))

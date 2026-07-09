@@ -23,9 +23,46 @@ class CoseMac0(
         return expected.contentEquals(tag)
     }
 
+    fun toCbor(tagged: Boolean = true): Cbor {
+        val arr = Cbor.Array(
+            listOf(
+                Cbor.Bytes(protectedBytes),
+                unprotected.map,
+                payload?.let { Cbor.Bytes(it) } ?: Cbor.Null,
+                Cbor.Bytes(tag),
+            )
+        )
+        return if (tagged) Cbor.Tagged(TAG, arr) else arr
+    }
+
+    fun encode(tagged: Boolean = true): ByteArray = CborEncoder.encode(toCbor(tagged))
+
     companion object {
         val TAG: ULong = 17u
         private val EMPTY_MAP = byteArrayOf(0xA0.toByte())
+
+        /** COSE `HMAC 256/256` (RFC 9053 §3.1) — the only MAC algorithm ISO 18013-5 §9.1.3.5 permits. */
+        const val ALG_HMAC_256_256 = 5L
+
+        /**
+         * Computes a `deviceMac`: HMAC-SHA256 over the MAC_structure, with `alg: HMAC 256/256` in the
+         * protected header. [key] is the EMacKey; the mdoc's `DeviceAuthentication` is passed detached,
+         * exactly as [CoseSign1.sign] takes it, so the payload stays out of the wire structure.
+         */
+        fun create(
+            key: ByteArray,
+            payload: ByteArray? = null,
+            detachedPayload: ByteArray? = null,
+            unprotected: CoseHeaders = CoseHeaders(),
+            externalAad: ByteArray = ByteArray(0),
+        ): CoseMac0 {
+            val content = payload ?: detachedPayload ?: throw CoseException("COSE_Mac0 needs a payload to MAC")
+            val protectedBytes = CborEncoder.encode(
+                Cbor.CborMap(listOf(Cbor.int(CoseHeaders.LABEL_ALG) to Cbor.int(ALG_HMAC_256_256)))
+            )
+            val tag = hmacSha256(key, macStructure(protectedBytes, externalAad, content))
+            return CoseMac0(protectedBytes, unprotected, payload, tag)
+        }
 
         fun fromCbor(c: Cbor): CoseMac0 {
             val body = when (c) {

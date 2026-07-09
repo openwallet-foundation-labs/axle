@@ -18,6 +18,8 @@ public struct ProximityService {
     let readerTrust: (any MdocReaderTrust)?
     /// When true, a failed final submission is recorded with `.error` status (opt-in via config).
     var recordFailures: Bool = false
+    /// ISO 18013-5 §9.1.3.5: sign the DeviceResponse, or MAC it with the DeviceKey/EReaderKey EMacKey.
+    var deviceAuthMode: ProximityDeviceAuth = .signature
 
     /// Starts a proximity session over `transport`: engage → session → reader request → consent → reply.
     /// With `nfc` = true the engagement is delivered via ISO 18013-5 NFC static handover (the app serves the
@@ -58,7 +60,10 @@ public struct ProximityService {
             case let .some(selection):
                 s.emit(.submitting)
                 do {
-                    let deviceResponse = try await buildDeviceResponse(deviceRequest, transcript, selection)
+                    let deviceResponse = try await buildDeviceResponse(
+                        deviceRequest, transcript, selection,
+                        eReaderKey: establishment.eReaderKey,
+                        transcriptBytes: try ProximitySessionTranscript.encode(transcript))
                     try await transport.send(try SessionMessages.encodeData(try enc.encrypt(deviceResponse)))
                 } catch {
                     // Only the final submission failed — record the attempt with .error status (opt-in).
@@ -151,8 +156,13 @@ public struct ProximityService {
         })?.id
     }
 
-    /// Builds the DeviceResponse for the first requested document (single-document retrieval; multi-doc is a follow-up).
-    private func buildDeviceResponse(_ deviceRequest: DeviceRequest, _ transcript: Cbor, _ selection: ProximitySelection) async throws -> [UInt8] {
+    /// Builds the DeviceResponse for the first requested document (single-document retrieval; multi-doc is a
+    /// follow-up). `eReaderKey` / `transcriptBytes` are only needed for `deviceMac`; the Digital Credentials
+    /// API path has no EReaderKey and always signs.
+    private func buildDeviceResponse(
+        _ deviceRequest: DeviceRequest, _ transcript: Cbor, _ selection: ProximitySelection,
+        eReaderKey: EcPublicKey? = nil, transcriptBytes: [UInt8]? = nil
+    ) async throws -> [UInt8] {
         guard let docRequest = deviceRequest.docRequests.first(where: { selection.chosen[$0.docType] != nil }) else {
             throw ProximityError.noMatchingCredential("no chosen document")
         }
@@ -162,9 +172,22 @@ public struct ProximityService {
         }
         let area = secureAreas.first(where: { $0.id == consumed.instance.key.secureArea }) ?? secureAreas[0]
         let issuerSigned = try IssuerSigned.decode(consumed.instance.payload)
+
+        let deviceAuth: DeviceAuth
+        if case .mac = deviceAuthMode, let eReaderKey, let transcriptBytes {
+            guard area.capabilities.keyAgreement else {
+                throw ProximityError.sessionFailed("deviceMac needs a key-agreement DeviceKey; '\(area.id)' cannot do ECDH")
+            }
+            // Zab = ECDH(DeviceKey, EReaderKey) computed inside the secure area — the private half never leaves.
+            let zab = try await area.keyAgreement(key: consumed.instance.key, peerPublicKey: eReaderKey, hint: nil)
+            deviceAuth = .mac(emacKey: try SessionEncryption.emacKey(sharedSecret: zab, sessionTranscriptBytes: transcriptBytes))
+        } else {
+            deviceAuth = .signature(signer: SecureAreaCoseSigner(area: area, key: consumed.instance.key, algorithm: .es256))
+        }
+
         return try await MdocPresenter.deviceResponse(
             issuerSigned: issuerSigned, docType: docRequest.docType, disclosed: docRequest.disclosable(issuerSigned),
-            sessionTranscript: transcript, deviceSigner: SecureAreaCoseSigner(area: area, key: consumed.instance.key, algorithm: .es256))
+            sessionTranscript: transcript, deviceAuth: deviceAuth)
     }
 
     private func recordSuccess(_ request: ProximityRequest, _ selection: ProximitySelection) async throws {

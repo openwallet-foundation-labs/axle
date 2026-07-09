@@ -22,7 +22,8 @@ The SDK owns the **entire ISO/IEC 18013-5 device-retrieval exchange** — and bo
   selectively-disclosed, holder-authenticated response.
 - **Reader authentication** — verifying the reader's `readerAuth` signature + certificate chain.
 - **Device authentication** — `deviceSignature` (COSE_Sign1) for signing device keys **or** `deviceMac`
-  (COSE_Mac0, EMacKey from the EReaderKey↔DeviceKey ECDH) for key-agreement keys.
+  (COSE_Mac0, EMacKey from the EReaderKey↔DeviceKey ECDH) for key-agreement keys. Both are produced
+  *and* verified; see [Device authentication](#device-authentication) to choose.
 
 You provide only the **transport** — the radio bytes in and out. Everything cryptographic and
 protocol-level lives inside the SDK, and it interoperates with conformant ISO 18013-5 devices.
@@ -466,3 +467,44 @@ func testReaderRetrievesRequestedElements() async {
 
 The in-memory transport keeps proximity logic testable on a plain CI runner (including Linux); only
 the radio adapter needs a real device.
+
+## Device authentication
+
+ISO 18013-5 §9.1.3.5 lets the mdoc authenticate its `DeviceResponse` two ways. The SDK produces and
+verifies both; the holder side is a one-line config choice:
+
+<Tabs groupId="lang">
+<TabItem value="kotlin" label="Kotlin">
+
+```kotlin
+WalletConfig(presentation = PresentationConfig(proximityDeviceAuth = ProximityDeviceAuth.Mac))
+```
+
+</TabItem>
+<TabItem value="swift" label="Swift">
+
+```swift
+WalletConfig(presentation: PresentationConfig(proximityDeviceAuth: .mac))
+```
+
+</TabItem>
+</Tabs>
+
+| | `deviceSignature` (default) | `deviceMac` |
+| --- | --- | --- |
+| Structure | COSE_Sign1, ES256 | COSE_Mac0, HMAC 256/256 |
+| Key | signing `DeviceKey` | key-agreement `DeviceKey` |
+| Who can verify | anyone | **only the reader in this session** |
+
+`deviceMac` is keyed by the `EMacKey`: `HKDF(ECDH(DeviceKey, EReaderKey), salt = SHA-256(SessionTranscriptBytes), info = "EMacKey")`.
+The holder computes that ECDH inside its `SecureArea` — the private half never leaves — while the reader
+computes the mirror ECDH from its own ephemeral key. Because only those two parties can derive the key,
+a MAC is **non-transferable**: the reader cannot later prove to a third party that the wallet answered.
+A signature can be shown to anyone, which is exactly what some deployments want and others do not.
+
+:::warning The DeviceKey must support ECDH
+`ProximityDeviceAuth.Mac` requires a key-agreement `DeviceKey`. On Android Keystore and the Secure
+Enclave the key purpose is fixed at creation, so a wallet holding sign-only credentials must re-issue
+them before switching. The SDK checks `SecureArea.capabilities.keyAgreement` and fails the session with
+a clear error rather than silently falling back to a signature.
+:::

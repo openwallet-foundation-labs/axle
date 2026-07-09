@@ -14,13 +14,13 @@ Legend: ✅ implemented · 🟡 partial · ⬜ not yet.
 | Spec | Anchor version | Status |
 |---|---|---|
 | CBOR | RFC 8949 (deterministic encoding §4.2.1) | ✅ `cbor` / `CborCose` — RFC 8949 Appendix A vectors pass both languages; bytewise + length-first key ordering profiles |
-| COSE | RFC 9052 §4.2 `COSE_Sign1` · RFC 9053 ES256/384/512 · RFC 9360 x5chain | ✅ verify (JCA / swift-crypto) + sign (`CoseSigner` → `SecureArea` port); COSE-WG Sign1 vectors pass. `COSE_Mac0` verify-only (no MAC generation) |
+| COSE | RFC 9052 §4.2 `COSE_Sign1` · RFC 9053 ES256/384/512 · RFC 9360 x5chain | ✅ verify (JCA / swift-crypto) + sign (`CoseSigner` → `SecureArea` port); COSE-WG Sign1 vectors pass. `COSE_Mac0` sign + verify (HMAC 256/256) |
 | JOSE / JWS | RFC 7515 / 7518 subset (compact, ES256/384/512) | ✅ `sdjwt` / `SdJwt` — in-house, fixed-`alg` verification (no negotiation) |
 | JWE | RFC 7518 ECDH-ES direct + A128/192/256GCM | ✅ Concat KDF (RFC 7518 Appendix C vectors) — encrypts `direct_post.jwt` / `dc_api.jwt` responses |
 | HPKE | RFC 9180 base mode — DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-128-GCM | ✅ `mdoc` `Hpke` / `MDoc` — seals the `org-iso-mdoc` DC API response (ISO 18013-7 Annex C); RFC 9180 A.3 test vector passes both languages. Seal only — no verifier-side `open` |
 | SD-JWT | RFC 9901 | ✅ issue / present / verify, KB-JWT, recursive & array disclosures, decoys; RFC disclosure vectors (73 entries) pass both languages. Gaps: KB-JWT `iat` presence-only (no §7.3 time-window check), §7.1(6) `exp`/`nbf` enforced only in the VC layer, §8 JWS JSON serialization absent (optional) |
 | SD-JWT VC | draft-ietf-oauth-sd-jwt-vc | 🟡 `SdJwtVcVerifier` — typ/iss/vct enforcement, time validation, issuer-key resolution (`.well-known/jwt-vc-issuer` + x5c), holder binding, status extraction. **Type Metadata (§4) and `vct#integrity` entirely unimplemented**; transitional `vc+sd-jwt` typ rejected |
-| ISO/IEC 18013-5 mdoc | :2021 | ✅ `mdoc` / `MDoc` — `IssuerSigned`/MSO, `DeviceResponse`, selective disclosure, device signature, reader auth (§9.1.4). `deviceMac` is **verify-only** (reader side); MSO digest SHA-256 only; `DeviceResponse` errors/status semantics not modeled |
+| ISO/IEC 18013-5 mdoc | :2021 | ✅ `mdoc` / `MDoc` — `IssuerSigned`/MSO, `DeviceResponse`, selective disclosure, device signature **and `deviceMac`** (holder + reader), reader auth (§9.1.4). MSO digest SHA-256 only; `DeviceResponse` errors/status semantics not modeled |
 | X.509 PKIX | RFC 5280 | ✅ `trust` / `Trust` — chain validation (path build, validity, basic constraints), SAN, x509_san_dns / x509_hash; x5c adapters for SD-JWT VC issuers, mdoc issuer/reader, and signed issuer metadata |
 
 ## Issuance (OpenID4VCI)
@@ -38,7 +38,7 @@ Legend: ✅ implemented · 🟡 partial · ⬜ not yet.
 | Spec | Anchor version | Status |
 |---|---|---|
 | OpenID4VP | 1.0 Final (2025-07-09), DCQL | ✅ `openid4vp` — DCQL engine (null wildcard, values, claim_sets, credential_sets), JAR request resolution, `vp_token` (SD-JWT+KB-JWT and mdoc `DeviceResponse`), `direct_post` + `direct_post.jwt` (JWE), reader trust for signed requests, DC API `expected_origins` replay check (Appendix A.2), JAR hardening (`typ`, request-object `client_id` equality, `wallet_nonce`, case-sensitive `request_uri_method`), §8.5 Authorization Error Responses (`VpErrorCode` taxonomy + `reportError`; decline reports `access_denied` and follows the verifier's `redirect_uri`). Gaps: DCQL `multiple`/`trusted_authorities`/`require_cryptographic_holder_binding`, `transaction_data` partial — see audit below |
-| ISO/IEC 18013-5 device retrieval | :2021 §9 | 🟡 `proximity` / `Proximity` — QR **and NFC static handover** engagement, ECDH session keys (HKDF, salt = SHA-256 of the tag-24 SessionTranscript), `SessionEstablishment`/`SessionData` framing, encrypted exchange, reader authentication; **holder and reader** sides (`wallet.reader`). Device auth: `deviceSignature` end-to-end; `deviceMac` **verify-only** (holder cannot produce it; no automated test — live Multipaz interop only). BLE (both modes) + NFC APDU transports are **Android demo host adapters only — no iOS transport**. **Live device-to-device interop with Multipaz** (BLE both modes + NFC, see `INTEROP.md`) |
+| ISO/IEC 18013-5 device retrieval | :2021 §9 | 🟡 `proximity` / `Proximity` — QR **and NFC static handover** engagement, ECDH session keys (HKDF, salt = SHA-256 of the tag-24 SessionTranscript), `SessionEstablishment`/`SessionData` framing, encrypted exchange, reader authentication; **holder and reader** sides (`wallet.reader`). Device auth: `deviceSignature` **and `deviceMac`** end-to-end (holder derives the EMacKey via the `SecureArea` key-agreement port; opt in with `PresentationConfig.proximityDeviceAuth`). BLE (both modes) + NFC APDU transports are **Android demo host adapters only — no iOS transport**. **Live device-to-device interop with Multipaz** (BLE both modes + NFC, see `INTEROP.md`) |
 | ISO/IEC 18013-7 / DC API handover | :2025 Annex C | ✅ origin-bound mdoc `SessionTranscript` + **HPKE-sealed `org-iso-mdoc` response** for the Digital Credentials API. Annex B implemented per OpenID4VP 1.0 Final handover (not the TS-literal `OID4VPHandover`); Annex A (website REST retrieval) not implemented — see audit below |
 | W3C Digital Credentials API | browser-mediated (dc_api / dc_api.jwt) | ✅ `wallet.presentation.startDcApi` — no HTTP, response object returned to the platform |
 
@@ -103,7 +103,6 @@ Only what is 🟡/⬜ is listed; everything else in the tables above verified cl
 
 | Gap | Spec ref | Detail |
 |---|---|---|
-| `deviceMac` generation | §9.1.3.5 | 🟡 verify-only (`CoseMac0` has no MAC creation; `MdocPresenter` always signs); no automated test — Multipaz live interop only |
 | NFC negotiated handover | §8.2.2.1/§9.1.5.1 | ⬜ static handover only (`[Hs, null]` hardcoded); no ReaderEngagement / Handover Request |
 | Session termination | §9.1.1.4 | ⬜ status 20 never sent, `status` ignored on decode, session keys not destroyed; BLE `End` only in the demo client |
 | BLE / NFC transports | §8.3.3.1 | 🟡 core SDK exposes a transport port only; GATT (both modes, MTU chunking) + NFC APDU live in the **Android demo**; **no iOS/Swift transport**; BLE Ident characteristic absent |
@@ -120,7 +119,7 @@ Only what is 🟡/⬜ is listed; everything else in the tables above verified cl
 |---|---|---|
 | Annex B handover form | B.4.4 | 🟡 implements OpenID4VP 1.0 Final's `OpenID4VPHandover`/`OpenID4VPDCAPIHandover` (jwk-thumbprint form), not the TS-literal `OID4VPHandover` (clientIdHash/responseUriHash + `mdocGeneratedNonce`) — deliberate alignment with the published OID4VP Final, but not letter-of-TS |
 | `mdocGeneratedNonce` + `apu`/`apv` JWE headers | B.4.3.3/B.5.3 | ⬜ response JWE sent without apu/apv (the `Jwe` primitive supports them) |
-| mdoc MAC auth in OID4VP | B.4.5 | ⬜ OID4VP mdoc path signs only |
+| mdoc MAC auth in OID4VP | B.4.5 | ⬜ the OID4VP mdoc path signs only (proximity does both) |
 | Annex B curve set | B.5.2 Table B.8 | 🟡 P-256/384/521 only; no Brainpool / Curve25519/448 (P-256 satisfies the mdoc-side minimum) |
 | **Annex A — all of it** | Annex A | ⬜ website REST retrieval (`RestApiOptions`, HTTP POST `application/cbor`), `OriginInfo`/domain origin, `EngagementToApp`, `MacKeys` (v1.1) — none implemented |
 | Verifier-side HPKE decryption | C.4 Table C.3 | ⬜ `Hpke` seals only; no `open` (wallet-side complete, reader/verifier side cannot unseal) |
@@ -133,7 +132,6 @@ Only what is 🟡/⬜ is listed; everything else in the tables above verified cl
 |---|---|
 | SD-JWT VC Type Metadata (§4: vct resolution, `extends`, display, claim metadata, schema) + `vct#integrity` | ⬜ largest single gap; §4.7 is a step of the verification algorithm |
 | OpenID4VP hardening: DCQL `multiple`/`trusted_authorities`, `require_cryptographic_holder_binding` | ⬜ |
-| `deviceMac` generation (holder side) + automated deviceMac test | ⬜ verify-only today |
 | iOS proximity transport (CoreBluetooth / CoreNFC) + BLE Ident characteristic + session termination (status 20) | ⬜ Android demo adapters only |
 | OpenID4VCI: credential response encryption, `attestation` proof type, `credential_identifiers`, deferred `interval` | ⬜ |
 | NFC negotiated handover · 18013-7 Annex A (website REST retrieval) | ⬜ |

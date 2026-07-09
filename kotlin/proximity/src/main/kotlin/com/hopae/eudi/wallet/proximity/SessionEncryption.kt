@@ -115,7 +115,15 @@ class SessionEncryption private constructor(
          * reader's [ephemeral] EReaderKey and the mdoc [deviceKey], salted by the SessionTranscript.
          */
         fun deriveEMacKey(ephemeral: EphemeralKeyPair, deviceKey: EcPublicKey, sessionTranscriptBytes: ByteArray): ByteArray =
-            Hkdf.deriveSha256(ephemeral.sharedSecret(deviceKey), transcriptSalt(sessionTranscriptBytes), "EMacKey".encodeToByteArray(), 32)
+            emacKey(ephemeral.sharedSecret(deviceKey), sessionTranscriptBytes)
+
+        /**
+         * The same `EMacKey` from an already-computed ECDH secret — the mdoc side, whose `DeviceKey` private
+         * half never leaves its secure area, so it derives `Zab` through the [SecureArea] port rather than
+         * from an [EphemeralKeyPair]. Both sides must reach identical bytes for `deviceMac` to verify.
+         */
+        fun emacKey(sharedSecret: ByteArray, sessionTranscriptBytes: ByteArray): ByteArray =
+            Hkdf.deriveSha256(sharedSecret, transcriptSalt(sessionTranscriptBytes), "EMacKey".encodeToByteArray(), 32)
 
         // ISO 18013-5 §9.1.1.4: salt = SHA-256(SessionTranscriptBytes), SessionTranscriptBytes = #6.24(bstr .cbor SessionTranscript).
         private fun transcriptSalt(sessionTranscriptBytes: ByteArray): ByteArray =

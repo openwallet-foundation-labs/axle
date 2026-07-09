@@ -7,6 +7,8 @@ import com.hopae.eudi.wallet.cbor.cose.CoseKey
 import com.hopae.eudi.wallet.mdoc.DeviceRequest
 import com.hopae.eudi.wallet.mdoc.Hpke
 import com.hopae.eudi.wallet.mdoc.IssuerSigned
+import com.hopae.eudi.wallet.mdoc.DeviceAuth
+import com.hopae.eudi.wallet.cbor.cose.EcPublicKey
 import com.hopae.eudi.wallet.mdoc.MdocPresenter
 import com.hopae.eudi.wallet.mdoc.MdocReaderTrust
 import com.hopae.eudi.wallet.mdoc.MdocSessionTranscript
@@ -48,6 +50,8 @@ class ProximityService internal constructor(
     private val readerTrust: MdocReaderTrust?,
     /** When true, a failed final submission is recorded with ERROR status (opt-in via config). */
     private val recordFailures: Boolean = false,
+    /** ISO 18013-5 §9.1.3.5: sign the DeviceResponse, or MAC it with the DeviceKey/EReaderKey EMacKey. */
+    private val deviceAuthMode: ProximityDeviceAuth = ProximityDeviceAuth.Signature,
 ) {
     /**
      * Starts a proximity session over [transport]: engage → session → reader request → consent → reply.
@@ -91,7 +95,11 @@ class ProximityService internal constructor(
                 else -> {
                     emit(ProximityState.Submitting)
                     try {
-                        val deviceResponse = buildDeviceResponse(deviceRequest, transcript, selection)
+                        val deviceResponse = buildDeviceResponse(
+                            deviceRequest, transcript, selection,
+                            eReaderKey = establishment.eReaderKey,
+                            transcriptBytes = ProximitySessionTranscript.encode(transcript),
+                        )
                         transport.send(SessionMessages.encodeData(enc.encrypt(deviceResponse)))
                     } catch (e: Throwable) {
                         // Only the final submission failed — record the attempt with ERROR status (opt-in).
@@ -184,8 +192,18 @@ class ProximityService internal constructor(
                 (envelope.format as? CredentialFormat.MsoMdoc)?.docType == docType
         }?.id
 
-    /** Builds the DeviceResponse for the first requested document (single-document retrieval; multi-doc is a follow-up). */
-    private suspend fun buildDeviceResponse(deviceRequest: DeviceRequest, transcript: Cbor, selection: ProximitySelection): ByteArray {
+    /**
+     * Builds the DeviceResponse for the first requested document (single-document retrieval; multi-doc is a
+     * follow-up). [eReaderKey] and [transcriptBytes] are only needed for `deviceMac`; the Digital Credentials
+     * API path has no EReaderKey and always signs.
+     */
+    private suspend fun buildDeviceResponse(
+        deviceRequest: DeviceRequest,
+        transcript: Cbor,
+        selection: ProximitySelection,
+        eReaderKey: EcPublicKey? = null,
+        transcriptBytes: ByteArray? = null,
+    ): ByteArray {
         val docRequest = deviceRequest.docRequests.firstOrNull { selection.chosen.containsKey(it.docType) }
             ?: throw WalletError.Proximity.NoMatchingCredential("no chosen document")
         val credentialId = selection.chosen.getValue(docRequest.docType)
@@ -193,12 +211,24 @@ class ProximityService internal constructor(
             ?: throw WalletError.Proximity.NoMatchingCredential(docRequest.docType)
         val area = secureAreas.firstOrNull { it.id == consumed.instance.key.secureArea } ?: secureAreas.first()
         val issuerSigned = IssuerSigned.decode(consumed.instance.payload)
+
+        val deviceAuth = if (deviceAuthMode == ProximityDeviceAuth.Mac && eReaderKey != null && transcriptBytes != null) {
+            if (!area.capabilities.keyAgreement) {
+                throw WalletError.Proximity.SessionFailed("deviceMac needs a key-agreement DeviceKey; '${area.id}' cannot do ECDH")
+            }
+            // Zab = ECDH(DeviceKey, EReaderKey) computed inside the secure area — the private half never leaves.
+            val zab = area.keyAgreement(consumed.instance.key, eReaderKey)
+            DeviceAuth.Mac(SessionEncryption.emacKey(zab, transcriptBytes))
+        } else {
+            DeviceAuth.Signature(SecureAreaCoseSigner(area, consumed.instance.key, SigningAlgorithm.ES256))
+        }
+
         return MdocPresenter.deviceResponse(
             issuerSigned = issuerSigned,
             docType = docRequest.docType,
             disclosed = docRequest.disclosable(issuerSigned),
             sessionTranscript = transcript,
-            deviceSigner = SecureAreaCoseSigner(area, consumed.instance.key, SigningAlgorithm.ES256),
+            deviceAuth = deviceAuth,
         )
     }
 

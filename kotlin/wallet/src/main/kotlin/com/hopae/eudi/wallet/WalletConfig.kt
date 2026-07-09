@@ -28,8 +28,26 @@ class IssuanceConfig(
 )
 
 class PresentationConfig(
+    /**
+     * How the mdoc authenticates a proximity response (ISO 18013-5 §9.1.3.5). [ProximityDeviceAuth.Mac]
+     * requires the credential's `DeviceKey` to be a key-agreement key — on Android Keystore that purpose
+     * is fixed at key creation, so switching an existing wallet over needs re-issued credentials.
+     */
+    val proximityDeviceAuth: ProximityDeviceAuth = ProximityDeviceAuth.Signature,
     // Phase C: clientIdPrefixes, responseEncryption.
 )
+
+/** ISO 18013-5 §9.1.3.5 device authentication forms. */
+enum class ProximityDeviceAuth {
+    /** `deviceSignature` — an ECDSA signature any third party can verify. */
+    Signature,
+
+    /**
+     * `deviceMac` — an HMAC only this reader can check, since the key comes from a DeviceKey/EReaderKey
+     * ECDH. Non-transferable: the reader cannot prove to anyone else that the mdoc answered.
+     */
+    Mac,
+}
 
 /** Trust anchors as DER — the facade builds trust validators internally per port. */
 class TrustConfig(

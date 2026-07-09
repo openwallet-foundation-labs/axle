@@ -29,6 +29,42 @@ public struct CoseMac0 {
         return expected == tagValue
     }
 
+    public func toCbor(tagged: Bool = true) -> Cbor {
+        let arr = Cbor.array([
+            .bytes(protectedBytes),
+            .map(unprotected.map),
+            payload.map { Cbor.bytes($0) } ?? .null,
+            .bytes(tagValue),
+        ])
+        return tagged ? .tagged(Self.tag, arr) : arr
+    }
+
+    public func encode(tagged: Bool = true) throws -> [UInt8] {
+        try CborEncoder.encode(toCbor(tagged: tagged))
+    }
+
+    /// COSE `HMAC 256/256` (RFC 9053 §3.1) — the only MAC algorithm ISO 18013-5 §9.1.3.5 permits.
+    public static let algHmac256_256: Int64 = 5
+
+    /// Computes a `deviceMac`: HMAC-SHA256 over the MAC_structure, with `alg: HMAC 256/256` in the
+    /// protected header. `key` is the EMacKey; the mdoc's `DeviceAuthentication` is passed detached,
+    /// exactly as `CoseSign1.sign` takes it, so the payload stays out of the wire structure.
+    public static func create(
+        key: [UInt8],
+        payload: [UInt8]? = nil,
+        detachedPayload: [UInt8]? = nil,
+        unprotected: CoseHeaders = CoseHeaders(),
+        externalAad: [UInt8] = []
+    ) throws -> CoseMac0 {
+        guard let content = payload ?? detachedPayload else {
+            throw CoseError.malformed("COSE_Mac0 needs a payload to MAC")
+        }
+        let protectedBytes = try CborEncoder.encode(.map([(.int(CoseHeaders.labelAlg), .int(algHmac256_256))]))
+        let structure = try macStructure(protectedBytes: protectedBytes, externalAad: externalAad, payload: content)
+        let tagValue = Array(HMAC<SHA256>.authenticationCode(for: Data(structure), using: SymmetricKey(data: Data(key))))
+        return CoseMac0(protectedBytes: protectedBytes, unprotected: unprotected, payload: payload, tagValue: tagValue)
+    }
+
     public static func fromCbor(_ c: Cbor) throws -> CoseMac0 {
         let body: Cbor
         if case let .tagged(t, inner) = c {

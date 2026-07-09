@@ -87,6 +87,60 @@ class MdocReaderTest {
         assertFailsWith<MdocException> { readerFacade(p).verifyDeviceResponse(deviceResponse, otherSt) }
     }
 
+    /**
+     * ISO 18013-5 §9.1.3.5: a key-agreement DeviceKey authenticates with `deviceMac` instead of a signature.
+     * The EMacKey is HKDF'd from a DeviceKey/EReaderKey ECDH secret both sides can compute; here it stands in
+     * as an opaque key so this test stays independent of the proximity module's derivation.
+     */
+    @Test
+    fun deviceMacRoundTrip() = runBlocking {
+        val p = Party()
+        val issuerSigned = IssuerSigned.decode(mdoc(p))
+        val st = MdocSessionTranscript.dcApiIsoMdoc("ZW5j", "https://reader.example")
+        val emacKey = ByteArray(32) { (it * 7 + 1).toByte() }
+
+        val deviceResponse = MdocPresenter.deviceResponse(
+            issuerSigned = issuerSigned, docType = docType, disclosed = mapOf(namespace to listOf("family_name")),
+            sessionTranscript = st, deviceAuth = DeviceAuth.Mac(emacKey),
+        )
+
+        // The wire carries deviceMac, not deviceSignature.
+        val doc = DeviceResponse.decode(deviceResponse).documents.single()
+        assertTrue(doc.deviceMac != null && doc.deviceSignature == null)
+
+        val verified = readerFacade(p).verifyDeviceResponse(deviceResponse, st) { emacKey }.single()
+        assertTrue(verified.deviceAuthenticated)
+        assertEquals(Cbor.Text("Han"), verified.elements[namespace]!!["family_name"])
+    }
+
+    /** A reader that cannot derive the EMacKey cannot verify a MAC-authenticated response. */
+    @Test
+    fun deviceMacWithoutEmacKeyRejected(): Unit = runBlocking {
+        val p = Party()
+        val issuerSigned = IssuerSigned.decode(mdoc(p))
+        val st = MdocSessionTranscript.dcApiIsoMdoc("ZW5j", "https://reader.example")
+        val deviceResponse = MdocPresenter.deviceResponse(
+            issuerSigned = issuerSigned, docType = docType, disclosed = mapOf(namespace to listOf("family_name")),
+            sessionTranscript = st, deviceAuth = DeviceAuth.Mac(ByteArray(32) { 3 }),
+        )
+        assertFailsWith<MdocException> { readerFacade(p).verifyDeviceResponse(deviceResponse, st) }
+    }
+
+    /** A MAC keyed with the wrong EMacKey must not verify — the holder binding fails. */
+    @Test
+    fun deviceMacWithWrongKeyRejected(): Unit = runBlocking {
+        val p = Party()
+        val issuerSigned = IssuerSigned.decode(mdoc(p))
+        val st = MdocSessionTranscript.dcApiIsoMdoc("ZW5j", "https://reader.example")
+        val deviceResponse = MdocPresenter.deviceResponse(
+            issuerSigned = issuerSigned, docType = docType, disclosed = mapOf(namespace to listOf("family_name")),
+            sessionTranscript = st, deviceAuth = DeviceAuth.Mac(ByteArray(32) { 3 }),
+        )
+        assertFailsWith<MdocException> {
+            readerFacade(p).verifyDeviceResponse(deviceResponse, st) { ByteArray(32) { 9 } }
+        }
+    }
+
     @Test
     fun untrustedIssuerRejected(): Unit = runBlocking {
         val p = Party()

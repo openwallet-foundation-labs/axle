@@ -61,6 +61,69 @@ final class ProximityTests: XCTestCase {
         XCTAssertThrowsError(try reader.decrypt(try device.encrypt([UInt8]("x".utf8))))
     }
 
+    /// ISO 18013-5 §9.1.3.5, the interop-critical property: the mdoc derives the `EMacKey` from
+    /// ECDH(DeviceKey_priv, EReaderKey_pub) inside its secure area, the reader from
+    /// ECDH(EReaderKey_priv, DeviceKey_pub). Different halves, identical bytes — otherwise `deviceMac`
+    /// never verifies against a conformant peer.
+    func testHolderAndReaderDeriveTheSameEMacKey() async throws {
+        let area = SoftwareSecureArea()
+        let deviceKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let eDevice = EphemeralKeyPair(), eReader = EphemeralKeyPair()
+        let transcript = try ProximitySessionTranscript.build(
+            deviceEngagement: try DeviceEngagement.qr(eDeviceKey: eDevice.publicKey), eReaderKey: eReader.publicKey)
+        let transcriptBytes = try ProximitySessionTranscript.encode(transcript)
+
+        let zab = try await area.keyAgreement(key: deviceKey.handle, peerPublicKey: eReader.publicKey, hint: nil)
+        let holder = try SessionEncryption.emacKey(sharedSecret: zab, sessionTranscriptBytes: transcriptBytes)
+        let reader = try SessionEncryption.deriveEMacKey(ephemeral: eReader, deviceKey: deviceKey.publicKey, sessionTranscriptBytes: transcriptBytes)
+
+        XCTAssertEqual(reader, holder)
+        XCTAssertEqual(32, holder.count)
+    }
+
+    /// A deviceMac built by the holder verifies against the EMacKey the reader independently derives.
+    func testDeviceMacOverProximityTranscriptVerifies() async throws {
+        let docType = "org.iso.18013.5.1.mDL", namespace = "org.iso.18013.5.1"
+        let area = SoftwareSecureArea()
+        let issuerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let deviceKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let mdocBytes = try await MdocTestIssuer.issue(
+            area: area, issuerKey: issuerKey, deviceKey: deviceKey.publicKey, docType: docType, namespace: namespace,
+            elements: [("family_name", .text("Han"))], x5chain: [[0x30, 0x01]],
+            signed: MdocTestIssuer.isoFormatter.date(from: "2026-01-01T00:00:00Z")!,
+            validFrom: MdocTestIssuer.isoFormatter.date(from: "2026-01-01T00:00:00Z")!,
+            validUntil: MdocTestIssuer.isoFormatter.date(from: "2027-01-01T00:00:00Z")!)
+
+        let eDevice = EphemeralKeyPair(), eReader = EphemeralKeyPair()
+        let sessionTranscript = try ProximitySessionTranscript.build(
+            deviceEngagement: try DeviceEngagement.qr(eDeviceKey: eDevice.publicKey), eReaderKey: eReader.publicKey)
+        let transcriptBytes = try ProximitySessionTranscript.encode(sessionTranscript)
+
+        // holder side: Zab from the secure area, never exposing DeviceKey's private half
+        let zab = try await area.keyAgreement(key: deviceKey.handle, peerPublicKey: eReader.publicKey, hint: nil)
+        let emacKey = try SessionEncryption.emacKey(sharedSecret: zab, sessionTranscriptBytes: transcriptBytes)
+        let deviceResponse = try await MdocPresenter.deviceResponse(
+            issuerSigned: try IssuerSigned.decode(mdocBytes), docType: docType, disclosed: [namespace: ["family_name"]],
+            sessionTranscript: sessionTranscript, deviceAuth: .mac(emacKey: emacKey))
+
+        // reader side: derive the EMacKey from its own ephemeral half and verify the MAC
+        func field(_ c: Cbor, _ key: String) -> Cbor {
+            guard case let .map(entries) = c else { fatalError("not a map") }
+            return entries.first { if case let .text(t) = $0.0 { return t == key }; return false }!.1
+        }
+        let document: Cbor = {
+            guard case let .array(docs) = field(try! CborDecoder.decode(deviceResponse), "documents") else { fatalError() }
+            return docs[0]
+        }()
+        let deviceMac = try CoseMac0.fromCbor(field(field(field(document, "deviceSigned"), "deviceAuth"), "deviceMac"))
+        let deviceNsBytes = Cbor.tagged(24, .bytes(try CborEncoder.encode(.map([]))))
+        let deviceAuth = Cbor.array([.text("DeviceAuthentication"), sessionTranscript, .text(docType), deviceNsBytes])
+        let deviceAuthBytes = try CborEncoder.encode(.tagged(24, .bytes(try CborEncoder.encode(deviceAuth))))
+
+        let readerKey = try SessionEncryption.deriveEMacKey(ephemeral: eReader, deviceKey: deviceKey.publicKey, sessionTranscriptBytes: transcriptBytes)
+        XCTAssertTrue(deviceMac.verify(key: readerKey, detachedPayload: deviceAuthBytes), "deviceMac must bind the proximity SessionTranscript")
+    }
+
     func testDeviceResponseSignedOverProximityTranscript() async throws {
         let docType = "org.iso.18013.5.1.mDL", namespace = "org.iso.18013.5.1"
         let area = SoftwareSecureArea()

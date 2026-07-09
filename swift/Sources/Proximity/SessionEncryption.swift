@@ -87,7 +87,14 @@ public final class SessionEncryption {
     /// ISO 18013-5 §9.1.3.5 `EMacKey` for verifying `deviceMac`: HKDF-SHA256 over the ECDH secret of the reader's
     /// `ephemeral` EReaderKey and the mdoc `deviceKey`, salted by the SessionTranscript.
     public static func deriveEMacKey(ephemeral: EphemeralKeyPair, deviceKey: EcPublicKey, sessionTranscriptBytes: [UInt8]) throws -> [UInt8] {
-        let ikm = SymmetricKey(data: Data(try ephemeral.sharedSecret(deviceKey)))
+        try emacKey(sharedSecret: try ephemeral.sharedSecret(deviceKey), sessionTranscriptBytes: sessionTranscriptBytes)
+    }
+
+    /// The same `EMacKey` from an already-computed ECDH secret — the mdoc side, whose `DeviceKey` private half
+    /// never leaves its secure area, so it derives `Zab` through the `SecureArea` port rather than from an
+    /// `EphemeralKeyPair`. Both sides must reach identical bytes for `deviceMac` to verify.
+    public static func emacKey(sharedSecret: [UInt8], sessionTranscriptBytes: [UInt8]) throws -> [UInt8] {
+        let ikm = SymmetricKey(data: Data(sharedSecret))
         let key = HKDF<SHA256>.deriveKey(inputKeyMaterial: ikm, salt: try transcriptSalt(sessionTranscriptBytes),
                                          info: Data("EMacKey".utf8), outputByteCount: 32)
         return key.withUnsafeBytes { [UInt8]($0) }

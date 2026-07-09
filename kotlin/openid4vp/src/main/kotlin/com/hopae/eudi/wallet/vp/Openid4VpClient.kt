@@ -135,10 +135,11 @@ class Openid4VpClient(
 
         val heldById = held.associateBy { it.credentialId }
         val iat = clock()
-        // Encrypted responses (direct_post.jwt / dc_api.jwt) bind the verifier's encryption key in the mdoc handover.
-        val jwkThumbprint = if (request.responseMode.endsWith(".jwt")) {
-            verifierEncryptionKey(request)?.let { ecJwkThumbprint(it.publicKey) }
-        } else null
+        // Encrypted responses (direct_post.jwt / dc_api.jwt) carry a verifier encryption key: it binds the
+        // mdoc handover (thumbprint) and doubles as the EReaderKey for mdoc deviceMac (ISO 18013-7 B.4.5).
+        val encryptionKey = if (request.responseMode.endsWith(".jwt")) verifierEncryptionKey(request) else null
+        val jwkThumbprint = encryptionKey?.let { ecJwkThumbprint(it.publicKey) }
+        val deviceAuthAlgValues = deviceAuthAlgValues(request)
 
         val vpEntries = mutableListOf<Pair<String, JsonValue>>()
         for ((queryId, credentialId) in selection.chosen) {
@@ -155,6 +156,8 @@ class Openid4VpClient(
                     transactionData = request.transactionData,
                     verifierJwkThumbprint = jwkThumbprint,
                     origin = request.origin,
+                    verifierEncryptionKey = encryptionKey?.publicKey,
+                    deviceAuthAlgValues = deviceAuthAlgValues,
                 )
             )
             vpEntries.add(queryId to JsonValue.Arr(listOf(JsonValue.Str(presentation))))
@@ -219,6 +222,25 @@ class Openid4VpClient(
         val chosen = usable.firstOrNull { (it["use"] as? JsonValue.Str)?.value == "enc" } ?: usable.firstOrNull() ?: return null
         val publicKey = JwkEc.fromJson(chosen) ?: return null
         return VerifierEncryptionKey(publicKey, (chosen["kid"] as? JsonValue.Str)?.value)
+    }
+
+    /**
+     * The verifier's accepted mdoc device-authentication algorithms (OpenID4VP §B.2.2): the
+     * `deviceauth_alg_values` array under `client_metadata.vp_formats_supported.mso_mdoc` (or the older
+     * `vp_formats`). Null when the verifier did not constrain it — then `deviceSignature` is used.
+     */
+    private fun deviceAuthAlgValues(request: ResolvedRequest): List<Long>? {
+        val formats = (request.clientMetadata?.get("vp_formats_supported")
+            ?: request.clientMetadata?.get("vp_formats")) as? JsonValue.Obj ?: return null
+        val mdoc = formats["mso_mdoc"] as? JsonValue.Obj ?: return null
+        val values = (mdoc["deviceauth_alg_values"] as? JsonValue.Arr)?.items ?: return null
+        return values.mapNotNull {
+            when (it) {
+                is JsonValue.NumInt -> it.value
+                is JsonValue.NumDouble -> it.value.toLong()
+                else -> null
+            }
+        }.ifEmpty { null }
     }
 
     /**

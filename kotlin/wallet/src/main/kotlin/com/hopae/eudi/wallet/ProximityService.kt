@@ -8,6 +8,7 @@ import com.hopae.eudi.wallet.mdoc.DeviceRequest
 import com.hopae.eudi.wallet.mdoc.Hpke
 import com.hopae.eudi.wallet.mdoc.IssuerSigned
 import com.hopae.eudi.wallet.mdoc.DeviceAuth
+import com.hopae.eudi.wallet.mdoc.MdocDeviceAuthMode
 import com.hopae.eudi.wallet.cbor.cose.EcPublicKey
 import com.hopae.eudi.wallet.mdoc.MdocPresenter
 import com.hopae.eudi.wallet.mdoc.MdocReaderTrust
@@ -51,7 +52,7 @@ class ProximityService internal constructor(
     /** When true, a failed final submission is recorded with ERROR status (opt-in via config). */
     private val recordFailures: Boolean = false,
     /** ISO 18013-5 §9.1.3.5: sign the DeviceResponse, or MAC it with the DeviceKey/EReaderKey EMacKey. */
-    private val deviceAuthMode: ProximityDeviceAuth = ProximityDeviceAuth.Signature,
+    private val deviceAuthMode: MdocDeviceAuthMode = MdocDeviceAuthMode.Signature,
 ) {
     /**
      * Starts a proximity session over [transport]: engage → session → reader request → consent → reply.
@@ -223,7 +224,7 @@ class ProximityService internal constructor(
         val area = secureAreas.firstOrNull { it.id == consumed.instance.key.secureArea } ?: secureAreas.first()
         val issuerSigned = IssuerSigned.decode(consumed.instance.payload)
 
-        val deviceAuth = if (deviceAuthMode == ProximityDeviceAuth.Mac && eReaderKey != null && transcriptBytes != null) {
+        val deviceAuth = if (deviceAuthMode == MdocDeviceAuthMode.Mac && eReaderKey != null && transcriptBytes != null) {
             if (!area.capabilities.keyAgreement) {
                 throw WalletError.Proximity.SessionFailed("deviceMac needs a key-agreement DeviceKey; '${area.id}' cannot do ECDH")
             }

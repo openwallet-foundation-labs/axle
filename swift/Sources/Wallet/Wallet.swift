@@ -52,11 +52,12 @@ public struct Wallet {
             clock: clockSeconds)
         let recordFailures = config.transactionLog.recordFailures
         let presentation = PresentationService(vp: vp, store: store, txlog: txlog, secureAreas: ports.secureAreas,
-                                               recordFailures: recordFailures)
+                                               recordFailures: recordFailures,
+                                               deviceAuthMode: config.presentation.mdocDeviceAuth)
         let proximity = ProximityService(store: store, txlog: txlog, secureAreas: ports.secureAreas,
                                          readerTrust: readerValidator.map { X5cMdocReaderTrust(validator: $0) },
                                          recordFailures: recordFailures,
-                                         deviceAuthMode: config.presentation.proximityDeviceAuth)
+                                         deviceAuthMode: config.presentation.mdocDeviceAuth)
         // Reader side: verify presented mdocs against the same issuer anchors used for status/issuance.
         let reader = ProximityReaderService(issuerTrust: X5cMdocIssuerTrust(validator: validator))
 

@@ -1,6 +1,8 @@
 package com.hopae.eudi.wallet
 
 import com.hopae.eudi.wallet.mdoc.IssuerSigned
+import com.hopae.eudi.wallet.mdoc.MdocDeviceAuthMode
+import com.hopae.eudi.wallet.mdoc.MdocKeyAgreement
 import com.hopae.eudi.wallet.sdjwt.Base64Url
 import com.hopae.eudi.wallet.sdjwt.SdJwt
 import com.hopae.eudi.wallet.sdjwt.SecureAreaJwsSigner
@@ -39,6 +41,8 @@ class PresentationService internal constructor(
     private val scope: CoroutineScope,
     /** When true, a failed final submission is recorded with ERROR status (opt-in via config). */
     private val recordFailures: Boolean = false,
+    /** ISO 18013-5 §9.1.3.5 device-auth preference for mdoc presentations (deviceMac when the verifier requests it). */
+    private val deviceAuthMode: MdocDeviceAuthMode = MdocDeviceAuthMode.Signature,
 ) {
     /** Remote (URL/QR) presentation: resolve → match stored credentials → consent → direct_post submit. */
     fun start(requestUri: String): PresentationSession = runSession(
@@ -153,6 +157,10 @@ class PresentationService internal constructor(
                     envelope.id.value,
                     IssuerSigned.decode(instance.payload),
                     SecureAreaCoseSigner(area, instance.key, SigningAlgorithm.ES256),
+                    deviceKeyAgreement = if (area.capabilities.keyAgreement) {
+                        MdocKeyAgreement { peer -> area.keyAgreement(instance.key, peer) }
+                    } else null,
+                    deviceAuth = deviceAuthMode,
                 )
             }
         }.getOrNull()

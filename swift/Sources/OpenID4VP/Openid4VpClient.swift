@@ -130,9 +130,11 @@ public struct Openid4VpClient {
         var heldById: [String: any PresentableCredential] = [:]
         for h in held { heldById[h.credentialId] = h }
         let iat = clock()
-        // Encrypted responses (direct_post.jwt / dc_api.jwt) bind the verifier's encryption key in the mdoc handover.
-        let jwkThumbprint: [UInt8]? = request.responseMode.hasSuffix(".jwt")
-            ? verifierEncryptionKey(request).map { ecJwkThumbprint($0.publicKey) } : nil
+        // Encrypted responses (direct_post.jwt / dc_api.jwt) carry a verifier encryption key: it binds the
+        // mdoc handover (thumbprint) and doubles as the EReaderKey for mdoc deviceMac (ISO 18013-7 B.4.5).
+        let encryptionKey = request.responseMode.hasSuffix(".jwt") ? verifierEncryptionKey(request) : nil
+        let jwkThumbprint = encryptionKey.map { ecJwkThumbprint($0.publicKey) }
+        let deviceAuthAlgValues = deviceAuthAlgValues(request)
 
         var vpEntries: [(String, JsonValue)] = []
         for (queryId, credentialId) in selection.chosen {
@@ -145,7 +147,8 @@ public struct Openid4VpClient {
             let presentation = try await cred.present(PresentationContext(
                 disclosedPaths: candidate.disclosedPaths,
                 clientId: request.clientId, nonce: request.nonce, responseUri: request.responseUri,
-                issuedAt: iat, transactionData: request.transactionData, verifierJwkThumbprint: jwkThumbprint, origin: request.origin
+                issuedAt: iat, transactionData: request.transactionData, verifierJwkThumbprint: jwkThumbprint, origin: request.origin,
+                verifierEncryptionKey: encryptionKey?.publicKey, deviceAuthAlgValues: deviceAuthAlgValues
             ))
             vpEntries.append((queryId, .arr([.str(presentation)])))
         }
@@ -206,6 +209,22 @@ public struct Openid4VpClient {
         var kid: String?
         if case let .str(k)? = chosen["kid"] { kid = k }
         return VerifierEncryptionKey(publicKey: publicKey, kid: kid)
+    }
+
+    /// The verifier's accepted mdoc device-authentication algorithms (OpenID4VP §B.2.2): the
+    /// `deviceauth_alg_values` array under `client_metadata.vp_formats_supported.mso_mdoc` (or the older
+    /// `vp_formats`). Nil when the verifier did not constrain it — then `deviceSignature` is used.
+    private func deviceAuthAlgValues(_ request: ResolvedRequest) -> [Int64]? {
+        let formats = request.clientMetadata?["vp_formats_supported"] ?? request.clientMetadata?["vp_formats"]
+        guard let mdoc = formats?["mso_mdoc"], case let .arr(values)? = mdoc["deviceauth_alg_values"] else { return nil }
+        let ids: [Int64] = values.compactMap {
+            switch $0 {
+            case let .numInt(n): return n
+            case let .numDouble(n): return Int64(n)
+            default: return nil
+            }
+        }
+        return ids.isEmpty ? nil : ids
     }
 
     /// ISO 18013-7 B.5.3: the mdoc sets `apv` to the base64url of the request `nonce`. `apu` would carry

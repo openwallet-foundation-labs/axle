@@ -3,6 +3,7 @@ package com.hopae.eudi.wallet.proximity
 import com.hopae.eudi.wallet.cbor.Cbor
 import com.hopae.eudi.wallet.cbor.CborDecoder
 import com.hopae.eudi.wallet.cbor.CborEncoder
+import com.hopae.eudi.wallet.cbor.Hkdf
 import com.hopae.eudi.wallet.cbor.cose.CoseMac0
 import com.hopae.eudi.wallet.cbor.cose.CoseSign1
 import com.hopae.eudi.wallet.mdoc.IssuerSigned

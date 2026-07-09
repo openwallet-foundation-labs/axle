@@ -16,6 +16,8 @@ public struct PresentationService {
     let secureAreas: [any SecureArea]
     /// When true, a failed final submission is recorded with `.error` status (opt-in via config).
     var recordFailures: Bool = false
+    /// ISO 18013-5 §9.1.3.5 device-auth preference for mdoc presentations (deviceMac when the verifier requests it).
+    var deviceAuthMode: MdocDeviceAuthMode = .signature
 
     /// Remote (URL/QR) presentation: resolve → match stored credentials → consent → direct_post submit.
     public func start(_ requestUri: String) -> PresentationSession {
@@ -131,10 +133,17 @@ public struct PresentationService {
                     sdJwt: try SdJwt.parse(String(decoding: instance.payload, as: UTF8.self)),
                     holderSigner: SecureAreaJwsSigner(area: area, key: instance.key, algorithm: .es256))
             case .msoMdoc:
+                let key = instance.key
+                var keyAgreement: MdocKeyAgreement?
+                if area.capabilities.keyAgreement {
+                    keyAgreement = { peer in try await area.keyAgreement(key: key, peerPublicKey: peer, hint: nil) }
+                }
                 return try HeldMdoc(
                     credentialId: envelope.id.value,
                     issuerSigned: try IssuerSigned.decode(instance.payload),
-                    deviceSigner: SecureAreaCoseSigner(area: area, key: instance.key, algorithm: .es256))
+                    deviceSigner: SecureAreaCoseSigner(area: area, key: key, algorithm: .es256),
+                    deviceKeyAgreement: keyAgreement,
+                    deviceAuth: deviceAuthMode)
             }
         } catch {
             return nil

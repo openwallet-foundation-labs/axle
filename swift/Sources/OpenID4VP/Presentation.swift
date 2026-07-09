@@ -1,3 +1,5 @@
+import CborCose
+
 /// Everything a held credential needs to build its OpenID4VP presentation for one query.
 public struct PresentationContext {
     /// Concrete leaf paths DCQL selected (SD-JWT VC claim paths / mdoc [ns, element]).
@@ -11,9 +13,17 @@ public struct PresentationContext {
     public let verifierJwkThumbprint: [UInt8]?
     /// Caller web origin for a Digital Credentials API presentation; non-nil selects the DC API handover.
     public let origin: String?
+    /// The verifier's response-encryption public key, doubling as the `EReaderKey` for mdoc `deviceMac`
+    /// (ISO 18013-7 B.4.5 / OpenID4VP §B.2.2). Nil when the response is unencrypted — then only
+    /// `deviceSignature` is possible, as there is no reader key to run ECDH against.
+    public let verifierEncryptionKey: EcPublicKey?
+    /// COSE algorithm identifiers from the verifier's `deviceauth_alg_values` (OpenID4VP §B.2.2), stating
+    /// which `deviceSignature` / `deviceMac` algorithms it accepts. Nil when the verifier did not constrain it.
+    public let deviceAuthAlgValues: [Int64]?
 
     public init(disclosedPaths: [[String]], clientId: String, nonce: String, responseUri: String?,
-                issuedAt: Int64, transactionData: [String]?, verifierJwkThumbprint: [UInt8]?, origin: String? = nil) {
+                issuedAt: Int64, transactionData: [String]?, verifierJwkThumbprint: [UInt8]?, origin: String? = nil,
+                verifierEncryptionKey: EcPublicKey? = nil, deviceAuthAlgValues: [Int64]? = nil) {
         self.disclosedPaths = disclosedPaths
         self.clientId = clientId
         self.nonce = nonce
@@ -22,6 +32,8 @@ public struct PresentationContext {
         self.transactionData = transactionData
         self.verifierJwkThumbprint = verifierJwkThumbprint
         self.origin = origin
+        self.verifierEncryptionKey = verifierEncryptionKey
+        self.deviceAuthAlgValues = deviceAuthAlgValues
     }
 }
 

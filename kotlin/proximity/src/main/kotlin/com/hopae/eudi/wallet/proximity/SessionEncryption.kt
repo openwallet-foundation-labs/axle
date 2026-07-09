@@ -2,6 +2,7 @@ package com.hopae.eudi.wallet.proximity
 
 import com.hopae.eudi.wallet.cbor.Cbor
 import com.hopae.eudi.wallet.cbor.CborEncoder
+import com.hopae.eudi.wallet.cbor.Hkdf
 import com.hopae.eudi.wallet.cbor.cose.EcCurve
 import com.hopae.eudi.wallet.cbor.cose.EcPublicKey
 import java.math.BigInteger

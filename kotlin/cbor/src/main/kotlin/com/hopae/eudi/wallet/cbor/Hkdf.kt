@@ -1,9 +1,12 @@
-package com.hopae.eudi.wallet.proximity
+package com.hopae.eudi.wallet.cbor
 
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-/** HKDF-SHA256 (RFC 5869) — the KDF ISO/IEC 18013-5 §9.1.1.4 uses for mdoc session keys. */
+/**
+ * HKDF-SHA256 (RFC 5869). The KDF ISO/IEC 18013-5 §9.1.1.4 uses for mdoc session keys and the
+ * §9.1.3.5 `EMacKey`; shared by the `proximity` session layer and the `mdoc` `deviceMac` path.
+ */
 object Hkdf {
 
     fun deriveSha256(ikm: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray {

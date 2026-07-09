@@ -19,7 +19,7 @@ public struct ProximityService {
     /// When true, a failed final submission is recorded with `.error` status (opt-in via config).
     var recordFailures: Bool = false
     /// ISO 18013-5 §9.1.3.5: sign the DeviceResponse, or MAC it with the DeviceKey/EReaderKey EMacKey.
-    var deviceAuthMode: ProximityDeviceAuth = .signature
+    var deviceAuthMode: MdocDeviceAuthMode = .signature
 
     /// Starts a proximity session over `transport`: engage → session → reader request → consent → reply.
     /// With `nfc` = true the engagement is delivered via ISO 18013-5 NFC static handover (the app serves the

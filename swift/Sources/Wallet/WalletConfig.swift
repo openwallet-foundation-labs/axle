@@ -1,4 +1,5 @@
 import Foundation
+import MDoc
 
 /// Immutable wallet configuration. Trust anchors are passed as DER so the public API stays free of
 /// trust-module types.
@@ -40,23 +41,15 @@ public struct IssuanceConfig {
 }
 
 public struct PresentationConfig {
-    /// How the mdoc authenticates a proximity response (ISO 18013-5 §9.1.3.5). `.mac` requires the
-    /// credential's `DeviceKey` to be a key-agreement key — on Android Keystore / Secure Enclave that
-    /// purpose is fixed at key creation, so switching an existing wallet over needs re-issued credentials.
-    public let proximityDeviceAuth: ProximityDeviceAuth
-    public init(proximityDeviceAuth: ProximityDeviceAuth = .signature) {
-        self.proximityDeviceAuth = proximityDeviceAuth
+    /// How this wallet's mdoc credentials authenticate a response (ISO 18013-5 §9.1.3.5), for both
+    /// proximity and OpenID4VP. `.mac` requires the credential's `DeviceKey` to be a key-agreement key —
+    /// on Android Keystore / Secure Enclave that purpose is fixed at key creation, so switching an existing
+    /// wallet over needs re-issued credentials. Over OpenID4VP it additionally needs the verifier to request
+    /// `deviceMac` (an encrypted response supplying an `EReaderKey`); otherwise it falls back to `deviceSignature`.
+    public let mdocDeviceAuth: MdocDeviceAuthMode
+    public init(mdocDeviceAuth: MdocDeviceAuthMode = .signature) {
+        self.mdocDeviceAuth = mdocDeviceAuth
     }
-}
-
-/// ISO 18013-5 §9.1.3.5 device authentication forms.
-public enum ProximityDeviceAuth: Sendable {
-    /// `deviceSignature` — an ECDSA signature any third party can verify.
-    case signature
-
-    /// `deviceMac` — an HMAC only this reader can check, since the key comes from a DeviceKey/EReaderKey
-    /// ECDH. Non-transferable: the reader cannot prove to anyone else that the mdoc answered.
-    case mac
 }
 
 /// Trust anchors as DER — the facade builds trust validators internally per port.

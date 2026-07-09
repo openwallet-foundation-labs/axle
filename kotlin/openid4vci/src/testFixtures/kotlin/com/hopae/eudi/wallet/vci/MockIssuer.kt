@@ -157,7 +157,11 @@ class MockIssuer(
         accessToken = "ACCESS-" + Base64Url.encode(byteArrayOf(1, 2, 3, 4))
         cNonce = "c-nonce-xyz"
         issuedRefreshToken = "REFRESH-" + Base64Url.encode(byteArrayOf(5, 6, 7, 8))
-        return ok("""{"access_token":"$accessToken","token_type":"DPoP","expires_in":3600,"refresh_token":"$issuedRefreshToken","c_nonce":"$cNonce"}""")
+        val authDetails = credentialIdentifiers?.let { ids ->
+            val idList = ids.joinToString(",") { "\"$it\"" }
+            ""","authorization_details":[{"type":"openid_credential","credential_configuration_id":"eu.europa.ec.eudi.pid.1","credential_identifiers":[$idList]}]"""
+        } ?: ""
+        return ok("""{"access_token":"$accessToken","token_type":"DPoP","expires_in":3600,"refresh_token":"$issuedRefreshToken","c_nonce":"$cNonce"$authDetails}""")
     }
 
     private var issuedRefreshToken: String? = null
@@ -190,6 +194,17 @@ class MockIssuer(
     var seenKeyAttestation: String? = null
         private set
     var seenProofCount: Int = 0
+        private set
+
+    /**
+     * When set, the token response binds these `credential_identifiers` to the config (§8.2), so the wallet
+     * must request with a `credential_identifier`. Test-observable via [seenCredentialIdentifier].
+     */
+    var credentialIdentifiers: List<String>? = null
+    /** The `credential_identifier` / `credential_configuration_id` the last Credential Request carried. */
+    var seenCredentialIdentifier: String? = null
+        private set
+    var seenConfigurationId: String? = null
         private set
 
     /** When true, /credential defers (returns a transaction_id); the credential comes from /deferred_credential. */
@@ -251,6 +266,12 @@ class MockIssuer(
         }
 
         val body = JsonValue.parse(plaintext) as JsonValue.Obj
+        seenCredentialIdentifier = (body["credential_identifier"] as? JsonValue.Str)?.value
+        seenConfigurationId = (body["credential_configuration_id"] as? JsonValue.Str)?.value
+        // §8.2: exactly one of the two identifies the requested Credential Dataset.
+        require((seenCredentialIdentifier == null) != (seenConfigurationId == null)) {
+            "Credential Request must carry exactly one of credential_identifier / credential_configuration_id"
+        }
         val proofs = ((body["proofs"] as JsonValue.Obj)["jwt"] as JsonValue.Arr).items.map { (it as JsonValue.Str).value }
         seenProofCount = proofs.size
         seenKeyAttestation = (Jws.parse(proofs.first()).header["key_attestation"] as? JsonValue.Str)?.value

@@ -209,6 +209,13 @@ class TokenResponse(
     val cNonce: String?,
     val expiresIn: Long?,
     val authorizationDetails: JsonValue?,
+    /**
+     * §8.2: the `credential_identifiers` the issuer bound to each `credential_configuration_id` in the
+     * token-response `authorization_details`. When a config appears here, its Credential Request MUST use
+     * one of these `credential_identifier`s instead of the `credential_configuration_id`. Empty when the
+     * issuer returned no `authorization_details` (e.g. a scope-based authorization).
+     */
+    val credentialIdentifiers: Map<String, List<String>>,
     /** OAuth 2.0 refresh token (RFC 6749 §5.1) — enables reissuance without re-authorization. */
     val refreshToken: String?,
 ) {
@@ -219,8 +226,18 @@ class TokenResponse(
             cNonce = o.str("c_nonce"),
             expiresIn = (o["expires_in"] as? JsonValue.NumInt)?.value,
             authorizationDetails = o["authorization_details"],
+            credentialIdentifiers = parseCredentialIdentifiers(o["authorization_details"]),
             refreshToken = o.str("refresh_token"),
         )
+
+        /** Maps each `authorization_details[].credential_configuration_id` to its non-empty `credential_identifiers`. */
+        private fun parseCredentialIdentifiers(details: JsonValue?): Map<String, List<String>> =
+            (details as? JsonValue.Arr)?.items.orEmpty().filterIsInstance<JsonValue.Obj>().mapNotNull { entry ->
+                val configId = (entry["credential_configuration_id"] as? JsonValue.Str)?.value ?: return@mapNotNull null
+                val ids = (entry["credential_identifiers"] as? JsonValue.Arr)?.items
+                    ?.mapNotNull { (it as? JsonValue.Str)?.value }.orEmpty()
+                if (ids.isEmpty()) null else configId to ids
+            }.toMap()
     }
 }
 

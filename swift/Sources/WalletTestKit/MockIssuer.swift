@@ -28,6 +28,14 @@ public actor MockIssuer: HttpTransport {
     public private(set) var seenKeyAttestation: String?
     public private(set) var seenProofCount = 0
 
+    /// When set, the token response binds these `credential_identifiers` to the config (§8.2), so the wallet
+    /// must request with a `credential_identifier`.
+    private var credentialIdentifiers: [String]?
+    public func setCredentialIdentifiers(_ ids: [String]?) { credentialIdentifiers = ids }
+    /// The `credential_identifier` / `credential_configuration_id` the last Credential Request carried.
+    public private(set) var seenCredentialIdentifier: String?
+    public private(set) var seenConfigurationId: String?
+
     /* ---- OpenID4VCI §8.2/§10 encrypted Credential Requests & Responses ---- */
 
     /// When set, the metadata advertises request/response encryption. `required` forces the wallet to use it.
@@ -154,7 +162,12 @@ public actor MockIssuer: HttpTransport {
         accessToken = "ACCESS-token-123"
         cNonce = "c-nonce-xyz"
         issuedRefreshToken = "REFRESH-token-5678"
-        return ok(#"{"access_token":"\#(accessToken!)","token_type":"DPoP","expires_in":3600,"refresh_token":"\#(issuedRefreshToken!)","c_nonce":"\#(cNonce!)"}"#)
+        var authDetails = ""
+        if let ids = credentialIdentifiers {
+            let idList = ids.map { "\"\($0)\"" }.joined(separator: ",")
+            authDetails = #","authorization_details":[{"type":"openid_credential","credential_configuration_id":"eu.europa.ec.eudi.pid.1","credential_identifiers":[\#(idList)]}]"#
+        }
+        return ok(#"{"access_token":"\#(accessToken!)","token_type":"DPoP","expires_in":3600,"refresh_token":"\#(issuedRefreshToken!)","c_nonce":"\#(cNonce!)"\#(authDetails)}"#)
     }
 
     private var issuedRefreshToken: String?
@@ -248,6 +261,11 @@ public actor MockIssuer: HttpTransport {
             preconditionFailure("bad credential request body")
         }
         let body = JsonValue.obj(entries)
+        if case let .str(id)? = body["credential_identifier"] { seenCredentialIdentifier = id } else { seenCredentialIdentifier = nil }
+        if case let .str(cfg)? = body["credential_configuration_id"] { seenConfigurationId = cfg } else { seenConfigurationId = nil }
+        // §8.2: exactly one of the two identifies the requested Credential Dataset.
+        precondition((seenCredentialIdentifier == nil) != (seenConfigurationId == nil),
+                     "Credential Request must carry exactly one of credential_identifier / credential_configuration_id")
         guard case let .arr(jwts)? = body["proofs"]?["jwt"], !jwts.isEmpty else {
             preconditionFailure("no proof jwt")
         }

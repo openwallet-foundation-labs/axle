@@ -390,8 +390,12 @@ public struct Openid4VciClient {
 
         let requestFormat = issuerMeta.credentialConfigurationsSupported[configurationId]?.format ?? "dc+sd-jwt"
         let encryption = try CredentialEncryptionSession.negotiate(credentialEncryption, issuerMeta)
+        // §8.2: when the token response bound credential_identifiers to this config, the request MUST use a
+        // credential_identifier and MUST NOT send credential_configuration_id. We request the first dataset;
+        // the config maps 1:1 to a credential in this SDK, so any further identifiers are not auto-expanded.
+        let credentialIdentifier = token.credentialIdentifiers[configurationId]?.first
         var entries: [(String, JsonValue)] = [
-            ("credential_configuration_id", .str(configurationId)),
+            credentialIdentifier.map { ("credential_identifier", JsonValue.str($0)) } ?? ("credential_configuration_id", .str(configurationId)),
             ("proofs", .obj([("jwt", .arr(proofJwts))])),
         ]
         if let encryption { entries.append(("credential_response_encryption", encryption.requestObject())) }

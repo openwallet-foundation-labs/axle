@@ -365,9 +365,17 @@ class Openid4VciClient(
 
         val requestFormat = issuerMeta.credentialConfigurationsSupported[configurationId]?.format ?: "dc+sd-jwt"
         val encryption = CredentialEncryptionSession.negotiate(credentialEncryption, issuerMeta)
+        // §8.2: when the token response bound credential_identifiers to this config, the request MUST use a
+        // credential_identifier and MUST NOT send credential_configuration_id. We request the first dataset;
+        // the config maps 1:1 to a credential in this SDK, so any further identifiers are not auto-expanded.
+        val credentialIdentifier = token.credentialIdentifiers[configurationId]?.firstOrNull()
         val requestBody = JsonValue.Obj(
             buildList {
-                add("credential_configuration_id" to JsonValue.Str(configurationId))
+                if (credentialIdentifier != null) {
+                    add("credential_identifier" to JsonValue.Str(credentialIdentifier))
+                } else {
+                    add("credential_configuration_id" to JsonValue.Str(configurationId))
+                }
                 add("proofs" to JsonValue.Obj(listOf("jwt" to JsonValue.Arr(proofJwts.map { JsonValue.Str(it) }))))
                 encryption?.let { add("credential_response_encryption" to it.requestObject()) }
             }

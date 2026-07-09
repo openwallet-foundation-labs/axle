@@ -253,6 +253,11 @@ public struct TokenResponse {
     public let tokenType: String
     public let cNonce: String?
     public let expiresIn: Int64?
+    /// §8.2: the `credential_identifiers` the issuer bound to each `credential_configuration_id` in the
+    /// token-response `authorization_details`. When a config appears here, its Credential Request MUST use one
+    /// of these `credential_identifier`s instead of the `credential_configuration_id`. Empty when the issuer
+    /// returned no `authorization_details` (e.g. a scope-based authorization).
+    public let credentialIdentifiers: [String: [String]]
     /// OAuth 2.0 refresh token (RFC 6749 §5.1) — enables reissuance without re-authorization.
     public let refreshToken: String?
 
@@ -268,8 +273,22 @@ public struct TokenResponse {
             tokenType: try o.requireString("token_type", "token response"),
             cNonce: cNonce,
             expiresIn: expiresIn,
+            credentialIdentifiers: parseCredentialIdentifiers(o["authorization_details"]),
             refreshToken: refreshToken
         )
+    }
+
+    /// Maps each `authorization_details[].credential_configuration_id` to its non-empty `credential_identifiers`.
+    private static func parseCredentialIdentifiers(_ details: JsonValue?) -> [String: [String]] {
+        guard case let .arr(entries)? = details else { return [:] }
+        var out: [String: [String]] = [:]
+        for entry in entries {
+            guard case let .str(configId)? = entry["credential_configuration_id"],
+                  case let .arr(idValues)? = entry["credential_identifiers"] else { continue }
+            let ids = idValues.compactMap { v -> String? in if case let .str(s) = v { return s }; return nil }
+            if !ids.isEmpty { out[configId] = ids }
+        }
+        return out
     }
 }
 

@@ -40,12 +40,19 @@ public struct VerifiedSdJwtVc {
 
 /// SD-JWT VC verifier (draft-ietf-oauth-sd-jwt-vc): the profile layer over RFC 9901.
 ///
-/// Enforces: `typ` ∈ {dc+sd-jwt, vc+sd-jwt}; required `iss` and `vct`; time claims
-/// (iat/exp/nbf) via `JwtTimeValidator`; issuer key resolution via `IssuerKeyResolver`;
-/// optional holder key binding. Fail-closed throughout.
+/// Enforces: `typ` == `dc+sd-jwt` (the legacy `vc+sd-jwt` is rejected — see `requiredTyp`); required
+/// `iss` and `vct`; time claims (iat/exp/nbf) via `JwtTimeValidator`; issuer key resolution via
+/// `IssuerKeyResolver`; optional holder key binding. Fail-closed throughout.
 public struct SdJwtVcVerifier {
-    // draft-ietf-oauth-sd-jwt-vc §3.1: typ MUST be dc+sd-jwt. (vc+sd-jwt was the
-    // pre-2024-11 value, dropped over a conflict with W3C's vc media type.)
+    /// draft-ietf-oauth-sd-jwt-vc §2.2.1: "The Issuer MUST include the `typ` header parameter in the
+    /// SD-JWT. The `typ` value MUST use `dc+sd-jwt`."
+    ///
+    /// The draft also *notes* — in lower case, so non-normatively — that the pre-2024-11 `vc+sd-jwt`
+    /// "should be accepted ... for a reasonable transitional period". We do not: that period has run
+    /// since November 2024, no implementation in this SDK's ecosystem emits or accepts the old value
+    /// (checked: the EUDI reference libraries, Multipaz, and `issuer.eudiw.dev`, which issues
+    /// `dc+sd-jwt`), and `typ` exists to prevent type confusion (RFC 8725 §3.11) — every extra value
+    /// accepted widens that surface for no interop gain.
     private static let requiredTyp = "dc+sd-jwt"
 
     private let issuerKeyResolver: any IssuerKeyResolver

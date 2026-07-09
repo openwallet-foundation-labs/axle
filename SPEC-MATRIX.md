@@ -19,7 +19,7 @@ Legend: ✅ implemented · 🟡 partial · ⬜ not yet.
 | JWE | RFC 7518 ECDH-ES direct + A128/192/256GCM | ✅ Concat KDF (RFC 7518 Appendix C vectors) — encrypts `direct_post.jwt` / `dc_api.jwt` responses and OpenID4VCI Credential Requests; decrypts Credential Responses (`JweRecipientKey`). `kid` header per OpenID4VCI §10 |
 | HPKE | RFC 9180 base mode — DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-128-GCM | ✅ `mdoc` `Hpke` / `MDoc` — seals the `org-iso-mdoc` DC API response (ISO 18013-7 Annex C); RFC 9180 A.3 test vector passes both languages. Seal only — no verifier-side `open` |
 | SD-JWT | RFC 9901 | ✅ issue / present / verify, KB-JWT, recursive & array disclosures, decoys; RFC disclosure vectors (73 entries) pass both languages. Gaps: KB-JWT `iat` presence-only (no §7.3 time-window check), §7.1(6) `exp`/`nbf` enforced only in the VC layer, §8 JWS JSON serialization absent (optional) |
-| SD-JWT VC | draft-ietf-oauth-sd-jwt-vc | 🟡 `SdJwtVcVerifier` — typ/iss/vct enforcement, time validation, issuer-key resolution (`.well-known/jwt-vc-issuer` + x5c), holder binding, status extraction. **Type Metadata (§4) and `vct#integrity` entirely unimplemented**; transitional `vc+sd-jwt` typ rejected |
+| SD-JWT VC | draft-ietf-oauth-sd-jwt-vc-17 (2026-07-06) | 🟡 `SdJwtVcVerifier` — typ/iss/vct enforcement, time validation, issuer-key resolution (`.well-known/jwt-vc-issuer` + x5c), holder binding, status extraction. **Type Metadata (§4) and `vct#integrity` entirely unimplemented**; the legacy `vc+sd-jwt` typ is rejected — a [deliberate non-goal](#deliberate-non-goals) |
 | ISO/IEC 18013-5 mdoc | :2021 | ✅ `mdoc` / `MDoc` — `IssuerSigned`/MSO, `DeviceResponse`, selective disclosure, device signature **and `deviceMac`** (holder + reader), reader auth (§9.1.4). MSO digest SHA-256 only; `DeviceResponse` errors/status semantics not modeled |
 | X.509 PKIX | RFC 5280 | ✅ `trust` / `Trust` — chain validation (path build, validity, basic constraints), SAN, x509_san_dns / x509_hash; x5c adapters for SD-JWT VC issuers, mdoc issuer/reader, and signed issuer metadata |
 
@@ -72,7 +72,6 @@ Only what is 🟡/⬜ is listed; everything else in the tables above verified cl
 |---|---|---|
 | **Type Metadata — all of it** | §4 | ⬜ no vct resolution/retrieval, `extends`, display/rendering (simple or svg_templates), claim metadata, or JSON-schema validation; §4.7 processing never runs in verification |
 | `vct#integrity` / `#integrity` | §2.2.2.2, §5 | ⬜ never read or validated |
-| Transitional `vc+sd-jwt` typ | §2.2.1 | 🟡 rejected despite spec's should-accept guidance; docstrings in both trees falsely claim it is accepted |
 | Metadata resolver edge cases | §3.1/§3.2 | 🟡 jwks-XOR-jwks_uri not enforced; trailing-`/` in path-bearing `iss` not stripped |
 | did-based key resolution | §2.5 (optional) | ⬜ |
 
@@ -131,6 +130,7 @@ Not gaps to be closed later — decisions. Recorded so the matrix cannot be read
 | TS-literal `OID4VPHandover` | 18013-7 B.4.4 | The TS predates OpenID4VP 1.0 Final, which replaced the `clientIdHash`/`responseUriHash` + `mdocGeneratedNonce` handover with `OpenID4VPHandover`/`OpenID4VPDCAPIHandover` (jwk-thumbprint form). We implement the Final form, which is what conformant verifiers send — `verifier.eudiw.dev` and `digital-credentials.dev` both interoperate live. Implementing the superseded form would break against them |
 | `mdocGeneratedNonce` + the `apu` JWE header | 18013-7 B.4.3.3 / B.5.3 | `apu` is defined as the `mdocGeneratedNonce` *of the B.4.4 SessionTranscript*. With that handover gone there is no such nonce, so `apu` has nothing to carry. (`apv` and `kid` survive — see above) |
 | **18013-7 Annex A** — website REST retrieval | Annex A | `RestApiOptions`, HTTP POST `application/cbor`, `OriginInfo`, `EngagementToApp`, `MacKeys`. Out of product scope: the SDK targets proximity (18013-5) and the browser-mediated DC API (Annex C), not a website REST channel |
+| Accepting the legacy `vc+sd-jwt` typ | SD-JWT VC §2.2.1 | The only normative rule is "The `typ` value MUST use `dc+sd-jwt`". Accepting the pre-2024-11 name is suggested by a *non-normative* note (lower-case "should", and this draft's RFC 2119 boilerplate makes only upper-case keywords normative). We reject it: the rename was November 2024, nothing in this SDK's ecosystem emits or accepts it (the EUDI reference libraries, Multipaz, and `issuer.eudiw.dev` all use `dc+sd-jwt`), and `typ` exists to prevent type confusion (RFC 8725 §3.11) — every extra accepted value widens that surface for no interop gain. Pinned by `SdJwtVcTypTest` |
 | Single-purpose mdoc auth key enforcement | 18013-5 §9.1.3.4 | Both mechanisms shipped; see the 18013-5 table. Accepted as a conformance gap, not a security one |
 
 ## Not yet / roadmap

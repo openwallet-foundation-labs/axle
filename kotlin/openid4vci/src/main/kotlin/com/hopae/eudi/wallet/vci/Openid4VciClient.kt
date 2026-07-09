@@ -71,6 +71,13 @@ class Openid4VciClient(
     private val clientAuth: WalletClientAuth? = null,
     /** Optional Key Attestation for the proof key(s), added to each key-proof header (HAIP). */
     private val keyAttestation: KeyAttestationSource? = null,
+    /**
+     * §8.2.1 Appendix F.3: use the `attestation` proof type — a single Key Attestation JWT with no
+     * per-key proof of possession — instead of `jwt` proofs. Only applies when a [keyAttestation] source is
+     * configured and the issuer's config lists `attestation` in `proof_types_supported`; otherwise `jwt` is
+     * used. The attestation's `attested_keys` are the keys the Credential(s) bind to, so no key needs to sign.
+     */
+    private val preferAttestationProof: Boolean = false,
     /** How to negotiate signed issuer metadata (OpenID4VCI §12.2.2/§12.2.3). Default: unsigned JSON. */
     private val metadataPolicy: IssuerMetadataPolicy = IssuerMetadataPolicy.IgnoreSigned,
     /** Encrypted Credential Requests/Responses (§8.2, §10). Default: only when the issuer requires it. */
@@ -355,15 +362,8 @@ class Openid4VciClient(
         keys: IssuanceKeys,
     ): CredentialResponse {
         val cNonce = token.cNonce ?: issuerMeta.nonceEndpoint?.let { fetchCNonce(it) }
-
-        // One key-proof per proof key (batch issuance yields one credential per proof).
-        val keyAttestationJwt = keyAttestation?.attestation(cNonce)
-        val proofJwts = keys.proofKeys.map { pk ->
-            KeyProofSigner(pk.signer, pk.publicKey, clock)
-                .proofJwt(issuerMeta.credentialIssuer, cNonce, clientId, keyAttestationJwt)
-        }
-
-        val requestFormat = issuerMeta.credentialConfigurationsSupported[configurationId]?.format ?: "dc+sd-jwt"
+        val config = issuerMeta.credentialConfigurationsSupported[configurationId]
+        val requestFormat = config?.format ?: "dc+sd-jwt"
         val encryption = CredentialEncryptionSession.negotiate(credentialEncryption, issuerMeta)
         // §8.2: when the token response bound credential_identifiers to this config, the request MUST use a
         // credential_identifier and MUST NOT send credential_configuration_id. We request the first dataset;
@@ -376,7 +376,7 @@ class Openid4VciClient(
                 } else {
                     add("credential_configuration_id" to JsonValue.Str(configurationId))
                 }
-                add("proofs" to JsonValue.Obj(listOf("jwt" to JsonValue.Arr(proofJwts.map { JsonValue.Str(it) }))))
+                add("proofs" to proofs(issuerMeta, config, cNonce, keys))
                 encryption?.let { add("credential_response_encryption" to it.requestObject()) }
             }
         ).serialize()
@@ -391,6 +391,31 @@ class Openid4VciClient(
         }
         return CredentialResponse.fromObj(credentialBody(credResp, encryption), requestFormat)
             .withContext(token.accessToken, issuerMeta.credentialIssuer, requestFormat, token.refreshToken, configurationId)
+    }
+
+    /**
+     * The `proofs` object (§8.2.1). Uses the `attestation` proof type — a single Key Attestation JWT, no
+     * per-key proof of possession (Appendix F.3) — when [preferAttestationProof] is set, a [keyAttestation]
+     * source exists, and the issuer's config supports it; otherwise a `jwt` proof per proof key (Appendix F.1,
+     * batch issuance), each carrying the Key Attestation in its header when configured.
+     */
+    private suspend fun proofs(
+        issuerMeta: CredentialIssuerMetadata,
+        config: CredentialConfiguration?,
+        cNonce: String?,
+        keys: IssuanceKeys,
+    ): JsonValue.Obj {
+        val attestationSource = keyAttestation
+        if (preferAttestationProof && attestationSource != null && config?.proofTypesSupported?.contains("attestation") == true) {
+            // Appendix F.3: exactly one Key Attestation JWT, its attested_keys are what the Credentials bind to.
+            return JsonValue.Obj(listOf("attestation" to JsonValue.Arr(listOf(JsonValue.Str(attestationSource.attestation(cNonce))))))
+        }
+        val keyAttestationJwt = attestationSource?.attestation(cNonce)
+        val proofJwts = keys.proofKeys.map { pk ->
+            KeyProofSigner(pk.signer, pk.publicKey, clock)
+                .proofJwt(issuerMeta.credentialIssuer, cNonce, clientId, keyAttestationJwt)
+        }
+        return JsonValue.Obj(listOf("jwt" to JsonValue.Arr(proofJwts.map { JsonValue.Str(it) })))
     }
 
     /**

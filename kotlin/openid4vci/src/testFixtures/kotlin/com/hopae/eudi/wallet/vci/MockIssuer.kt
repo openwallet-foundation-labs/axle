@@ -207,6 +207,12 @@ class MockIssuer(
     var seenConfigurationId: String? = null
         private set
 
+    /** When true, the config advertises the `attestation` proof type (§8.2.1 Appendix F.3) in its metadata. */
+    var supportsAttestationProof: Boolean = false
+    /** The `attestation`-proof Key Attestation JWT the last Credential Request carried (§8.2.1.3), if any. */
+    var seenAttestationProof: String? = null
+        private set
+
     /** When true, /credential defers (returns a transaction_id); the credential comes from /deferred_credential. */
     var deferMode: Boolean = false
 
@@ -272,12 +278,26 @@ class MockIssuer(
         require((seenCredentialIdentifier == null) != (seenConfigurationId == null)) {
             "Credential Request must carry exactly one of credential_identifier / credential_configuration_id"
         }
-        val proofs = ((body["proofs"] as JsonValue.Obj)["jwt"] as JsonValue.Arr).items.map { (it as JsonValue.Str).value }
-        seenProofCount = proofs.size
-        seenKeyAttestation = (Jws.parse(proofs.first()).header["key_attestation"] as? JsonValue.Str)?.value
-
+        val proofsObj = body["proofs"] as JsonValue.Obj
         // The wallet's response-encryption key, when it asked for one (§8.2).
         val responseEnc = body["credential_response_encryption"] as? JsonValue.Obj
+
+        // §8.2.1.3 attestation proof type: exactly one Key Attestation JWT, no per-key proof of possession.
+        (proofsObj["attestation"] as? JsonValue.Arr)?.let { attestation ->
+            val attestationJwt = (attestation.items.single() as JsonValue.Str).value
+            seenAttestationProof = attestationJwt
+            val attClaims = JsonValue.parse(Jws.parse(attestationJwt).payloadBytes.decodeToString()) as JsonValue.Obj
+            require((attClaims["nonce"] as? JsonValue.Str)?.value == cNonce) { "attestation nonce must equal the c_nonce" }
+            // One credential per attested_key, bound to it (Appendix F.3 / D.1).
+            val attestedKeys = (attClaims["attested_keys"] as JsonValue.Arr).items.map { JwkEc.fromJson(it as JsonValue.Obj)!! }
+            seenProofCount = attestedKeys.size
+            val creds = attestedKeys.map { """{"credential":"${issueSdJwtVc(it)}"}""" }.joinToString(",")
+            return respond("""{"credentials":[$creds],"notification_id":"n-1"}""", responseEnc)
+        }
+
+        val proofs = (proofsObj["jwt"] as JsonValue.Arr).items.map { (it as JsonValue.Str).value }
+        seenProofCount = proofs.size
+        seenKeyAttestation = (Jws.parse(proofs.first()).header["key_attestation"] as? JsonValue.Str)?.value
 
         if (deferMode) {
             // Defer (§8.3): verify the proof, remember the holder key, return a transaction_id + interval.
@@ -365,7 +385,7 @@ class MockIssuer(
          "credential_configurations_supported":{
            "eu.europa.ec.eudi.pid.1":{"format":"dc+sd-jwt","vct":"eu.europa.ec.eudi.pid.1",
              "display":[{"name":"Personal ID","logo":{"uri":"https://logo.example/pid.png"},"background_color":"#123456"}],
-             "proof_types_supported":{"jwt":{"proof_signing_alg_values_supported":["ES256"]}}}}}
+             "proof_types_supported":{"jwt":{"proof_signing_alg_values_supported":["ES256"]}${if (supportsAttestationProof) ""","attestation":{"proof_signing_alg_values_supported":["ES256"]}""" else ""}}}}}
     """.trimIndent()
 
     private fun asMetadata(): String = """

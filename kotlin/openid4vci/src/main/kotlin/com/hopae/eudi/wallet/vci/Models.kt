@@ -157,6 +157,8 @@ class CredentialConfiguration(
     val vct: String?,
     val docType: String?,
     val proofSigningAlgs: List<String>,
+    /** The `proof_types_supported` keys the issuer advertises for this config (e.g. `jwt`, `attestation`). */
+    val proofTypesSupported: Set<String>,
     val scope: String?,
     /** From the first `display` entry — for wallet UI. */
     val displayName: String? = null,
@@ -165,6 +167,7 @@ class CredentialConfiguration(
 ) {
     companion object {
         fun fromObj(o: JsonValue.Obj): CredentialConfiguration {
+            val proofTypes = (o["proof_types_supported"] as? JsonValue.Obj)?.entries?.map { it.first }?.toSet() ?: emptySet()
             val proofAlgs = ((o["proof_types_supported"] as? JsonValue.Obj)
                 ?.get("jwt") as? JsonValue.Obj)
                 ?.let { (it["proof_signing_alg_values_supported"] as? JsonValue.Arr) }
@@ -175,6 +178,7 @@ class CredentialConfiguration(
                 vct = (o["vct"] as? JsonValue.Str)?.value,
                 docType = (o["doctype"] as? JsonValue.Str)?.value,
                 proofSigningAlgs = proofAlgs,
+                proofTypesSupported = proofTypes,
                 scope = (o["scope"] as? JsonValue.Str)?.value,
                 displayName = (display?.get("name") as? JsonValue.Str)?.value,
                 logoUri = ((display?.get("logo") as? JsonValue.Obj)?.get("uri") as? JsonValue.Str)?.value,

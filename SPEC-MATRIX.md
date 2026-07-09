@@ -27,7 +27,7 @@ Legend: ✅ implemented · 🟡 partial · ⬜ not yet.
 
 | Spec | Anchor version | Status |
 |---|---|---|
-| OpenID4VCI | 1.0 Final (2025-09-16) | ✅ `openid4vci` — pre-authorized & authorization-code (+PAR), offer resolution, scope-preferred; **signed metadata** (§12.2.2 `Accept` negotiation + §12.2.3 `application/jwt` with `typ`/`alg`/`sub`/`iat`/`exp` rules); **live-issued a real PID from `issuer.eudiw.dev`** and **live-verified signed metadata from `dev.issuer-backend.eudiw.dev`** (see `INTEROP.md`). **encrypted Credential Requests/Responses** (§8.2/§10, ECDH-ES + A*GCM, live-verified against `issuer.eudiw.dev`) — same on the **deferred endpoint** (§9.1); deferred issuance surfaces the §8.3 `interval` (`IssuanceState.Deferred(retryAfter)`) and handles §9.2 202 re-deferrals; **`credential_identifiers`** (§8.2 — request by `credential_identifier` when the token binds them). Gaps: `attestation` proof type — see audit below |
+| OpenID4VCI | 1.0 Final (2025-09-16) | ✅ `openid4vci` — pre-authorized & authorization-code (+PAR), offer resolution, scope-preferred; **signed metadata** (§12.2.2 `Accept` negotiation + §12.2.3 `application/jwt` with `typ`/`alg`/`sub`/`iat`/`exp` rules); **live-issued a real PID from `issuer.eudiw.dev`** and **live-verified signed metadata from `dev.issuer-backend.eudiw.dev`** (see `INTEROP.md`). **encrypted Credential Requests/Responses** (§8.2/§10, ECDH-ES + A*GCM, live-verified against `issuer.eudiw.dev`) — same on the **deferred endpoint** (§9.1); deferred issuance surfaces the §8.3 `interval` (`IssuanceState.Deferred(retryAfter)`) and handles §9.2 202 re-deferrals; **`credential_identifiers`** (§8.2 — request by `credential_identifier` when the token binds them); both key-proof mechanisms — `jwt` proofs with the `key_attestation` header, and the **`attestation` proof type** (Appendix F.3, `preferAttestationProof`). No open gaps in the reviewed clauses |
 | PKCE | RFC 7636 (S256) | ✅ |
 | DPoP | RFC 9449 | ✅ jti/htm/htu/ath + DPoP-Nonce retry |
 | OAuth Attestation-Based Client Auth | draft (wallet attestation + PoP) | ✅ WUA client authentication during issuance |
@@ -77,7 +77,7 @@ Only what is 🟡/⬜ is listed; everything else in the tables above verified cl
 
 | Gap | Spec ref | Detail |
 |---|---|---|
-| `attestation` proof type | §8.2.1.3 | ⬜ only `jwt` proofs sent (key attestation rides in the `key_attestation` JOSE header, which **is** implemented) |
+| `attestation` proof type | §8.2.1.3 | ✅ `preferAttestationProof` sends a single Key Attestation JWT as `proofs.attestation[0]` (Appendix F.3) — no per-key proof of possession, the `attested_keys` are what the Credential(s) bind to — when the issuer's config lists `attestation` in `proof_types_supported` and a `KeyAttestationSource` is configured; otherwise the `jwt` proof type (attestation in the header). Gated on `CredentialConfiguration.proofTypesSupported` |
 | `credential_identifier(s)` issuance flow | §3.4/§6.2/§8.2 | ✅ token-response `authorization_details` parsed into `TokenResponse.credentialIdentifiers` (per config); the Credential Request then sends a `credential_identifier` (never `credential_configuration_id`) when the issuer bound one, else falls back to `credential_configuration_id`. 🟡 a config with **multiple** identifiers requests only the first — the SDK maps a config 1:1 to a credential, so multi-dataset expansion is not done |
 | `tx_code` input hints | §4.1.1 | ✅ exposed to the host as `TxCodeSpec` (length / input_mode / description) on `CredentialOffer` and `IssuanceState.TxCodeRequired`; `validate(code)` returns advisory violations. Not enforced by the SDK — the hints are for rendering, and a mismatch is the issuer's call, not ours (headless: no input screen to gate) |
 | `mso_mdoc` format | §3.3.1 | 🟡 opaque-string passthrough; live-tested Kotlin only, untested in Swift |
@@ -174,7 +174,6 @@ Not gaps to be closed later — decisions. Recorded so the matrix cannot be read
 | SD-JWT VC Type Metadata (§4: vct resolution, `extends`, display, claim metadata, schema) + `vct#integrity` | ⬜ largest single gap; §4.7 is a step of the verification algorithm |
 | OpenID4VP hardening: DCQL `multiple`, `require_cryptographic_holder_binding` | ⬜ the trust-free half of the OpenID4VP gap; `trusted_authorities` is sequenced with the trust cluster below |
 | iOS proximity transport (CoreBluetooth / CoreNFC) + BLE Ident characteristic + session termination (status 20) | ⬜ Android demo adapters only |
-| OpenID4VCI: `attestation` proof type | ⬜ |
 | NFC negotiated handover (18013-5 §8.2.2.1) | ⬜ |
 | Wallet Provider backend end-to-end (WUA issue → verify loop) | 🟡 backend exists (`wallet-provider/`); e2e loop closure pending |
 | BLE / NFC transport production hardening | 🟡 demo adapters + live Multipaz interop done; reconnect / timeout / MTU / cancellation hardening pending |

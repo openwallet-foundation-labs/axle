@@ -192,16 +192,19 @@ public struct CredentialConfiguration {
     public let vct: String?
     public let docType: String?
     public let proofSigningAlgs: [String]
+    /// The `proof_types_supported` keys the issuer advertises for this config (e.g. `jwt`, `attestation`).
+    public let proofTypesSupported: Set<String>
     public let scope: String?
     /// From the first `display` entry — for wallet UI.
     public let displayName: String?
     public let logoUri: String?
     public let backgroundColor: String?
 
-    public init(format: String, vct: String?, docType: String?, proofSigningAlgs: [String], scope: String?,
+    public init(format: String, vct: String?, docType: String?, proofSigningAlgs: [String],
+                proofTypesSupported: Set<String> = [], scope: String?,
                 displayName: String? = nil, logoUri: String? = nil, backgroundColor: String? = nil) {
         self.format = format; self.vct = vct; self.docType = docType
-        self.proofSigningAlgs = proofSigningAlgs; self.scope = scope
+        self.proofSigningAlgs = proofSigningAlgs; self.proofTypesSupported = proofTypesSupported; self.scope = scope
         self.displayName = displayName; self.logoUri = logoUri; self.backgroundColor = backgroundColor
     }
 
@@ -209,6 +212,10 @@ public struct CredentialConfiguration {
         var proofAlgs: [String] = []
         if case let .arr(items)? = o["proof_types_supported"]?["jwt"]?["proof_signing_alg_values_supported"] {
             proofAlgs = items.compactMap { if case let .str(s) = $0 { return s } else { return nil } }
+        }
+        var proofTypes: Set<String> = []
+        if case let .obj(entries)? = o["proof_types_supported"] {
+            proofTypes = Set(entries.map { $0.0 })
         }
         var format = ""
         if case let .str(f)? = o["format"] { format = f }
@@ -225,7 +232,8 @@ public struct CredentialConfiguration {
             if case let .str(c)? = first["background_color"] { backgroundColor = c }
         }
         return CredentialConfiguration(format: format, vct: vct, docType: docType, proofSigningAlgs: proofAlgs,
-                                       scope: scope, displayName: displayName, logoUri: logoUri, backgroundColor: backgroundColor)
+                                       proofTypesSupported: proofTypes, scope: scope,
+                                       displayName: displayName, logoUri: logoUri, backgroundColor: backgroundColor)
     }
 }
 

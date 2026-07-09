@@ -80,12 +80,17 @@ public struct Openid4VciClient {
     private let metadataPolicy: IssuerMetadataPolicy
     /// Encrypted Credential Requests/Responses (§8.2, §10). Default: only when the issuer requires it.
     private let credentialEncryption: CredentialEncryption
+    /// §8.2.1 Appendix F.3: use the `attestation` proof type — a single Key Attestation JWT with no per-key
+    /// proof of possession — instead of `jwt` proofs. Only applies when a `keyAttestation` source is configured
+    /// and the issuer's config lists `attestation` in `proof_types_supported`; otherwise `jwt` is used.
+    private let preferAttestationProof: Bool
 
     public init(http: any HttpTransport, rng: any Rng, clock: @escaping () -> Int64,
                 clientId: String = "wallet-dev", clientAuth: WalletClientAuth? = nil,
                 keyAttestation: (any KeyAttestationSource)? = nil,
                 metadataPolicy: IssuerMetadataPolicy = .ignoreSigned,
-                credentialEncryption: CredentialEncryption = .whenRequired) {
+                credentialEncryption: CredentialEncryption = .whenRequired,
+                preferAttestationProof: Bool = false) {
         self.http = http
         self.rng = rng
         self.clock = clock
@@ -95,6 +100,7 @@ public struct Openid4VciClient {
         self.keyAttestation = keyAttestation
         self.metadataPolicy = metadataPolicy
         self.credentialEncryption = credentialEncryption
+        self.preferAttestationProof = preferAttestationProof
     }
 
     /// Client-attestation headers bound to the authorization server (empty when not configured).
@@ -379,16 +385,9 @@ public struct Openid4VciClient {
             cNonce = try await fetchCNonce(nonceEndpoint)
         }
 
-        // One key-proof per proof key (batch issuance yields one credential per proof).
-        let keyAttestationJwt = try await keyAttestation?.attestation(cNonce: cNonce)
-        var proofJwts: [JsonValue] = []
-        for pk in keys.proofKeys {
-            let proofSigner = KeyProofSigner(signer: pk.signer, publicKey: pk.publicKey, now: clock)
-            proofJwts.append(.str(try await proofSigner.proofJwt(
-                credentialIssuer: issuerMeta.credentialIssuer, cNonce: cNonce, clientId: clientId, keyAttestation: keyAttestationJwt)))
-        }
-
-        let requestFormat = issuerMeta.credentialConfigurationsSupported[configurationId]?.format ?? "dc+sd-jwt"
+        let config = issuerMeta.credentialConfigurationsSupported[configurationId]
+        let requestFormat = config?.format ?? "dc+sd-jwt"
+        let proofsValue = try await proofs(issuerMeta, config, cNonce, keys)
         let encryption = try CredentialEncryptionSession.negotiate(credentialEncryption, issuerMeta)
         // §8.2: when the token response bound credential_identifiers to this config, the request MUST use a
         // credential_identifier and MUST NOT send credential_configuration_id. We request the first dataset;
@@ -396,7 +395,7 @@ public struct Openid4VciClient {
         let credentialIdentifier = token.credentialIdentifiers[configurationId]?.first
         var entries: [(String, JsonValue)] = [
             credentialIdentifier.map { ("credential_identifier", JsonValue.str($0)) } ?? ("credential_configuration_id", .str(configurationId)),
-            ("proofs", .obj([("jwt", .arr(proofJwts))])),
+            ("proofs", proofsValue),
         ]
         if let encryption { entries.append(("credential_response_encryption", encryption.requestObject())) }
         let requestBody = JsonValue.obj(entries).serialize()
@@ -413,6 +412,27 @@ public struct Openid4VciClient {
         return CredentialResponse.fromObj(try credentialBody(credResp, encryption), requestedFormat: requestFormat)
             .withContext(accessToken: token.accessToken, credentialIssuer: issuerMeta.credentialIssuer, requestedFormat: requestFormat,
                          refreshToken: token.refreshToken, configurationId: configurationId)
+    }
+
+    /// The `proofs` object (§8.2.1). Uses the `attestation` proof type — a single Key Attestation JWT, no
+    /// per-key proof of possession (Appendix F.3) — when `preferAttestationProof` is set, a `keyAttestation`
+    /// source exists, and the issuer's config supports it; otherwise a `jwt` proof per proof key (Appendix F.1,
+    /// batch issuance), each carrying the Key Attestation in its header when configured.
+    private func proofs(_ issuerMeta: CredentialIssuerMetadata, _ config: CredentialConfiguration?,
+                        _ cNonce: String?, _ keys: IssuanceKeys) async throws -> JsonValue {
+        if preferAttestationProof, let attestationSource = keyAttestation,
+           config?.proofTypesSupported.contains("attestation") == true {
+            // Appendix F.3: exactly one Key Attestation JWT, its attested_keys are what the Credentials bind to.
+            return .obj([("attestation", .arr([.str(try await attestationSource.attestation(cNonce: cNonce))]))])
+        }
+        let keyAttestationJwt = try await keyAttestation?.attestation(cNonce: cNonce)
+        var proofJwts: [JsonValue] = []
+        for pk in keys.proofKeys {
+            let proofSigner = KeyProofSigner(signer: pk.signer, publicKey: pk.publicKey, now: clock)
+            proofJwts.append(.str(try await proofSigner.proofJwt(
+                credentialIssuer: issuerMeta.credentialIssuer, cNonce: cNonce, clientId: clientId, keyAttestation: keyAttestationJwt)))
+        }
+        return .obj([("jwt", .arr(proofJwts))])
     }
 
     /// §8.3: an encrypted Credential Response arrives as `application/jwt`, an unencrypted one as

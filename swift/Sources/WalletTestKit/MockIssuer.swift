@@ -36,6 +36,12 @@ public actor MockIssuer: HttpTransport {
     public private(set) var seenCredentialIdentifier: String?
     public private(set) var seenConfigurationId: String?
 
+    /// When true, the config advertises the `attestation` proof type (§8.2.1 Appendix F.3) in its metadata.
+    private var supportsAttestationProof = false
+    public func setSupportsAttestationProof(_ enabled: Bool) { supportsAttestationProof = enabled }
+    /// The `attestation`-proof Key Attestation JWT the last Credential Request carried (§8.2.1.3), if any.
+    public private(set) var seenAttestationProof: String?
+
     /* ---- OpenID4VCI §8.2/§10 encrypted Credential Requests & Responses ---- */
 
     /// When set, the metadata advertises request/response encryption. `required` forces the wallet to use it.
@@ -266,6 +272,25 @@ public actor MockIssuer: HttpTransport {
         // §8.2: exactly one of the two identifies the requested Credential Dataset.
         precondition((seenCredentialIdentifier == nil) != (seenConfigurationId == nil),
                      "Credential Request must carry exactly one of credential_identifier / credential_configuration_id")
+
+        // The wallet's response-encryption key, when it asked for one (§8.2).
+        let responseEncEarly = body["credential_response_encryption"]
+
+        // §8.2.1.3 attestation proof type: exactly one Key Attestation JWT, no per-key proof of possession.
+        if case let .arr(attestation)? = body["proofs"]?["attestation"], case let .str(attestationJwt)? = attestation.first {
+            seenAttestationProof = attestationJwt
+            let attClaims = try JsonValue.parse(String(decoding: try Jws.parse(attestationJwt).payloadBytes, as: UTF8.self))
+            guard case let .str(nonce)? = attClaims["nonce"], nonce == cNonce else { preconditionFailure("attestation nonce must equal the c_nonce") }
+            guard case let .arr(keyJwks)? = attClaims["attested_keys"] else { preconditionFailure("attestation missing attested_keys") }
+            var creds: [String] = []
+            for jwk in keyJwks {
+                guard let key = JwkEc.fromJson(jwk) else { continue }
+                creds.append(#"{"credential":"\#(try await issueSdJwtVc(holderKey: key))"}"#)
+            }
+            seenProofCount = creds.count
+            return try respond(#"{"credentials":[\#(creds.joined(separator: ","))],"notification_id":"n-1"}"#, responseEncEarly)
+        }
+
         guard case let .arr(jwts)? = body["proofs"]?["jwt"], !jwts.isEmpty else {
             preconditionFailure("no proof jwt")
         }
@@ -369,6 +394,7 @@ public actor MockIssuer: HttpTransport {
 
     private func issuerMetadata() -> String {
         let encryption = encryptionSupported ? requestEncryptionJson() + responseEncryptionJson() : ""
+        let attestation = supportsAttestationProof ? #","attestation":{"proof_signing_alg_values_supported":["ES256"]}"# : ""
         return """
         {"credential_issuer":"\(issuer)",
          \(encryption)"credential_endpoint":"\(issuer)/credential",
@@ -380,7 +406,7 @@ public actor MockIssuer: HttpTransport {
          "credential_configurations_supported":{
            "eu.europa.ec.eudi.pid.1":{"format":"dc+sd-jwt","vct":"eu.europa.ec.eudi.pid.1",
              "display":[{"name":"Personal ID","logo":{"uri":"https://logo.example/pid.png"},"background_color":"#123456"}],
-             "proof_types_supported":{"jwt":{"proof_signing_alg_values_supported":["ES256"]}}}}}
+             "proof_types_supported":{"jwt":{"proof_signing_alg_values_supported":["ES256"]}\(attestation)}}}}
         """
     }
 

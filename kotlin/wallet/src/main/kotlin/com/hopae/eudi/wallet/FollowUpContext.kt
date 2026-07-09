@@ -24,6 +24,12 @@ internal class FollowUpContext(
     val dpopKey: KeyHandle,
     val policy: CredentialPolicy,
 ) {
+    /** A copy with a fresh `transaction_id` — the issuer rotates it on each still-deferred (202) response. */
+    fun withTransactionId(transactionId: String?): FollowUpContext = FollowUpContext(
+        credentialIssuer, configurationId, requestedFormat, accessToken, refreshToken,
+        transactionId, notificationId, proofKeys, dpopKey, policy,
+    )
+
     /** Reconstructs the vci [CredentialResponse] carrying the follow-up context (public ctor, no `withContext`). */
     fun toCredentialResponse(): CredentialResponse = CredentialResponse(
         credentials = emptyList(),

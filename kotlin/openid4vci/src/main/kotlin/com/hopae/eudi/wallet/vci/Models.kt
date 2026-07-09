@@ -231,6 +231,11 @@ class CredentialResponse(
     val credentials: List<IssuedCredential>,
     val transactionId: String?,
     val notificationId: String?,
+    /**
+     * The `interval` (§8.3): the minimum seconds the wallet SHOULD wait before re-polling the deferred
+     * endpoint. REQUIRED alongside `transaction_id`; null when the credential was issued immediately.
+     */
+    val interval: Long? = null,
     /** Context for follow-ups (deferred poll, notification, reissuance) — set by the client, not parsed. */
     val accessToken: String? = null,
     val credentialIssuer: String? = null,
@@ -248,7 +253,7 @@ class CredentialResponse(
     internal fun withContext(
         accessToken: String?, credentialIssuer: String?, requestedFormat: String,
         refreshToken: String? = null, configurationId: String? = null,
-    ) = CredentialResponse(credentials, transactionId, notificationId, accessToken, credentialIssuer, requestedFormat, refreshToken, configurationId)
+    ) = CredentialResponse(credentials, transactionId, notificationId, interval, accessToken, credentialIssuer, requestedFormat, refreshToken, configurationId)
 
     companion object {
         fun fromObj(o: JsonValue.Obj, requestedFormat: String): CredentialResponse {
@@ -264,6 +269,7 @@ class CredentialResponse(
                 credentials = creds,
                 transactionId = o.str("transaction_id"),
                 notificationId = o.str("notification_id"),
+                interval = (o["interval"] as? JsonValue.NumInt)?.value,
             )
         }
     }

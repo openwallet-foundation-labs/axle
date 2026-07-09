@@ -186,13 +186,28 @@ public actor MockIssuer: HttpTransport {
         guard let token = accessToken else { return HttpResponse(status: 401, headers: [], body: [UInt8]("no token".utf8)) }
         precondition(request.headers.contains { $0.0 == "Authorization" && $0.1 == "DPoP \(token)" }, "bad auth")
         _ = try await verifyDpop(request, htm: "POST", htu: "\(issuer)/deferred_credential", accessToken: token)
+
+        // §9.1: the Deferred Credential Request is encrypted exactly like the Credential endpoint.
+        let contentType = request.headers.first { $0.0.caseInsensitiveCompare("Content-Type") == .orderedSame }?.1
+        let raw = String(bytes: request.body ?? [], encoding: .utf8) ?? ""
+        let plaintext: String
+        if contentType?.hasPrefix("application/jwt") == true {
+            seenEncryptedRequest = true
+            plaintext = String(bytes: try requestEncKey.decrypt(raw), encoding: .utf8) ?? ""
+        } else {
+            plaintext = raw
+        }
+        guard case .obj = try? JsonValue.parse(plaintext) else { preconditionFailure("bad deferred request body") }
+        let body = try JsonValue.parse(plaintext)
+        let responseEnc = body["credential_response_encryption"]
+
         deferredPollCount += 1
-        // First poll: not ready yet; second poll: issue.
+        // First poll: §9.2 re-deferral (HTTP 202 + interval + transaction_id); second poll: issue.
         if deferredPollCount < 2 {
-            return HttpResponse(status: 400, headers: [("Content-Type", "application/json")], body: [UInt8](#"{"error":"issuance_pending"}"#.utf8))
+            return try respond(#"{"transaction_id":"tx-1","interval":42}"#, responseEnc, status: 202)
         }
         let cred = try await issueSdJwtVc(holderKey: deferredHolderKey!)
-        return ok(#"{"credentials":[{"credential":"\#(cred)"}]}"#)
+        return try respond(#"{"credentials":[{"credential":"\#(cred)"}]}"#, responseEnc)
     }
 
     private func handleNotification(_ request: HttpRequest) throws -> HttpResponse {
@@ -245,9 +260,9 @@ public actor MockIssuer: HttpTransport {
         let responseEnc = body["credential_response_encryption"]
 
         if deferMode, case let .str(first) = jwts[0] {
-            // Defer: verify the proof, remember the holder key, return a transaction_id (no credential yet).
+            // Defer (§8.3): verify the proof, remember the holder key, return a transaction_id + interval.
             deferredHolderKey = try await verifyKeyProof(first)
-            return try respond(#"{"transaction_id":"tx-1","notification_id":"n-1"}"#, responseEnc)
+            return try respond(#"{"transaction_id":"tx-1","interval":300,"notification_id":"n-1"}"#, responseEnc, status: 202)
         }
 
         // One credential per proof (batch issuance), each bound to that proof's holder key.
@@ -261,8 +276,10 @@ public actor MockIssuer: HttpTransport {
     }
 
     /// Encrypts the Credential Response to the wallet's `jwk` when it requested encryption (§8.3 / §10).
-    private func respond(_ json: String, _ responseEnc: JsonValue?) throws -> HttpResponse {
-        guard let responseEnc, let jwk = responseEnc["jwk"] else { return ok(json) }
+    private func respond(_ json: String, _ responseEnc: JsonValue?, status: Int = 200) throws -> HttpResponse {
+        guard let responseEnc, let jwk = responseEnc["jwk"] else {
+            return HttpResponse(status: status, headers: [("Content-Type", "application/json")], body: [UInt8](json.utf8))
+        }
         guard case let .str(alg)? = jwk["alg"], alg == "ECDH-ES" else {
             preconditionFailure("§10 requires alg on the chosen JWK")
         }
@@ -272,7 +289,7 @@ public actor MockIssuer: HttpTransport {
         }
         seenResponseEnc = enc.rawValue
         let jwe = try Jwe.encryptEcdhEs(plaintext: [UInt8](json.utf8), recipient: recipient, enc: enc)
-        return HttpResponse(status: 200, headers: [("Content-Type", "application/jwt")], body: [UInt8](jwe.utf8))
+        return HttpResponse(status: status, headers: [("Content-Type", "application/jwt")], body: [UInt8](jwe.utf8))
     }
 
     /// Verifies a DPoP proof; returns its `nonce` claim (nil if absent). Fails on any invalidity.

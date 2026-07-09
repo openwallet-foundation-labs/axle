@@ -33,14 +33,20 @@ public struct IssuanceService {
             case let .fromOffer(offer): response = try await issueFromOffer(s, offer, request, built.keys)
             case let .fromIssuer(issuer): response = try await authorizationCodeFlow(s, issuer, request.configurationId, nil, built.keys)
             }
-            let id = response.isDeferred
-                ? try await persistDeferred(response, built, request)
-                : try await persistIssued(response, built.proofKeys.map { $0.handle }, built.dpopKey.handle, request.policy, existingId: nil)
+            // §9.2: the issuer may defer issuance — store the credential deferred and surface a .deferred
+            // state (with the retry instant) instead of .completed, so the host knows to resume later.
+            if response.isDeferred {
+                let id = try await persistDeferred(response, built, request)
+                s.emit(.deferred(credentialId: id, retryAfter: retryInstant(response)))
+                return
+            }
+            let id = try await persistIssued(response, built.proofKeys.map { $0.handle }, built.dpopKey.handle, request.policy, existingId: nil)
             s.emit(.completed(IssuanceResult(issued: [id])))
         }
     }
 
-    /// Retries a deferred credential (OpenID4VCI §9). Fails with `.deferredNotReady` if not ready.
+    /// Retries a deferred credential (OpenID4VCI §9). Ends in `.completed` when the issuer is ready, or
+    /// `.deferred` again (§9.2, HTTP 202) when it still needs more time.
     public func resumeDeferred(_ credentialId: CredentialId) -> IssuanceSession {
         session { s in
             s.emit(.processing)
@@ -49,9 +55,25 @@ public struct IssuanceService {
             let ctx = try FollowUpContext.decode(transactionContext)
             let keys = try await rebuildKeys(ctx)
             let response = try await catchingVci { try await vci.fetchDeferredCredential(ctx.toCredentialResponse(), keys: keys) }
+
+            // §9.2: still deferred — refresh the stored transaction_id + retryAfter and report .deferred again.
+            if response.isDeferred {
+                let retryAfter = retryInstant(response)
+                let refreshed = ctx.withTransactionId(response.transactionId).encode()
+                try await store.save(CredentialEnvelope(id: envelope.id, format: envelope.format, createdAt: envelope.createdAt,
+                                                        lifecycle: .deferred(transactionContext: refreshed, retryAfter: retryAfter), metadata: envelope.metadata))
+                s.emit(.deferred(credentialId: credentialId, retryAfter: retryAfter))
+                return
+            }
+
             let id = try await persistIssued(response, ctx.proofKeys, ctx.dpopKey, ctx.policy, existingId: credentialId)
             s.emit(.completed(IssuanceResult(issued: [id])))
         }
+    }
+
+    /// The §8.3 `interval` as an absolute instant, or nil when the issuer gave none.
+    private func retryInstant(_ response: CredentialResponse) -> Date? {
+        response.interval.map { clock.now().addingTimeInterval(TimeInterval($0)) }
     }
 
     /// Renews a credential via the stored refresh token (RFC 6749 §6) — rotates to fresh proof keys.
@@ -131,7 +153,7 @@ public struct IssuanceService {
         let id = newId()
         let format: CredentialFormat = ctx.requestedFormat == "mso_mdoc" ? .msoMdoc(docType: ctx.configurationId) : .sdJwtVc(vct: ctx.configurationId)
         try await store.save(CredentialEnvelope(id: id, format: format, createdAt: clock.now(),
-                                                lifecycle: .deferred(transactionContext: ctx.encode(), retryAfter: nil), metadata: await captureMetadata(response)))
+                                                lifecycle: .deferred(transactionContext: ctx.encode(), retryAfter: retryInstant(response)), metadata: await captureMetadata(response)))
         return id
     }
 
@@ -208,8 +230,6 @@ public struct IssuanceService {
             throw IssuanceError.invalidOffer(m)
         } catch VciError.oauth(let error, _, _) {
             throw IssuanceError.authorizationFailed(oauthError: error, message: error)
-        } catch VciError.issuancePending {
-            throw IssuanceError.deferredNotReady
         } catch let e as VciError {
             throw IssuanceError.credentialRequestFailed(String(describing: e))
         }

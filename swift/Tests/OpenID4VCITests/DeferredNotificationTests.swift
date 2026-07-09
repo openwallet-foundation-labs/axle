@@ -37,12 +37,12 @@ final class DeferredNotificationTests: XCTestCase {
         XCTAssertTrue(deferred.isDeferred, "issuer deferred issuance")
         XCTAssertEqual(0, deferred.credentials.count)
         XCTAssertNotNil(deferred.transactionId)
+        XCTAssertEqual(300, deferred.interval, "§8.3 interval is parsed")
 
-        // first poll: not ready yet
-        do {
-            _ = try await client.fetchDeferredCredential(deferred, keys: keys)
-            XCTFail("expected issuancePending")
-        } catch VciError.issuancePending {}
+        // first poll: §9.2 still-deferred — a fresh CredentialResponse that is again isDeferred, not an error.
+        let stillDeferred = try await client.fetchDeferredCredential(deferred, keys: keys)
+        XCTAssertTrue(stillDeferred.isDeferred, "issuer re-deferred")
+        XCTAssertEqual(42, stillDeferred.interval)
         // second poll: credential is ready
         let ready = try await client.fetchDeferredCredential(deferred, keys: keys)
         XCTAssertEqual(1, ready.credentials.count)

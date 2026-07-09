@@ -7,7 +7,6 @@ sealed class WalletError(message: String, cause: Throwable? = null) : Exception(
         class InvalidOffer(message: String) : Issuance("invalid offer: $message")
         class AuthorizationFailed(val oauthError: String?, message: String) : Issuance("authorization failed: $message")
         class CredentialRequestFailed(message: String, cause: Throwable? = null) : Issuance("credential request failed: $message", cause)
-        class DeferredNotReady : Issuance("deferred credential not ready")
         class Unexpected(cause: Throwable) : Issuance("unexpected issuance error: ${cause.message}", cause)
     }
 

@@ -41,9 +41,12 @@ class DeferredNotificationTest {
         assertTrue(deferred.isDeferred, "issuer deferred issuance")
         assertEquals(0, deferred.credentials.size)
         assertNotNull(deferred.transactionId)
+        assertEquals(300L, deferred.interval, "§8.3 interval is parsed")
 
-        // first poll: not ready yet
-        assertFailsWith<VciException.IssuancePending> { client.fetchDeferredCredential(deferred, keys) }
+        // first poll: §9.2 still-deferred — a fresh CredentialResponse that is again isDeferred, not an error.
+        val stillDeferred = client.fetchDeferredCredential(deferred, keys)
+        assertTrue(stillDeferred.isDeferred, "issuer re-deferred")
+        assertEquals(42L, stillDeferred.interval)
         // second poll: credential is ready
         val ready = client.fetchDeferredCredential(deferred, keys)
         assertEquals(1, ready.credentials.size)

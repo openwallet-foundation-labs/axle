@@ -444,7 +444,8 @@ public struct Openid4VciClient {
     }
 
     /// Polls the deferred credential endpoint (OpenID4VCI §9). Pass a `CredentialResponse` whose
-    /// `isDeferred` is true. Throws `VciError.issuancePending` if the issuer is still not ready.
+    /// `isDeferred` is true. Still not ready → the returned response is again `isDeferred` (§9.2, HTTP
+    /// 202); a real failure throws.
     public func fetchDeferredCredential(_ deferred: CredentialResponse, keys: IssuanceKeys) async throws -> CredentialResponse {
         guard let transactionId = deferred.transactionId else { throw VciError.protocolError("response has no transaction_id to defer") }
         guard let accessToken = deferred.accessToken else { throw VciError.protocolError("deferred response has no access token") }
@@ -452,14 +453,22 @@ public struct Openid4VciClient {
         guard let endpoint = issuerMeta.deferredCredentialEndpoint else { throw VciError.metadata("issuer has no deferred_credential_endpoint") }
 
         let dpop = DpopProver(signer: keys.dpopSigner, publicKey: keys.dpopPublicKey, rng: rng, now: clock)
-        let body = JsonValue.obj([("transaction_id", .str(transactionId))]).serialize()
+        // §9.1: the Deferred Credential Request/Response are encrypted exactly like the Credential endpoint.
+        let encryption = try CredentialEncryptionSession.negotiate(credentialEncryption, issuerMeta)
+        var entries: [(String, JsonValue)] = [("transaction_id", .str(transactionId))]
+        if let encryption { entries.append(("credential_response_encryption", encryption.requestObject())) }
+        let requestBody = JsonValue.obj(entries).serialize()
+
+        // §9.2: "still deferred" is an HTTP 202 re-deferral (transaction_id + interval), returned as a
+        // normal CredentialResponse the caller inspects via isDeferred — not an error.
         let response: HttpResponse
-        do {
-            response = try await postJsonWithDpop(endpoint, json: body, dpop: dpop, accessToken: accessToken)
-        } catch let VciError.oauth(error, _, _) where error == "issuance_pending" {
-            throw VciError.issuancePending
+        if let encryption {
+            response = try await postWithDpop(endpoint, body: try encryption.encryptRequest(requestBody),
+                                              contentType: "application/jwt", dpop: dpop, accessToken: accessToken)
+        } else {
+            response = try await postJsonWithDpop(endpoint, json: requestBody, dpop: dpop, accessToken: accessToken)
         }
-        return CredentialResponse.fromObj(try parseObj(response, "deferred credential"), requestedFormat: deferred.requestedFormat)
+        return CredentialResponse.fromObj(try credentialBody(response, encryption), requestedFormat: deferred.requestedFormat)
             .withContext(accessToken: accessToken, credentialIssuer: deferred.credentialIssuer, requestedFormat: deferred.requestedFormat)
     }
 

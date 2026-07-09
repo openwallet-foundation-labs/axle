@@ -77,8 +77,16 @@ sealed interface IssuanceState {
     /** The pre-authorized flow needs a transaction code; [txCode] carries the §4.1.1 input hints, if any. */
     data class TxCodeRequired(val txCode: TxCodeSpec? = null) : IssuanceState
     data object Processing : IssuanceState
+
+    /**
+     * The issuer is not ready yet (OpenID4VCI §9.2 deferred issuance): the credential is stored deferred
+     * under [credentialId]. Not a failure — call `resumeDeferred(credentialId)` again after [retryAfter]
+     * (the `interval` the issuer asked the wallet to wait), or immediately if it is null.
+     */
+    data class Deferred(val credentialId: CredentialId, val retryAfter: java.time.Instant?) : IssuanceState
+
     data class Completed(val result: IssuanceResult) : IssuanceState
     data class Failed(val error: WalletError.Issuance) : IssuanceState
 
-    val isTerminal: Boolean get() = this is Completed || this is Failed
+    val isTerminal: Boolean get() = this is Completed || this is Deferred || this is Failed
 }

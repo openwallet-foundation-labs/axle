@@ -72,12 +72,18 @@ public enum IssuanceState {
     /// The pre-authorized flow needs a transaction code; the associated value carries the §4.1.1 hints, if any.
     case txCodeRequired(TxCodeSpec?)
     case processing
+
+    /// The issuer is not ready yet (OpenID4VCI §9.2 deferred issuance): the credential is stored deferred
+    /// under `credentialId`. Not a failure — call `resumeDeferred(credentialId)` again after `retryAfter`
+    /// (the `interval` the issuer asked the wallet to wait), or immediately if it is nil.
+    case deferred(credentialId: CredentialId, retryAfter: Date?)
+
     case completed(IssuanceResult)
     case failed(IssuanceError)
 
     public var isTerminal: Bool {
         switch self {
-        case .completed, .failed: return true
+        case .completed, .deferred, .failed: return true
         default: return false
         }
     }

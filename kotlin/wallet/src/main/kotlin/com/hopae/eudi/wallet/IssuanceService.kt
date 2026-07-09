@@ -56,15 +56,21 @@ class IssuanceService internal constructor(
             is IssuanceRequest.Source.FromOffer -> issueFromOffer(this, source.offer, request, built.keys)
             is IssuanceRequest.Source.FromIssuer -> authorizationCodeFlow(this, source.credentialIssuer, request.configurationId, null, built.keys)
         }
-        val id = if (response.isDeferred) {
-            persistDeferred(response, built, request)
-        } else {
-            persistIssued(response, built.proofKeys.map { it.handle }, built.dpopKey.handle, request.policy, existingId = null)
+        // §9.2: the issuer may defer issuance — store the credential deferred and surface a Deferred
+        // state (with the retry instant) instead of Completed, so the host knows to resume later.
+        if (response.isDeferred) {
+            val id = persistDeferred(response, built, request)
+            emit(IssuanceState.Deferred(id, retryInstant(response)))
+            return@session
         }
+        val id = persistIssued(response, built.proofKeys.map { it.handle }, built.dpopKey.handle, request.policy, existingId = null)
         emit(IssuanceState.Completed(IssuanceResult(listOf(id))))
     }
 
-    /** Retries a deferred credential (OpenID4VCI §9). Fails with [WalletError.Issuance.DeferredNotReady] if not ready. */
+    /**
+     * Retries a deferred credential (OpenID4VCI §9). Ends in [IssuanceState.Completed] when the issuer
+     * is ready, or [IssuanceState.Deferred] again (§9.2, HTTP 202) when it still needs more time.
+     */
     fun resumeDeferred(credentialId: CredentialId): IssuanceSession = session {
         emit(IssuanceState.Processing)
         val envelope = store.get(credentialId) ?: throw WalletError.Issuance.CredentialRequestFailed("credential not found")
@@ -72,9 +78,23 @@ class IssuanceService internal constructor(
             ?: throw WalletError.Issuance.CredentialRequestFailed("credential is not deferred")
         val ctx = FollowUpContext.decode(deferred.transactionContext)
         val response = catchingVci { vci.fetchDeferredCredential(ctx.toCredentialResponse(), rebuildKeys(ctx)) }
+
+        // §9.2: still deferred — refresh the stored transaction_id + retryAfter and report Deferred again.
+        if (response.isDeferred) {
+            val retryAfter = retryInstant(response)
+            val refreshed = ctx.withTransactionId(response.transactionId).encode()
+            store.save(CredentialEnvelope(envelope.id, envelope.format, envelope.createdAt, EnvelopeLifecycle.Deferred(refreshed, retryAfter), envelope.metadata))
+            emit(IssuanceState.Deferred(credentialId, retryAfter))
+            return@session
+        }
+
         val id = persistIssued(response, ctx.proofKeys, ctx.dpopKey, ctx.policy, existingId = credentialId)
         emit(IssuanceState.Completed(IssuanceResult(listOf(id))))
     }
+
+    /** The §8.3 `interval` as an absolute instant, or null when the issuer gave none. */
+    private fun retryInstant(response: CredentialResponse): java.time.Instant? =
+        response.interval?.let { clock.now().plusSeconds(it) }
 
     /** Renews a credential via the stored refresh token (RFC 6749 §6) — rotates to fresh proof keys. */
     fun reissue(credentialId: CredentialId): IssuanceSession = session {
@@ -136,7 +156,7 @@ class IssuanceService internal constructor(
         val ctx = contextOf(response, built.proofKeys.map { it.handle }, built.dpopKey.handle, request.policy, request.configurationId)
         val id = newId()
         val format = if (ctx.requestedFormat == "mso_mdoc") CredentialFormat.MsoMdoc(ctx.configurationId) else CredentialFormat.SdJwtVc(ctx.configurationId)
-        store.save(CredentialEnvelope(id, format, clock.now(), EnvelopeLifecycle.Deferred(ctx.encode(), null), captureMetadata(response)))
+        store.save(CredentialEnvelope(id, format, clock.now(), EnvelopeLifecycle.Deferred(ctx.encode(), retryInstant(response)), captureMetadata(response)))
         return id
     }
 
@@ -221,7 +241,6 @@ class IssuanceService internal constructor(
         throw when (e) {
             is VciException.InvalidOffer -> WalletError.Issuance.InvalidOffer(e.message ?: "")
             is VciException.OAuthError -> WalletError.Issuance.AuthorizationFailed(e.oauthError, e.message ?: "")
-            is VciException.IssuancePending -> WalletError.Issuance.DeferredNotReady()
             else -> WalletError.Issuance.CredentialRequestFailed(e.message ?: "", e)
         }
     }

@@ -194,6 +194,7 @@ class MockIssuer(
 
     /** When true, /credential defers (returns a transaction_id); the credential comes from /deferred_credential. */
     var deferMode: Boolean = false
+
     private var deferredHolderKey: EcPublicKey? = null
     private var deferredPollCount = 0
     /** Test-observable: (notification_id, event) of the last notification received. */
@@ -204,14 +205,24 @@ class MockIssuer(
         val token = accessToken ?: return HttpResponse(401, emptyList(), "no token".encodeToByteArray())
         require(request.headers.any { it.first == "Authorization" && it.second == "DPoP $token" }) { "bad auth" }
         verifyDpop(request, "POST", "$issuer/deferred_credential", accessToken = token)
-        val body = JsonValue.parse(request.body!!.decodeToString()) as JsonValue.Obj
+
+        // §9.1: the Deferred Credential Request is encrypted exactly like the Credential endpoint.
+        val contentType = request.headers.firstOrNull { it.first.equals("Content-Type", true) }?.second
+        val raw = request.body!!.decodeToString()
+        val plaintext = if (contentType?.startsWith("application/jwt") == true) {
+            seenEncryptedRequest = true
+            requestEncKey.decrypt(raw).decodeToString()
+        } else raw
+        val body = JsonValue.parse(plaintext) as JsonValue.Obj
         require((body["transaction_id"] as JsonValue.Str).value == "tx-1") { "unknown transaction_id" }
+        val responseEnc = body["credential_response_encryption"] as? JsonValue.Obj
+
         deferredPollCount++
-        // First poll: not ready yet; second poll: issue.
+        // First poll: still deferred — §9.2 re-deferral (HTTP 202 + interval + transaction_id). Second: issue.
         if (deferredPollCount < 2) {
-            return HttpResponse(400, listOf("Content-Type" to "application/json"), """{"error":"issuance_pending"}""".encodeToByteArray())
+            return respond("""{"transaction_id":"tx-1","interval":42}""", responseEnc, status = 202)
         }
-        return ok("""{"credentials":[{"credential":"${issueSdJwtVc(deferredHolderKey!!)}"}]}""")
+        return respond("""{"credentials":[{"credential":"${issueSdJwtVc(deferredHolderKey!!)}"}]}""", responseEnc)
     }
 
     private fun handleNotification(request: HttpRequest): HttpResponse {
@@ -248,9 +259,9 @@ class MockIssuer(
         val responseEnc = body["credential_response_encryption"] as? JsonValue.Obj
 
         if (deferMode) {
-            // Defer: verify the proof, remember the holder key, return a transaction_id (no credential yet).
+            // Defer (§8.3): verify the proof, remember the holder key, return a transaction_id + interval.
             deferredHolderKey = verifyKeyProof(proofs.first())
-            return respond("""{"transaction_id":"tx-1","notification_id":"n-1"}""", responseEnc)
+            return respond("""{"transaction_id":"tx-1","interval":300,"notification_id":"n-1"}""", responseEnc, status = 202)
         }
 
         // One credential per proof (batch issuance), each bound to that proof's holder key.
@@ -259,15 +270,15 @@ class MockIssuer(
     }
 
     /** Encrypts the Credential Response to the wallet's `jwk` when it requested encryption (§8.3 / §10). */
-    private fun respond(json: String, responseEnc: JsonValue.Obj?): HttpResponse {
-        if (responseEnc == null) return ok(json)
+    private fun respond(json: String, responseEnc: JsonValue.Obj?, status: Int = 200): HttpResponse {
+        if (responseEnc == null) return HttpResponse(status, listOf("Content-Type" to "application/json"), json.encodeToByteArray())
         val jwk = responseEnc["jwk"] as? JsonValue.Obj ?: error("credential_response_encryption has no jwk")
         require((jwk["alg"] as? JsonValue.Str)?.value == "ECDH-ES") { "§10 requires alg on the chosen JWK" }
         val recipient = JwkEc.fromJson(jwk) ?: error("bad response-encryption jwk")
         val enc = JweEnc.from((responseEnc["enc"] as? JsonValue.Str)?.value ?: "") ?: error("bad enc")
         seenResponseEnc = enc.id
         val jwe = Jwe.encryptEcdhEs(json.encodeToByteArray(), recipient, enc)
-        return HttpResponse(200, listOf("Content-Type" to "application/jwt"), jwe.encodeToByteArray())
+        return HttpResponse(status, listOf("Content-Type" to "application/jwt"), jwe.encodeToByteArray())
     }
 
     /** Verifies a DPoP proof; returns its `nonce` claim (null if absent). Throws on any invalidity. */

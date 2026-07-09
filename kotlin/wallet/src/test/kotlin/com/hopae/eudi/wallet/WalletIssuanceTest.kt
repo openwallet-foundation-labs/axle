@@ -112,20 +112,33 @@ class WalletIssuanceTest {
 
     private suspend fun IssuanceSession.awaitTerminal(): IssuanceState = withTimeout(15_000) { state.first { it.isTerminal } }
 
+    /**
+     * OpenID4VCI §9.2 deferred issuance: an unready issuer defers (HTTP 202 + interval + transaction_id).
+     * The wallet reports Deferred with the retry instant — not a failure — and resuming after a still-
+     * deferred response reports Deferred again, until the credential is finally issued.
+     */
     @Test
-    fun deferredIssuancePollsUntilReady() = runBlocking {
+    fun deferredIssuanceReportsDeferredUntilReady() = runBlocking {
+        val now = 1_700_000_000L
         val area = SoftwareSecureArea()
         val issuerKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
-        val mock = MockIssuer(area, issuerKey, now = 1_700_000_000L).apply { deferMode = true }
-        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), InMemoryStorageDriver(), mock))
+        val mock = MockIssuer(area, issuerKey, now = now).apply { deferMode = true }
+        val fixedClock = com.hopae.eudi.wallet.spi.WalletClock { java.time.Instant.ofEpochSecond(now) }
+        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), InMemoryStorageDriver(), mock, clock = fixedClock))
 
         val offer = wallet.issuance.resolveOffer(mock.credentialOfferJson)
-        val id = (wallet.issuance.start(IssuanceRequest.fromOffer(offer, "eu.europa.ec.eudi.pid.1", txCode = "1234")).awaitTerminal() as IssuanceState.Completed).result.issued.single()
+
+        // start: the issuer defers immediately (interval 300 → retryAfter = now + 300s), not Completed.
+        val started = wallet.issuance.start(IssuanceRequest.fromOffer(offer, "eu.europa.ec.eudi.pid.1", txCode = "1234")).awaitTerminal()
+        assertTrue(started is IssuanceState.Deferred, "expected Deferred, got $started")
+        val id = started.credentialId
+        assertEquals(java.time.Instant.ofEpochSecond(now + 300), started.retryAfter)
         assertTrue(wallet.credentials.get(id)!!.lifecycle is Lifecycle.Deferred, "credential is deferred")
 
-        // first poll: not ready
+        // first poll: still deferred (interval 42 → fresh retryAfter), still Deferred not Failed.
         val t1 = wallet.issuance.resumeDeferred(id).awaitTerminal()
-        assertTrue(t1 is IssuanceState.Failed && t1.error is WalletError.Issuance.DeferredNotReady, "expected DeferredNotReady, got $t1")
+        assertTrue(t1 is IssuanceState.Deferred, "expected Deferred, got $t1")
+        assertEquals(java.time.Instant.ofEpochSecond(now + 42), t1.retryAfter)
 
         // second poll: ready
         val t2 = wallet.issuance.resumeDeferred(id).awaitTerminal()

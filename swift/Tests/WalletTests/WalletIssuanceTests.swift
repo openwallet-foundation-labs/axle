@@ -99,22 +99,39 @@ final class WalletIssuanceTests: XCTestCase {
         wallet.close()
     }
 
-    func testDeferredIssuancePollsUntilReady() async throws {
-        let (wallet, mock, _) = try await makeWallet()
-        await mock.setDeferMode(true)
-        let offer = try await wallet.issuance.resolveOffer(mock.credentialOfferJson)
-        guard case let .completed(r) = await drive(wallet.issuance.start(.fromOffer(offer, configurationId: "eu.europa.ec.eudi.pid.1", txCode: "1234"))) else { return XCTFail() }
-        let id = r.issued[0]
-        let deferred = try await wallet.credentials.get(id)!
-        if case .deferred = deferred.lifecycle {} else { XCTFail("expected deferred") }
+    private struct FixedClock: WalletClock {
+        let instant: Date
+        func now() -> Date { instant }
+    }
 
-        // first poll: not ready
-        guard case let .failed(e1) = await drive(wallet.issuance.resumeDeferred(id)) else { return XCTFail("expected failed") }
-        XCTAssertEqual(IssuanceError.deferredNotReady, e1)
+    /// OpenID4VCI §9.2 deferred issuance: an unready issuer defers (HTTP 202 + interval + transaction_id).
+    /// The wallet reports .deferred with the retry instant — not a failure — and resuming after a still-
+    /// deferred response reports .deferred again, until the credential is finally issued.
+    func testDeferredIssuanceReportsDeferredUntilReady() async throws {
+        let epoch: TimeInterval = 1_700_000_000
+        let area = SoftwareSecureArea()
+        let issuerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let mock = MockIssuer(area: area, issuerKey: issuerKey, now: Int64(epoch))
+        await mock.setDeferMode(true)
+        let wallet = Wallet.create(config: WalletConfig(),
+                                   ports: WalletPorts(secureAreas: [area], storage: InMemoryStorageDriver(), http: mock,
+                                                      clock: FixedClock(instant: Date(timeIntervalSince1970: epoch))))
+        let offer = try await wallet.issuance.resolveOffer(mock.credentialOfferJson)
+
+        // start: the issuer defers immediately (interval 300 → retryAfter = now + 300s), not .completed.
+        guard case let .deferred(id, retryAfter) = await drive(wallet.issuance.start(.fromOffer(offer, configurationId: "eu.europa.ec.eudi.pid.1", txCode: "1234"))) else {
+            return XCTFail("expected deferred")
+        }
+        XCTAssertEqual(Date(timeIntervalSince1970: epoch + 300), retryAfter)
+        if case .deferred = try await wallet.credentials.get(id)!.lifecycle {} else { XCTFail("credential is deferred") }
+
+        // first poll: still deferred (interval 42 → fresh retryAfter), still .deferred not .failed.
+        guard case let .deferred(_, retry1) = await drive(wallet.issuance.resumeDeferred(id)) else { return XCTFail("expected deferred") }
+        XCTAssertEqual(Date(timeIntervalSince1970: epoch + 42), retry1)
+
         // second poll: ready
         guard case .completed = await drive(wallet.issuance.resumeDeferred(id)) else { return XCTFail("expected completed") }
-        let issued = try await wallet.credentials.get(id)!
-        if case .issued = issued.lifecycle {} else { XCTFail("expected issued") }
+        if case .issued = try await wallet.credentials.get(id)!.lifecycle {} else { XCTFail("credential now issued") }
         wallet.close()
     }
 

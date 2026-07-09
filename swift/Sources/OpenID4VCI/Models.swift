@@ -282,6 +282,9 @@ public struct CredentialResponse {
     public let credentials: [IssuedCredential]
     public let transactionId: String?
     public let notificationId: String?
+    /// The `interval` (§8.3): the minimum seconds the wallet SHOULD wait before re-polling the deferred
+    /// endpoint. REQUIRED alongside `transaction_id`; nil when the credential was issued immediately.
+    public let interval: Int64?
     /// Context for follow-ups (deferred poll, notification, reissuance) — set by the client, not parsed.
     public let accessToken: String?
     public let credentialIssuer: String?
@@ -291,11 +294,13 @@ public struct CredentialResponse {
     public let configurationId: String?
 
     public init(credentials: [IssuedCredential], transactionId: String?, notificationId: String?,
+                interval: Int64? = nil,
                 accessToken: String? = nil, credentialIssuer: String? = nil, requestedFormat: String = "dc+sd-jwt",
                 refreshToken: String? = nil, configurationId: String? = nil) {
         self.credentials = credentials
         self.transactionId = transactionId
         self.notificationId = notificationId
+        self.interval = interval
         self.accessToken = accessToken
         self.credentialIssuer = credentialIssuer
         self.requestedFormat = requestedFormat
@@ -312,8 +317,8 @@ public struct CredentialResponse {
     func withContext(accessToken: String?, credentialIssuer: String?, requestedFormat: String,
                      refreshToken: String? = nil, configurationId: String? = nil) -> CredentialResponse {
         CredentialResponse(credentials: credentials, transactionId: transactionId, notificationId: notificationId,
-                           accessToken: accessToken, credentialIssuer: credentialIssuer, requestedFormat: requestedFormat,
-                           refreshToken: refreshToken, configurationId: configurationId)
+                           interval: interval, accessToken: accessToken, credentialIssuer: credentialIssuer,
+                           requestedFormat: requestedFormat, refreshToken: refreshToken, configurationId: configurationId)
     }
 
     public static func fromObj(_ o: JsonValue, requestedFormat: String) -> CredentialResponse {
@@ -329,6 +334,8 @@ public struct CredentialResponse {
         if case let .str(t)? = o["transaction_id"] { txId = t }
         var notifId: String?
         if case let .str(n)? = o["notification_id"] { notifId = n }
-        return CredentialResponse(credentials: creds, transactionId: txId, notificationId: notifId, requestedFormat: requestedFormat)
+        var interval: Int64?
+        if case let .numInt(i)? = o["interval"] { interval = i }
+        return CredentialResponse(credentials: creds, transactionId: txId, notificationId: notifId, interval: interval, requestedFormat: requestedFormat)
     }
 }

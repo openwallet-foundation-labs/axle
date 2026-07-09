@@ -17,6 +17,13 @@ struct FollowUpContext {
     let dpopKey: KeyHandle
     let policy: CredentialPolicy
 
+    /// A copy with a fresh `transaction_id` — the issuer rotates it on each still-deferred (202) response.
+    func withTransactionId(_ transactionId: String?) -> FollowUpContext {
+        FollowUpContext(credentialIssuer: credentialIssuer, configurationId: configurationId, requestedFormat: requestedFormat,
+                        accessToken: accessToken, refreshToken: refreshToken, transactionId: transactionId,
+                        notificationId: notificationId, proofKeys: proofKeys, dpopKey: dpopKey, policy: policy)
+    }
+
     /// Reconstructs the vci `CredentialResponse` carrying the follow-up context (public init).
     func toCredentialResponse() -> CredentialResponse {
         CredentialResponse(credentials: [], transactionId: transactionId, notificationId: notificationId,

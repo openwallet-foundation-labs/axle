@@ -27,7 +27,7 @@ Legend: ✅ implemented · 🟡 partial · ⬜ not yet.
 
 | Spec | Anchor version | Status |
 |---|---|---|
-| OpenID4VCI | 1.0 Final (2025-09-16) | ✅ `openid4vci` — pre-authorized & authorization-code (+PAR), offer resolution, scope-preferred; **signed metadata** (§12.2.2 `Accept` negotiation + §12.2.3 `application/jwt` with `typ`/`alg`/`sub`/`iat`/`exp` rules); **live-issued a real PID from `issuer.eudiw.dev`** and **live-verified signed metadata from `dev.issuer-backend.eudiw.dev`** (see `INTEROP.md`). **encrypted Credential Requests/Responses** (§8.2/§10, ECDH-ES + A*GCM, live-verified against `issuer.eudiw.dev`). Gaps: `attestation` proof type, `credential_identifiers`, deferred `interval`, encryption on the deferred endpoint — see audit below |
+| OpenID4VCI | 1.0 Final (2025-09-16) | ✅ `openid4vci` — pre-authorized & authorization-code (+PAR), offer resolution, scope-preferred; **signed metadata** (§12.2.2 `Accept` negotiation + §12.2.3 `application/jwt` with `typ`/`alg`/`sub`/`iat`/`exp` rules); **live-issued a real PID from `issuer.eudiw.dev`** and **live-verified signed metadata from `dev.issuer-backend.eudiw.dev`** (see `INTEROP.md`). **encrypted Credential Requests/Responses** (§8.2/§10, ECDH-ES + A*GCM, live-verified against `issuer.eudiw.dev`) — same on the **deferred endpoint** (§9.1); deferred issuance surfaces the §8.3 `interval` (`IssuanceState.Deferred(retryAfter)`) and handles §9.2 202 re-deferrals. Gaps: `attestation` proof type, `credential_identifiers` — see audit below |
 | PKCE | RFC 7636 (S256) | ✅ |
 | DPoP | RFC 9449 | ✅ jti/htm/htu/ath + DPoP-Nonce retry |
 | OAuth Attestation-Based Client Auth | draft (wallet attestation + PoP) | ✅ WUA client authentication during issuance |
@@ -79,7 +79,6 @@ Only what is 🟡/⬜ is listed; everything else in the tables above verified cl
 |---|---|---|
 | `attestation` proof type | §8.2.1.3 | ⬜ only `jwt` proofs sent (key attestation rides in the `key_attestation` JOSE header, which **is** implemented) |
 | `credential_identifier(s)` issuance flow | §3.4/§6.2/§8.2 | ⬜ requests always use `credential_configuration_id`; token-response `authorization_details` parsed-but-ignored (Kotlin) / not parsed (Swift) |
-| Deferred `interval` backoff | §8.3/§9.2 | ⬜ not parsed or honored (REQUIRED alongside `transaction_id`) |
 | `tx_code` input hints | §4.1.1 | ✅ exposed to the host as `TxCodeSpec` (length / input_mode / description) on `CredentialOffer` and `IssuanceState.TxCodeRequired`; `validate(code)` returns advisory violations. Not enforced by the SDK — the hints are for rendering, and a mismatch is the issuer's call, not ours (headless: no input screen to gate) |
 | `mso_mdoc` format | §3.3.1 | 🟡 opaque-string passthrough; live-tested Kotlin only, untested in Swift |
 
@@ -138,7 +137,7 @@ Not gaps to be closed later — decisions. Recorded so the matrix cannot be read
 | SD-JWT VC Type Metadata (§4: vct resolution, `extends`, display, claim metadata, schema) + `vct#integrity` | ⬜ largest single gap; §4.7 is a step of the verification algorithm |
 | OpenID4VP hardening: DCQL `multiple`/`trusted_authorities`, `require_cryptographic_holder_binding` | ⬜ |
 | iOS proximity transport (CoreBluetooth / CoreNFC) + BLE Ident characteristic + session termination (status 20) | ⬜ Android demo adapters only |
-| OpenID4VCI: `attestation` proof type, `credential_identifiers`, deferred `interval`, encryption on the deferred endpoint | ⬜ |
+| OpenID4VCI: `attestation` proof type, `credential_identifiers` | ⬜ |
 | NFC negotiated handover (18013-5 §8.2.2.1) | ⬜ |
 | LOTL Level 2 · CRL / OCSP real-time revocation | ⬜ trust hardening |
 | Wallet Provider backend end-to-end (WUA issue → verify loop) | 🟡 backend exists (`wallet-provider/`); e2e loop closure pending |

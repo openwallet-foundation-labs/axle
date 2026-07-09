@@ -5,7 +5,6 @@ public enum IssuanceError: Error, Equatable {
     case invalidOffer(String)
     case authorizationFailed(oauthError: String?, message: String)
     case credentialRequestFailed(String)
-    case deferredNotReady
     case unexpected(String)
 }
 

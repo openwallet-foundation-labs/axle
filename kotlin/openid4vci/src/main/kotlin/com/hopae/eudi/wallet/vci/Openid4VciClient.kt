@@ -427,7 +427,7 @@ class Openid4VciClient(
     /**
      * Polls the deferred credential endpoint (OpenID4VCI §9) for a credential the issuer was not
      * yet ready to issue. Pass the [CredentialResponse] whose [CredentialResponse.isDeferred] is true.
-     * @throws VciException.IssuancePending if the issuer is still not ready (retry later).
+     * Still not ready → the returned response is again `isDeferred` (§9.2, HTTP 202); a real failure throws.
      */
     suspend fun fetchDeferredCredential(deferred: CredentialResponse, keys: IssuanceKeys): CredentialResponse {
         val transactionId = deferred.transactionId
@@ -438,13 +438,25 @@ class Openid4VciClient(
             ?: throw VciException.MetadataError("issuer has no deferred_credential_endpoint")
 
         val dpop = DpopProver(keys.dpopSigner, keys.dpopPublicKey, rng, clock)
-        val body = JsonValue.Obj(listOf("transaction_id" to JsonValue.Str(transactionId))).serialize()
-        val response = try {
-            postJsonWithDpop(endpoint, body, dpop, accessToken)
-        } catch (e: VciException.OAuthError) {
-            if (e.oauthError == "issuance_pending") throw VciException.IssuancePending else throw e
+        // §9.1: the Deferred Credential Request/Response are encrypted exactly like the Credential
+        // endpoint (§8.2/§10). A fresh session per request — its own response-encryption key.
+        val encryption = CredentialEncryptionSession.negotiate(credentialEncryption, issuerMeta)
+        val requestBody = JsonValue.Obj(
+            buildList {
+                add("transaction_id" to JsonValue.Str(transactionId))
+                encryption?.let { add("credential_response_encryption" to it.requestObject()) }
+            }
+        ).serialize()
+
+        // §9.2: "still deferred" is an HTTP 202 re-deferral (transaction_id + interval), which comes back
+        // as a normal CredentialResponse the caller inspects via isDeferred — not an error. A real error
+        // (invalid_transaction_id, credential_request_denied) surfaces from postWithDpop as usual.
+        val response = if (encryption == null) {
+            postJsonWithDpop(endpoint, requestBody, dpop, accessToken)
+        } else {
+            postWithDpop(endpoint, encryption.encryptRequest(requestBody), "application/jwt", dpop, accessToken)
         }
-        return CredentialResponse.fromObj(parseObj(response, "deferred credential"), deferred.requestedFormat)
+        return CredentialResponse.fromObj(credentialBody(response, encryption), deferred.requestedFormat)
             .withContext(accessToken, deferred.credentialIssuer, deferred.requestedFormat)
     }
 

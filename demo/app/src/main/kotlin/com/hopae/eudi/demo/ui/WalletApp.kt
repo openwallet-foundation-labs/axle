@@ -298,6 +298,7 @@ private suspend fun runIssuance(
                 }
                 is IssuanceState.AuthorizationRequired -> openAuth(s.authorizationUrl, session)
                 is IssuanceState.Completed -> LogStore.log("✅ Issued ${s.result.issued.size} credential(s)")
+                is IssuanceState.Deferred -> LogStore.log("⏳ deferred — resume ${s.credentialId.value} after ${s.retryAfter ?: "now"}")
                 is IssuanceState.Failed -> LogStore.log("❌ ${s.error.message}")
                 else -> {}
             }

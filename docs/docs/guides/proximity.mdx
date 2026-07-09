@@ -508,3 +508,17 @@ Enclave the key purpose is fixed at creation, so a wallet holding sign-only cred
 them before switching. The SDK checks `SecureArea.capabilities.keyAgreement` and fails the session with
 a clear error rather than silently falling back to a signature.
 :::
+
+:::caution One key, one mechanism (§9.1.3.4)
+> A single mdoc authentication key shall not be used to produce both MACs and signatures during its
+> lifetime.
+
+Only the proximity path has an `EReaderKey`, so **the DC API (`org-iso-mdoc`) and OpenID4VP mdoc paths
+always sign**, whatever `proximityDeviceAuth` says. With the default `KeyUse.Rotate` policy the same
+DeviceKey is reused, so a wallet set to `Mac` that also presents over those paths makes one key do both
+— which the clause forbids, and which quietly undoes the deniability that `Mac` was chosen for.
+
+Issue the credential with `KeyUse.OneTime` and a batch (`CredentialPolicy(batchSize = n, use = OneTime)`)
+to satisfy the clause structurally: each DeviceKey is consumed by exactly one presentation, so it can
+never produce both. This is also what HAIP recommends for unlinkability.
+:::

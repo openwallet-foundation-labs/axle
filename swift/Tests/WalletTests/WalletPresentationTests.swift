@@ -93,12 +93,40 @@ final class WalletPresentationTests: XCTestCase {
             if case .requestResolved = state { session.decline() }
             if state.isTerminal { terminal = state; break }
         }
-        guard case .declined = terminal else { return XCTFail("terminal: \(String(describing: terminal))") }
+        guard case let .declined(redirectUri) = terminal else { return XCTFail("terminal: \(String(describing: terminal))") }
 
         let claims = await verifier.verifiedClaims
         XCTAssertNil(claims, "nothing presented on decline")
+        // §8.5: the verifier is told the user refused, and the wallet surfaces its redirect_uri.
+        let error = await verifier.errorResponse
+        XCTAssertEqual("access_denied", error?.error)
+        XCTAssertEqual("xyz", error?.state)
+        XCTAssertEqual("https://verifier.example/done", redirectUri)
         let entries = await logStore.all()
         XCTAssertEqual(.incomplete, entries[0].status)
+        wallet.close()
+    }
+
+    /// DC API has no response_uri: the refusal goes back to the platform, never to a verifier endpoint (§15.9.2).
+    func testDeclineOverDcApiReportsNothing() async throws {
+        let area = SoftwareSecureArea()
+        let storage = InMemoryStorageDriver()
+        let issuerPublic = try await seedPid(area, storage)
+        let verifier = MockVerifier(issuerPublic: issuerPublic)
+        let wallet = Wallet.create(config: WalletConfig(),
+                                   ports: WalletPorts(secureAreas: [area], storage: storage, http: verifier))
+
+        let session = wallet.presentation.startDcApi(await verifier.dcApiRequestObject(), origin: "https://verifier.example")
+        var terminal: PresentationState?
+        for await state in session.states {
+            if case .requestResolved = state { session.decline() }
+            if state.isTerminal { terminal = state; break }
+        }
+        guard case let .declined(redirectUri) = terminal else { return XCTFail("terminal: \(String(describing: terminal))") }
+
+        XCTAssertNil(redirectUri)
+        let error = await verifier.errorResponse
+        XCTAssertNil(error, "no error may be POSTed over the DC API")
         wallet.close()
     }
 

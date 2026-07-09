@@ -14,6 +14,15 @@ public actor MockVerifier: HttpTransport {
     private let encPubJwk: JsonValue
     private let encPrivD: [UInt8]
     public private(set) var verifiedClaims: JsonValue?
+
+    /// The Authorization Error Response the wallet POSTed instead of a `vp_token` (§8.5), if any.
+    public struct ErrorResponse: Sendable {
+        public let error: String
+        public let description: String?
+        public let state: String?
+    }
+    public private(set) var errorResponse: ErrorResponse?
+
     /// When true, the verifier rejects the submitted response with HTTP 400 (e.g. issuer not trusted).
     public var rejectResponse = false
     public func setRejectResponse(_ value: Bool) { rejectResponse = value }
@@ -41,6 +50,18 @@ public actor MockVerifier: HttpTransport {
             "&response_uri=\(enc(responseUri))&state=xyz&dcql_query=\(enc(dcql))&client_metadata=\(enc(clientMetadata))"
     }
 
+    /// An unsigned Digital Credentials API request object (Appendix A.3.1): the origin is the verifier's
+    /// identity, so it carries no `client_id` and no `response_uri` — nothing is ever POSTed for it.
+    public func dcApiRequestObject() -> String {
+        let dcql = #"{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{"vct_values":["urn:eudi:pid:1"]},"claims":[{"path":["family_name"]},{"path":["given_name"]}]}]}"#
+        return JsonValue.obj([
+            ("response_type", .str("vp_token")),
+            ("response_mode", .str("dc_api")),
+            ("nonce", .str(nonce)),
+            ("dcql_query", try! JsonValue.parse(dcql)),
+        ]).serialize()
+    }
+
     public func execute(_ request: HttpRequest) async throws -> HttpResponse {
         guard request.url == responseUri, request.method == .post else {
             return HttpResponse(status: 404, headers: [], body: [])
@@ -53,6 +74,12 @@ public actor MockVerifier: HttpTransport {
         for pair in bodyStr.split(separator: "&") {
             let kv = pair.split(separator: "=", maxSplits: 1)
             form[String(kv[0]).removingPercentEncoding ?? ""] = kv.count > 1 ? (String(kv[1]).removingPercentEncoding ?? "") : ""
+        }
+        // OpenID4VP §8.5: an Authorization Error Response lands on the same endpoint as the vp_token.
+        if let code = form["error"] {
+            errorResponse = ErrorResponse(error: code, description: form["error_description"], state: form["state"])
+            return HttpResponse(status: 200, headers: [("Content-Type", "application/json")],
+                                body: [UInt8](#"{"redirect_uri":"https://verifier.example/done"}"#.utf8))
         }
         let vpToken: JsonValue
         if let response = form["response"] {

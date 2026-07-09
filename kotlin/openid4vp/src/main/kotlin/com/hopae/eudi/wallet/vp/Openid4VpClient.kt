@@ -94,6 +94,30 @@ class Openid4VpClient(
         }
     }
 
+    /**
+     * Sends an Authorization Error Response (§8.5) to the verifier's `response_uri`: a form POST of
+     * `error` / `error_description` / `state`, symmetric to the success submission. Returns the
+     * verifier's `redirect_uri` when it supplies one — which the wallet MUST then follow.
+     *
+     * Only defined for the `direct_post` response modes. Over the Digital Credentials API there is no
+     * `response_uri`; the error is handed back to the platform, and §15.9.2 warns that returning
+     * protocol errors there can itself reveal whether the wallet holds a matching credential.
+     */
+    suspend fun reportError(
+        request: ResolvedRequest,
+        code: VpErrorCode,
+        description: String? = null,
+    ): SubmitResult {
+        val responseUri = request.responseUri
+            ?: throw VpException.Unsupported("error responses are only sent to a response_uri (direct_post)")
+        val form = buildString {
+            append("error=").append(enc(code.code))
+            description?.let { append("&error_description=").append(enc(it)) }
+            request.state?.let { append("&state=").append(enc(it)) }
+        }
+        return post(responseUri, form)
+    }
+
     private suspend fun buildVpToken(
         request: ResolvedRequest,
         matches: DcqlMatchResult,

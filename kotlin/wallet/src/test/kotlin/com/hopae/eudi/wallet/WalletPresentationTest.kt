@@ -121,7 +121,32 @@ class WalletPresentationTest {
         assertTrue(terminal is PresentationState.Declined, "terminal: $terminal")
 
         assertNull(verifier.verifiedClaims, "nothing presented on decline")
+        // §8.5: the verifier is told the user refused, and the wallet surfaces its redirect_uri.
+        val error = verifier.errorResponse
+        assertEquals("access_denied", error?.error)
+        assertEquals("xyz", error?.state)
+        assertEquals("https://verifier.example/done", (terminal as PresentationState.Declined).redirectUri)
         assertEquals(TransactionStatus.INCOMPLETE, logStore.all().single().status)
+        wallet.close()
+    }
+
+    /** DC API has no response_uri: the refusal goes back to the platform, never to a verifier endpoint (§15.9.2). */
+    @Test
+    fun declineOverDcApiReportsNothing() = runBlocking {
+        val area = SoftwareSecureArea()
+        val storage = InMemoryStorageDriver()
+        val issuerPublic = seedPid(area, storage)
+        val verifier = MockVerifier(issuerPublic)
+        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), storage, verifier))
+
+        val session = wallet.presentation.startDcApi(verifier.dcApiRequestObject(), "https://verifier.example")
+        withTimeout(15_000) { session.state.first { it is PresentationState.RequestResolved } }
+        session.decline()
+        val terminal = withTimeout(15_000) { session.state.first { it.isTerminal } }
+
+        assertTrue(terminal is PresentationState.Declined)
+        assertNull((terminal as PresentationState.Declined).redirectUri)
+        assertNull(verifier.errorResponse, "no error may be POSTed over the DC API")
         wallet.close()
     }
 

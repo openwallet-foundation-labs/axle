@@ -62,7 +62,12 @@ sealed interface PresentationState {
      * the JSON object to hand back to the platform for the Digital Credentials API flow. Exactly one is set.
      */
     data class Completed(val redirectUri: String?, val dcApiResponse: String? = null) : PresentationState
-    data object Declined : PresentationState
+
+    /**
+     * The user refused. For the remote flow the wallet has told the verifier (`access_denied`, §8.5);
+     * [redirectUri] is the URI the verifier asked the wallet to send the user agent to, if any.
+     */
+    data class Declined(val redirectUri: String? = null) : PresentationState
     data class Failed(val error: WalletError.Presentation) : PresentationState
 
     val isTerminal: Boolean get() = this is Completed || this is Declined || this is Failed

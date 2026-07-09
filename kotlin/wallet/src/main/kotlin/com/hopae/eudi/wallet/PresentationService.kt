@@ -25,6 +25,7 @@ import com.hopae.eudi.wallet.vp.HeldSdJwtVc
 import com.hopae.eudi.wallet.vp.Openid4VpClient
 import com.hopae.eudi.wallet.vp.PresentableCredential
 import com.hopae.eudi.wallet.vp.ResolvedRequest
+import com.hopae.eudi.wallet.vp.VpErrorCode
 import com.hopae.eudi.wallet.vp.VpException
 import kotlinx.coroutines.CoroutineScope
 import com.hopae.eudi.wallet.vp.PresentationSelection as VpSelection
@@ -78,7 +79,15 @@ class PresentationService internal constructor(
             when (val selection = awaitDecision(request)) {
                 null -> {
                     recordDeclined(resolved)
-                    emit(PresentationState.Declined)
+                    // §8.5: tell the verifier the user refused so it stops waiting. Best-effort — an
+                    // unreachable verifier must not turn a decline into a failure. DC API has no
+                    // response_uri; there the platform surfaces the refusal (§15.9.2).
+                    val redirectUri = resolved.responseUri?.let {
+                        runCatching {
+                            vp.reportError(resolved, VpErrorCode.ACCESS_DENIED, "the user declined to share the requested credentials")
+                        }.getOrNull()?.redirectUri
+                    }
+                    emit(PresentationState.Declined(redirectUri))
                 }
                 else -> {
                     if (selection.chosen.isEmpty()) throw WalletError.Presentation.SelectionIncomplete("no credential selected")

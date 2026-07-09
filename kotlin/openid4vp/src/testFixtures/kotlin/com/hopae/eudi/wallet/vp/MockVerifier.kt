@@ -36,6 +36,10 @@ class MockVerifier(
     private val encPrivD: ByteArray
 
     var verifiedClaims: JsonValue.Obj? = null
+
+    /** The Authorization Error Response the wallet POSTed instead of a `vp_token` (§8.5), if any. */
+    class ErrorResponse(val error: String, val description: String?, val state: String?)
+    var errorResponse: ErrorResponse? = null
         private set
 
     init {
@@ -58,11 +62,29 @@ class MockVerifier(
             "&dcql_query=${enc(dcqlQuery)}&client_metadata=${enc(clientMetadata)}"
     }
 
+    /**
+     * An unsigned Digital Credentials API request object (Appendix A.3.1): the origin is the verifier's
+     * identity, so it carries no `client_id` and no `response_uri` — nothing is ever POSTed for it.
+     */
+    fun dcApiRequestObject(): String = JsonValue.Obj(
+        listOf(
+            "response_type" to JsonValue.Str("vp_token"),
+            "response_mode" to JsonValue.Str("dc_api"),
+            "nonce" to JsonValue.Str(nonce),
+            "dcql_query" to JsonValue.parse(DEFAULT_PID_QUERY),
+        )
+    ).serialize()
+
     override suspend fun execute(request: HttpRequest): HttpResponse {
         if (request.url != responseUri || request.method != HttpMethod.POST) return HttpResponse(404, emptyList(), ByteArray(0))
         if (rejectResponse) return HttpResponse(400, emptyList(), """{"error":"invalid_vp_token"}""".encodeToByteArray())
         val form = request.body!!.decodeToString().split('&').associate {
             URLDecoder.decode(it.substringBefore('='), "UTF-8") to URLDecoder.decode(it.substringAfter('='), "UTF-8")
+        }
+        // OpenID4VP §8.5: an Authorization Error Response lands on the same endpoint as the vp_token.
+        form["error"]?.let { code ->
+            errorResponse = ErrorResponse(code, form["error_description"], form["state"])
+            return HttpResponse(200, listOf("Content-Type" to "application/json"), """{"redirect_uri":"https://verifier.example/done"}""".encodeToByteArray())
         }
         val vpTokenJson = when {
             form["response"] != null -> Jwe.decryptEcdhEs(form["response"]!!, encPrivD, EcCurve.P256).decodeToString()

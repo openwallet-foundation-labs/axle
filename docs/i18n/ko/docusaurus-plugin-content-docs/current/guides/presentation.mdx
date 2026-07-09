@@ -23,7 +23,7 @@ SDK는 검증자(verifier)의 요청을 해석하고, 저장된 크리덴셜과 
 | resolve | `ResolvingRequest` → `RequestResolved(request)` | `.resolvingRequest` → `.requestResolved(request)` |
 | consent | *(여러분의 UI — `respond` / `decline`)* | *(여러분의 UI — `respond` / `decline`)* |
 | submit | `Submitting` | `.submitting` |
-| terminal | `Completed(redirectUri, dcApiResponse)` · `Declined` · `Failed(error)` | `.completed(redirectUri:, dcApiResponse:)` · `.declined` · `.failed(error)` |
+| terminal | `Completed(redirectUri, dcApiResponse)` · `Declined(redirectUri)` · `Failed(error)` | `.completed(redirectUri:, dcApiResponse:)` · `.declined(redirectUri:)` · `.failed(error)` |
 
 `state.isTerminal`은 `Completed`, `Declined`, `Failed`에서 `true`입니다.
 
@@ -130,7 +130,7 @@ session.respond(PresentationSelection.auto(request))   // or a user-chosen selec
 val done = session.state.first { it.isTerminal }
 when (done) {
     is PresentationState.Completed -> done.redirectUri   // optional redirect after success
-    is PresentationState.Declined  -> { /* user refused */ }
+    is PresentationState.Declined  -> done.redirectUri   // verifier에 `access_denied` 통지됨; 리다이렉트 따라가기
     is PresentationState.Failed    -> done.error
     else -> {}
 }
@@ -146,7 +146,7 @@ session.respond(PresentationSelection.auto(request))   // or a user-chosen selec
 for await state in session.states {
     switch state {
     case let .completed(redirectUri, _): _ = redirectUri   // optional redirect after success
-    case .declined: break                                  // user refused
+    case let .declined(redirectUri): _ = redirectUri       // verifier에 `access_denied` 통지됨; 리다이렉트 따라가기
     case let .failed(error): _ = error
     default: break
     }
@@ -256,3 +256,29 @@ DC API 핸드오버에 포함되므로, 응답을 다른 사이트에서 재생(
 요청은 해석되지 않으며, 세션은 `VerifierNotTrusted` 오류와 함께 `Failed`로 종료됩니다. 리더 앵커를
 구성하지 않은 경우에도 요청은 여전히 해석되지만 신뢰되지 않은 상태(`trusted == false`)로 도착하며, 이를
 사용자에게 반영하는 것은 여러분 UI의 책임입니다.
+
+서명된 요청 객체는 OpenID4VP §5 규칙으로도 검사됩니다: JOSE `typ`는 반드시 `oauth-authz-req+jwt`여야 하고,
+요청 객체의 `client_id`는 인가 요청의 것과 prefix까지 동일해야 합니다. `request_uri_method=post`에서는 SDK가
+새 `wallet_nonce`를 보내고, verifier가 이를 그대로 되돌려주지 않으면 요청 처리를 중단합니다.
+
+## 거절을 verifier에게 알리기 (§8.5)
+
+사용자가 **원격** 제시를 거절하면, SDK는 verifier의 `response_uri`로 인가 오류 응답을 POST 합니다 —
+`vp_token`이 갔을 바로 그 엔드포인트입니다:
+
+```
+error=access_denied&error_description=…&state=…
+```
+
+이게 없으면 verifier 페이지는 타임아웃까지 그냥 기다립니다. verifier는 `redirect_uri`로 답할 수 있고, SDK는
+이를 `Declined(redirectUri)`로 노출합니다. 값이 있으면 사용자 에이전트를 그곳으로 **반드시** 보내야 합니다.
+
+`access_denied`는 *"사용자가 거절함"*과 *"지갑에 해당 크리덴셜이 없음"*을 **의도적으로 같이** 덮습니다. 그래서
+verifier는 둘을 구분할 수 없습니다. 다른 상황을 직접 알리려면 `VpErrorCode` taxonomy와 함께
+`Openid4VpClient.reportError(request, code)`를 쓰세요.
+
+:::note DC API에서는 아무것도 보내지 않습니다
+Digital Credentials API 요청에는 `response_uri`가 없고, OpenID4VP §15.9.2는 거기서 프로토콜 오류를 돌려주는
+것 자체가 사용자가 해당 크리덴셜을 보유했음을 드러낼 수 있다고 경고합니다 — 플랫폼이 요청을 만족하는 지갑만
+선택지로 띄우기 때문입니다. 거절은 대신 플랫폼으로 전달됩니다.
+:::

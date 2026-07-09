@@ -57,7 +57,9 @@ public enum PresentationState {
     /// Success. `redirectUri` is the verifier redirect for the remote (URL/QR) flow; `dcApiResponse` is
     /// the JSON object to hand back to the platform for the Digital Credentials API flow. Exactly one is set.
     case completed(redirectUri: String?, dcApiResponse: String?)
-    case declined
+    /// The user refused. For the remote flow the wallet has told the verifier (`access_denied`, §8.5);
+    /// `redirectUri` is the URI the verifier asked the wallet to send the user agent to, if any.
+    case declined(redirectUri: String?)
     case failed(PresentationError)
 
     public var isTerminal: Bool {

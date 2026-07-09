@@ -23,7 +23,7 @@ Every presentation walks the same states. The `resolve` and `submit` phases are 
 | resolve | `ResolvingRequest` → `RequestResolved(request)` | `.resolvingRequest` → `.requestResolved(request)` |
 | consent | *(your UI — `respond` / `decline`)* | *(your UI — `respond` / `decline`)* |
 | submit | `Submitting` | `.submitting` |
-| terminal | `Completed(redirectUri, dcApiResponse)` · `Declined` · `Failed(error)` | `.completed(redirectUri:, dcApiResponse:)` · `.declined` · `.failed(error)` |
+| terminal | `Completed(redirectUri, dcApiResponse)` · `Declined(redirectUri)` · `Failed(error)` | `.completed(redirectUri:, dcApiResponse:)` · `.declined(redirectUri:)` · `.failed(error)` |
 
 `state.isTerminal` is `true` for `Completed`, `Declined`, and `Failed`.
 
@@ -126,7 +126,7 @@ session.respond(PresentationSelection.auto(request))   // or a user-chosen selec
 val done = session.state.first { it.isTerminal }
 when (done) {
     is PresentationState.Completed -> done.redirectUri   // optional redirect after success
-    is PresentationState.Declined  -> { /* user refused */ }
+    is PresentationState.Declined  -> done.redirectUri   // verifier told `access_denied`; follow its redirect
     is PresentationState.Failed    -> done.error
     else -> {}
 }
@@ -142,7 +142,7 @@ session.respond(PresentationSelection.auto(request))   // or a user-chosen selec
 for await state in session.states {
     switch state {
     case let .completed(redirectUri, _): _ = redirectUri   // optional redirect after success
-    case .declined: break                                  // user refused
+    case let .declined(redirectUri): _ = redirectUri       // verifier told `access_denied`; follow its redirect
     case let .failed(error): _ = error
     default: break
     }
@@ -253,3 +253,31 @@ Only when all three hold is `request.verifier.trusted == true`. A signed request
 does not resolve — the session ends in `Failed` with a `VerifierNotTrusted` error. With no reader anchors
 configured, requests still resolve but arrive as untrusted (`trusted == false`), and it is your UI's
 responsibility to reflect that to the user.
+
+Signed request objects are also checked against OpenID4VP §5: the JOSE `typ` must be
+`oauth-authz-req+jwt`, and the object's `client_id` must equal the one in the authorization request,
+prefix included. On `request_uri_method=post` the SDK sends a fresh `wallet_nonce` and terminates the
+request unless the verifier echoes it back.
+
+## Telling the verifier you refused (§8.5)
+
+When the user declines a **remote** presentation, the SDK POSTs an Authorization Error Response to the
+verifier's `response_uri` — the same endpoint a `vp_token` would have gone to:
+
+```
+error=access_denied&error_description=…&state=…
+```
+
+Without it the verifier's page just waits until it times out. The verifier may answer with a
+`redirect_uri`, which the SDK surfaces as `Declined(redirectUri)`; when present you **must** send the
+user agent there.
+
+`access_denied` deliberately covers both *"the user refused"* and *"the wallet holds no matching
+credential"*, so a verifier cannot tell the two apart. Use `Openid4VpClient.reportError(request, code)`
+with the `VpErrorCode` taxonomy to report other conditions yourself.
+
+:::note Nothing is reported over the DC API
+A Digital Credentials API request has no `response_uri`, and OpenID4VP §15.9.2 warns that returning
+protocol errors there can itself reveal that the user holds a matching credential — the platform only
+offers wallets that can satisfy the request. The refusal goes back to the platform instead.
+:::

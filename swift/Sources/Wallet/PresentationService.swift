@@ -62,7 +62,17 @@ public struct PresentationService {
             switch await s.awaitDecision(request) {
             case .none:
                 try await recordDeclined(resolved)
-                s.emit(.declined)
+                // §8.5: tell the verifier the user refused so it stops waiting. Best-effort — an
+                // unreachable verifier must not turn a decline into a failure. DC API has no
+                // response_uri; there the platform surfaces the refusal (§15.9.2).
+                var redirectUri: String?
+                if resolved.responseUri != nil {
+                    redirectUri = try? await vp.reportError(
+                        resolved, code: .accessDenied,
+                        description: "the user declined to share the requested credentials"
+                    ).redirectUri
+                }
+                s.emit(.declined(redirectUri: redirectUri))
             case let .some(selection):
                 if selection.chosen.isEmpty { throw PresentationError.selectionIncomplete("no credential selected") }
                 s.emit(.submitting)

@@ -92,6 +92,27 @@ public struct Openid4VpClient {
         }
     }
 
+    /// Sends an Authorization Error Response (§8.5) to the verifier's `response_uri`: a form POST of
+    /// `error` / `error_description` / `state`, symmetric to the success submission. Returns the
+    /// verifier's `redirect_uri` when it supplies one — which the wallet MUST then follow.
+    ///
+    /// Only defined for the `direct_post` response modes. Over the Digital Credentials API there is no
+    /// `response_uri`; the error is handed back to the platform, and §15.9.2 warns that returning
+    /// protocol errors there can itself reveal whether the wallet holds a matching credential.
+    public func reportError(
+        _ request: ResolvedRequest,
+        code: VpErrorCode,
+        description: String? = nil
+    ) async throws -> SubmitResult {
+        guard let responseUri = request.responseUri else {
+            throw VpError.unsupported("error responses are only sent to a response_uri (direct_post)")
+        }
+        var form = "error=\(enc(code.code))"
+        if let description { form += "&error_description=\(enc(description))" }
+        if let state = request.state { form += "&state=\(enc(state))" }
+        return try await post(responseUri, form)
+    }
+
     private func buildVpToken(
         request: ResolvedRequest,
         matches: DcqlMatchResult,

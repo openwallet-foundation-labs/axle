@@ -26,8 +26,8 @@ Buckets, most important first: **P1 (do now)** · **P2 (scoped)** · **Deferred*
   `readerEngagement`, and `nfcHandover(hs, hr)` binding `[Hs, Hr]` (static stays `[Hs, null]`, default).
   Wired into the wallet services: `ProximityService.present` and `ProximityReaderService.read` gained an
   optional `handoverRequestNdef` (default null → static). Negotiated round-trip e2e both languages (first
-  e2e coverage of the service NFC path). **Not done — separate track:** the demo/host NFC transport
-  choreography for negotiated (reader writes Hr → holder reads → holder writes Hs); see transport track.
+  e2e coverage of the service NFC path). **Transport choreography — done** (see transport hardening: TNEP
+  over Type-4 HCE, `NfcEngagementProcessor` / `MdocNfcHandover`, device-verified negotiated read).
 - [x] **#5 · DeviceResponse status on the reader — 18013-5 §8.3.2.1.2.3** — commit `74b2cb3`.
   Spike → scoped to **status only**. `MdocReader.verifyDeviceResponse` and `ProximityReaderService.read`
   surface a non-zero DeviceResponse status (Table 8: 10/11/12 → no documents, with a reason) instead of
@@ -95,6 +95,15 @@ are not lost; each deserves its own triage.
     `CardEmulation.setPreferredService` (released in `onDispose`), making our service the deterministic tap
     target. Device-verified: `dumpsys nfc` foreground service flips `null` → our service while armed, and the
     physical two-phone tap no longer raises the conflict dialog.
+  - [x] **NFC negotiated-handover transport (TNEP)** — the SDK bound `[Hs, Hr]` but the on-wire choreography was
+    unimplemented, so the demo only ever ran static handover. Added, in the **SDK** (`kotlin/proximity`, pure +
+    unit-tested): TNEP records (`NfcTnep`), the holder Type-4 HCE state machine (`NfcEngagementProcessor`,
+    static XOR negotiated, `hr→hs` suspend callback), and the reader driver (`MdocNfcHandover`, auto-detects
+    static vs the TNEP dance: Service Select → status → Hr↔Hs). `android/proximity` is a thin bridge
+    (`NfcEngagementService` async `sendResponseApdu`; `NfcReader` over IsoDep). Demo: holder `NFC·Nego` chip
+    (static stays default + untouched), reader auto-detects. `present`/`read` unchanged. Device-verified: two
+    phones, holder in negotiated mode → reader auto-detected TNEP, bound `[Hs, Hr]`, read 1 document (decryption
+    success ⇒ transcripts matched). Loopback unit test covers static + negotiated + read-only + reset.
   - **#31 promote demo adapters into supported Android library modules** — new `android/` composite build:
     - [x] Phase 1: `android/core` (`com.hopae.eudi.android:core`) — SecureArea, Storage, TxLogStore, Http
       adapters; `OkHttpTransport` decoupled from `LogStore` via an injected `WalletLogger`. Device-verified (`c10e9a8`).

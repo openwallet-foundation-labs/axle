@@ -49,7 +49,9 @@ import com.hopae.eudi.wallet.android.proximity.BleGattServerTransport
 import com.hopae.eudi.wallet.android.proximity.NfcEngagementService
 import com.hopae.eudi.wallet.android.proximity.NfcReader
 import com.hopae.eudi.wallet.proximity.MdocNfcEngagement
+import com.hopae.eudi.wallet.proximity.NfcEngagementProcessor
 import com.hopae.eudi.wallet.proximity.DeviceEngagement
+import kotlinx.coroutines.flow.first
 import com.hopae.eudi.wallet.spi.ProximityTransport
 import java.util.UUID
 import com.hopae.eudi.wallet.ProximityRequest
@@ -91,7 +93,7 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
     val context = LocalContext.current
     var status by remember { mutableStateOf("Preparing…") }
     var qr by remember { mutableStateOf<Bitmap?>(null) }
-    var mode by remember { mutableStateOf(0) } // 0 = QR peripheral, 1 = QR central, 2 = NFC (peripheral)
+    var mode by remember { mutableStateOf(0) } // 0 = QR peripheral, 1 = QR central, 2 = NFC static, 3 = NFC negotiated
     var session by remember { mutableStateOf<ProximitySession?>(null) }
     var pending by remember { mutableStateOf<ProximityRequest?>(null) } // reader's request, awaiting the user's consent
     var granted by remember { mutableStateOf(BLE_PERMISSIONS.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }) }
@@ -106,7 +108,8 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
         qr = null
         pending = null
         val central = mode == 1
-        val nfc = mode == 2
+        val nfc = mode == 2 || mode == 3
+        val negotiated = mode == 3
         // NFC: win the HCE routing conflict while presenting (other wallets register the same NDEF AID).
         if (nfc) (context as? android.app.Activity)?.let { NfcEngagementService.requestForeground(it) }
         val uuid = UUID.randomUUID()
@@ -119,44 +122,63 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
         val transport: ProximityTransport = server ?: client!!
         server?.start()
         if (client != null) scope.launch { runCatching { client.connect() } }
-        scope.launch {
-            try {
-                val s = wallet.proximity.present(transport, nfc = nfc)
-                session = s
-                s.state.collect { st ->
-                    when (st) {
-                        is ProximityState.EngagementReady -> {
-                            // Central client mode: arm Ident verification now that the engagement (EDeviceKey) exists.
-                            client?.armIdent(DeviceEngagement.eDeviceKeyBytes(st.deviceEngagement))
-                            val ndef = st.handoverNdef
-                            if (ndef != null) { // NFC static handover — serve over HCE, no QR
-                                NfcEngagementService.ndefMessage = ndef
-                                qr = null
-                                status = "Tap your phone to the reader"
-                            } else {
-                                qr = encodeQr("mdoc:" + b64(st.deviceEngagement))
-                                status = "Waiting for a reader — show this QR"
-                            }
+
+        // Drive one presentation session's state → engagement display, consent, and completion UI.
+        suspend fun driveSession(s: ProximitySession) {
+            session = s
+            s.state.collect { st ->
+                when (st) {
+                    is ProximityState.EngagementReady -> {
+                        // Central client mode: arm Ident verification now that the engagement (EDeviceKey) exists.
+                        client?.armIdent(DeviceEngagement.eDeviceKeyBytes(st.deviceEngagement))
+                        val ndef = st.handoverNdef
+                        when {
+                            ndef == null -> { qr = encodeQr("mdoc:" + b64(st.deviceEngagement)); status = "Waiting for a reader — show this QR" }
+                            !negotiated -> { NfcEngagementService.processor = NfcEngagementProcessor(staticHandoverSelect = ndef); qr = null; status = "Tap your phone to the reader" }
+                            else -> { qr = null; status = "Negotiating over NFC…" } // negotiated: the processor is already armed
                         }
-                        is ProximityState.RequestReceived -> {
-                            pending = st.request // ask the user before sending (like OpenID4VP consent)
-                            status = "Reader connected — review the request"
-                            LogStore.log("Proximity: reader requested ${st.request.documents.size} doc(s); awaiting consent")
-                        }
-                        ProximityState.Submitting -> { pending = null; status = "Sending response…" }
-                        ProximityState.Completed -> { pending = null; status = "✅ Presented to the reader" }
-                        ProximityState.Declined -> { pending = null; status = "Declined" }
-                        is ProximityState.Failed -> { pending = null; status = "❌ ${st.error.message}" }
-                        else -> {}
                     }
+                    is ProximityState.RequestReceived -> {
+                        pending = st.request // ask the user before sending (like OpenID4VP consent)
+                        status = "Reader connected — review the request"
+                        LogStore.log("Proximity: reader requested ${st.request.documents.size} doc(s); awaiting consent")
+                    }
+                    ProximityState.Submitting -> { pending = null; status = "Sending response…" }
+                    ProximityState.Completed -> { pending = null; status = "✅ Presented to the reader" }
+                    ProximityState.Declined -> { pending = null; status = "Declined" }
+                    is ProximityState.Failed -> { pending = null; status = "❌ ${st.error.message}" }
+                    else -> {}
                 }
-            } catch (e: Throwable) {
-                status = "❌ ${e.message}"
-                LogStore.log("❌ Proximity holder: ${e.message}")
+            }
+        }
+
+        if (negotiated) {
+            // Negotiated handover (§8.2.2.1): the reader runs the TNEP exchange and writes its Handover Request;
+            // only then do we start presenting (binding [Hs, Hr]) and hand the Handover Select back over NFC.
+            NfcEngagementService.processor = NfcEngagementProcessor(
+                negotiatedHandoverSelect = { hr ->
+                    val s = wallet.proximity.present(transport, nfc = true, handoverRequestNdef = hr)
+                    scope.launch { runCatching { driveSession(s) } }
+                    val ready = s.state.first { it is ProximityState.EngagementReady || it is ProximityState.Failed }
+                    if (ready is ProximityState.Failed) throw ready.error
+                    (ready as ProximityState.EngagementReady).handoverNdef ?: error("no Handover Select produced")
+                },
+            )
+            status = "Tap your phone to the reader (negotiated)"
+        } else {
+            scope.launch {
+                try {
+                    driveSession(wallet.proximity.present(transport, nfc = nfc))
+                } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                    throw e // normal teardown when the mode changes or the dialog closes — not a failure
+                } catch (e: Throwable) {
+                    status = "❌ ${e.message}"
+                    LogStore.log("❌ Proximity holder: ${e.message}")
+                }
             }
         }
         onDispose {
-            NfcEngagementService.ndefMessage = null
+            NfcEngagementService.processor = null
             if (nfc) (context as? android.app.Activity)?.let { NfcEngagementService.releaseForeground(it) }
             scope.cancel(); server?.stop(); client?.stop()
         }
@@ -174,10 +196,15 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
                         onDecline = { session?.decline(); pending = null; status = "Declined" },
                     )
                 } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = mode == 0, onClick = { mode = 0 }, label = { Text("QR·Periph") })
-                        FilterChip(selected = mode == 1, onClick = { mode = 1 }, label = { Text("QR·Central") })
-                        FilterChip(selected = mode == 2, onClick = { mode = 2 }, label = { Text("NFC") })
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = mode == 0, onClick = { mode = 0 }, label = { Text("QR·Periph") })
+                            FilterChip(selected = mode == 1, onClick = { mode = 1 }, label = { Text("QR·Central") })
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = mode == 2, onClick = { mode = 2 }, label = { Text("NFC") })
+                            FilterChip(selected = mode == 3, onClick = { mode = 3 }, label = { Text("NFC·Nego") })
+                        }
                     }
                     qr?.let { Image(it.asImageBitmap(), contentDescription = "engagement QR", modifier = Modifier.size(260.dp)) }
                     Text(status, style = MaterialTheme.typography.bodyLarge)
@@ -277,13 +304,13 @@ fun ProximityReaderScreen(wallet: Wallet) {
             status = "Hold near the wallet (NFC)…"
             scope.launch {
                 try {
-                    val ndef = NfcReader.readHandover(context as Activity)
-                    val eng = MdocNfcEngagement.parseHandoverSelect(ndef) ?: run { status = "❌ Not an mdoc NFC tag"; return@launch }
-                    status = "Connecting over BLE…"
+                    val handover = NfcReader.readHandover(context as Activity)
+                    val eng = MdocNfcEngagement.parseHandoverSelect(handover.handoverSelect) ?: run { status = "❌ Not an mdoc NFC tag"; return@launch }
+                    status = if (handover.negotiated) "Connecting over BLE (negotiated)…" else "Connecting over BLE…"
                     val uuids = if (eng.peripheralServerMode) Ble.PERIPHERAL_SERVER else Ble.CENTRAL_CLIENT
                     val transport = BleGattClientTransport(context, Ble.bytesToUuid(eng.serviceUuid), uuids, logger = LogWalletLogger()).also { it.connect() }
                     status = "Requesting documents…"
-                    val docs = wallet.reader.read(transport, eng.deviceEngagement, readerRequest(), handoverNdef = ndef)
+                    val docs = wallet.reader.read(transport, eng.deviceEngagement, readerRequest(), handoverNdef = handover.handoverSelect, handoverRequestNdef = handover.handoverRequest)
                     results = docs
                     status = if (docs.isEmpty()) "No documents returned" else "✅ Read ${docs.size} document(s)"
                     LogStore.log("Reader read ${docs.size} document(s) over NFC+BLE")

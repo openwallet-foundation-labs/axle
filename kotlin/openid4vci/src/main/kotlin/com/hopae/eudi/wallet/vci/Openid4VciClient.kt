@@ -68,7 +68,7 @@ class Openid4VciClient(
     private val clock: () -> Long,
     clientId: String = "wallet-dev",
     /** HAIP attestation-based client authentication (adds OAuth-Client-Attestation[-PoP] to PAR/token). */
-    private val clientAuth: WalletClientAuth? = null,
+    private val clientAuth: ClientAuthProvider? = null,
     /** Optional Key Attestation for the proof key(s), added to each key-proof header (HAIP). */
     private val keyAttestation: KeyAttestationSource? = null,
     /**

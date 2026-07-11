@@ -48,16 +48,27 @@ class ClientAttestationPop(
 }
 
 /**
+ * Supplies HAIP attestation-based client-auth headers (`OAuth-Client-Attestation[-PoP]`) for a given
+ * authorization-server [audience]. The wallet injects an implementation that fetches the WUA fresh **per
+ * issuer** (HAIP §4.4.1 unlinkability — a WUA is never reused across authorization servers); a fixed
+ * [WalletClientAuth] is the simplest case.
+ */
+interface ClientAuthProvider {
+    val clientId: String
+    suspend fun headers(audience: String): List<Pair<String, String>>
+}
+
+/**
  * Attestation-based client authentication (HAIP): pairs the wallet-provider-issued attestation JWT
  * with a per-request [ClientAttestationPop]. Attached to PAR and token requests as the
  * `OAuth-Client-Attestation` and `OAuth-Client-Attestation-PoP` headers.
  */
 class WalletClientAuth(
-    val clientId: String,
+    override val clientId: String,
     val attestationJwt: String,
     private val pop: ClientAttestationPop,
-) {
-    suspend fun headers(audience: String): List<Pair<String, String>> = listOf(
+) : ClientAuthProvider {
+    override suspend fun headers(audience: String): List<Pair<String, String>> = listOf(
         "OAuth-Client-Attestation" to attestationJwt,
         "OAuth-Client-Attestation-PoP" to pop.pop(audience),
     )

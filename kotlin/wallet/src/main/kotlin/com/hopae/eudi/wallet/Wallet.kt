@@ -64,7 +64,11 @@ class Wallet private constructor(
                 idGenerator = { "txn-" + Base64Url.encode(ports.rng.nextBytes(12)) },
                 clock = clockSeconds,
             )
-            val vci = Openid4VciClient(ports.http, ports.rng, clockSeconds, config.issuance.clientId)
+            // HAIP attestation-based client auth: enabled when a Wallet Provider is wired (else plain client_id).
+            val clientAuth = ports.walletAttestation?.let {
+                AttestationClientAuth(config.issuance.clientId, it, ports.defaultSecureArea, ports.storage, ports.rng, clockSeconds)
+            }
+            val vci = Openid4VciClient(ports.http, ports.rng, clockSeconds, config.issuance.clientId, clientAuth = clientAuth)
             val issuance = IssuanceService(vci, store, ports.storage, ports.defaultSecureArea, scope, ports.rng, ports.clock, config.issuance.redirectUri, txlog)
 
             // Reader trust: one validator over the configured reader anchors, shared by remote (signed OpenID4VP

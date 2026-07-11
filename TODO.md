@@ -70,13 +70,25 @@ Grouped; revisit after P1/P2. Rationale per line.
 These were in the broader audit but outside the 1–15 spec-conformance list walked here. Listed so they
 are not lost; each deserves its own triage.
 
-- **Wallet Provider / HAIP attestation** (audit #23–#28) — **← next track (starting)**. ⚠️ Two of these
-  are **correctness**, not enhancements: the WUA is reused across issuers and its `sub` can carry an
-  instance-unique id — both violate HAIP §4.4.1, so the "HAIP issuance profile complete" claim is currently
-  overstated. Also: `issueKeyAttestation` asserts `iso_18045_high` without verifying anything;
-  `SecureArea.attestation()` has no path to the wallet-provider; `IntegrityService` is a dev stub (no Play
-  Integrity / Android Key Attestation chain verification). Scope being planned: Android Key Attestation +
-  Play Integrity device/app checks → real WUA issuance/management wired to the `wallet-provider/` backend.
+- **Wallet Provider / HAIP attestation** (audit #23–#28) — **← in progress**.
+  - [x] **Phase 1 — WUA client auth wired to the backend, §4.4.1 (the named correctness bugs).**
+    - `android/attestation`: `WalletProviderAttestation` (reference `WalletAttestationProvider` talking to
+      `wallet-provider/`: nonce → register(integrity) → instance-key PoP → wallet-attestation) +
+      `IntegrityTokenProvider`/`DevIntegrityTokenProvider`. Gated integration test verified against the local
+      backend (real WUA, cnf binds instance key; batch key attestation). Commit `4a9a05b`.
+    - SDK glue: `ClientAuthProvider` seam (vci), `AttestationClientAuth` — persistent instance key +
+      **fresh WUA per issuer** (`sub` = clientId, non-unique). Wired in `Wallet.kt` when a provider is present.
+      Fixes the two flagged §4.4.1 bugs (no WUA reused across issuers; `sub` not instance-unique).
+    - **Residual (approach A, documented):** the instance key is persistent, so the WUA `cnf` is stable across
+      issuers → colluding issuers could still correlate. Full unlinkability needs a **per-use key batch**
+      (HAIP wallet-attestation batch) — a later refinement (approach C).
+    - **Remaining in Phase 1:** demo on-device wiring (inject the adapter; WP URL reachable from the device;
+      avoid breaking issuance when the WP is down) + **Swift parity**.
+  - [ ] **Phase 2 — Android Key Attestation (real):** `AndroidKeystoreSecureArea.createKey` sets an attestation
+    challenge; `attestation()` returns the real keystore X.509 chain (today a `null` stub asserting nothing).
+    Wire the OpenID4VCI `key_attestation` proof (`KeyAttestationSource` → backend `/key-attestation`).
+  - [ ] **Phase 3 — Play Integrity (real) / App Attest:** `PlayIntegrityTokenProvider` (demo: attempt real →
+    log → dev fallback; production: no fallback) + backend Play Integrity verification (replaces the dev stub).
 - **Trust cluster** (audit #16–#20): DCQL `trusted_authorities` (`aki` → `etsi_tl` → `openid_federation`),
   the `verifier_attestation`/`decentralized_identifier`/`openid_federation` client-ID prefixes, LOTL/CRL/OCSP.
   Already **deliberately sequenced last** in `SPEC-MATRIX.md` (needs standing trust infrastructure).

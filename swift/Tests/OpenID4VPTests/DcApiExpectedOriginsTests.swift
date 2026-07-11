@@ -95,7 +95,7 @@ final class DcApiExpectedOriginsTests: XCTestCase {
         let unsigned = claims(clientId: "x509_san_dns:bank.example", expectedOrigins: "null")
         let request = try await client().resolveDcApiRequest(unsigned, origin: origin)
         XCTAssertEqual(origin, request.clientId)
-        XCTAssertEqual("web-origin", request.verifier.clientIdScheme)
+        XCTAssertEqual("origin", request.verifier.clientIdScheme)
         XCTAssertFalse(request.verifier.trusted)
     }
 

@@ -117,7 +117,7 @@ public struct AuthorizationRequestResolver {
                 claims = envelope
                 // Unsigned (Appendix A.3.1): the Origin *is* the verifier's identity. The wallet MUST ignore
                 // any `client_id` and any `expected_origins` such a request carries.
-                verifier = VerifierInfo(clientId: origin, clientIdScheme: "web-origin", certificateChainDer: nil, commonName: nil, trusted: false)
+                verifier = VerifierInfo(clientId: origin, clientIdScheme: "origin", certificateChainDer: nil, commonName: nil, trusted: false)
             }
         } else {
             (claims, verifier) = try await verifySignedDcApi(trimmed, origin) // bare JWS

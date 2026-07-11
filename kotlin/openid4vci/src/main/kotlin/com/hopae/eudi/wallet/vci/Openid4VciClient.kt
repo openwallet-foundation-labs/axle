@@ -361,7 +361,9 @@ class Openid4VciClient(
         dpop: DpopProver,
         keys: IssuanceKeys,
     ): CredentialResponse {
-        val cNonce = token.cNonce ?: issuerMeta.nonceEndpoint?.let { fetchCNonce(it) }
+        // OpenID4VCI 1.0 §7: the c_nonce is obtained only from the Nonce Endpoint (draft-13 and earlier
+        // returned it in the token response; that path is gone).
+        val cNonce = issuerMeta.nonceEndpoint?.let { fetchCNonce(it) }
         val config = issuerMeta.credentialConfigurationsSupported[configurationId]
         val requestFormat = config?.format ?: "dc+sd-jwt"
         val encryption = CredentialEncryptionSession.negotiate(credentialEncryption, issuerMeta)

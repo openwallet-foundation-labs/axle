@@ -99,7 +99,7 @@ class DcApiExpectedOriginsTest {
     fun unsignedRequestIgnoresClientId() = runBlocking {
         val request = client().resolveDcApiRequest(claims(clientId = "x509_san_dns:bank.example", expectedOrigins = null), origin)
         assertEquals(origin, request.clientId)
-        assertEquals("web-origin", request.verifier.clientIdScheme)
+        assertEquals("origin", request.verifier.clientIdScheme)
         assertEquals(false, request.verifier.trusted)
     }
 

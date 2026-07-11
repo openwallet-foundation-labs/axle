@@ -259,7 +259,6 @@ public struct AuthorizationServerMetadata {
 public struct TokenResponse {
     public let accessToken: String
     public let tokenType: String
-    public let cNonce: String?
     public let expiresIn: Int64?
     /// §8.2: the `credential_identifiers` the issuer bound to each `credential_configuration_id` in the
     /// token-response `authorization_details`. When a config appears here, its Credential Request MUST use one
@@ -270,8 +269,6 @@ public struct TokenResponse {
     public let refreshToken: String?
 
     public static func fromObj(_ o: JsonValue) throws -> TokenResponse {
-        var cNonce: String?
-        if case let .str(n)? = o["c_nonce"] { cNonce = n }
         var expiresIn: Int64?
         if case let .numInt(e)? = o["expires_in"] { expiresIn = e }
         var refreshToken: String?
@@ -279,7 +276,6 @@ public struct TokenResponse {
         return TokenResponse(
             accessToken: try o.requireString("access_token", "token response"),
             tokenType: try o.requireString("token_type", "token response"),
-            cNonce: cNonce,
             expiresIn: expiresIn,
             credentialIdentifiers: parseCredentialIdentifiers(o["authorization_details"]),
             refreshToken: refreshToken

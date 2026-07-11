@@ -380,8 +380,10 @@ public struct Openid4VciClient {
         _ dpop: DpopProver,
         _ keys: IssuanceKeys
     ) async throws -> CredentialResponse {
-        var cNonce = token.cNonce
-        if cNonce == nil, let nonceEndpoint = issuerMeta.nonceEndpoint {
+        // OpenID4VCI 1.0 §7: the c_nonce is obtained only from the Nonce Endpoint (draft-13 and earlier
+        // returned it in the token response; that path is gone).
+        var cNonce: String?
+        if let nonceEndpoint = issuerMeta.nonceEndpoint {
             cNonce = try await fetchCNonce(nonceEndpoint)
         }
 

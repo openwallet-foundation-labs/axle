@@ -98,7 +98,7 @@ class AuthorizationRequestResolver(
             if (signedRequest != null) verifySignedDcApi(signedRequest, origin)
             // Unsigned (Appendix A.3.1): the Origin *is* the verifier's identity. The wallet MUST ignore
             // any `client_id` and any `expected_origins` such a request carries.
-            else c to VerifierInfo(origin, "web-origin", null, null, trusted = false)
+            else c to VerifierInfo(origin, "origin", null, null, trusted = false)
         } else {
             verifySignedDcApi(trimmed, origin) // bare JWS
         }

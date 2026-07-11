@@ -272,10 +272,10 @@ public struct Openid4VpClient {
     }
 
     /// The verifier's accepted mdoc device-authentication algorithms (OpenID4VP §B.2.2): the
-    /// `deviceauth_alg_values` array under `client_metadata.vp_formats_supported.mso_mdoc` (or the older
-    /// `vp_formats`). Nil when the verifier did not constrain it — then `deviceSignature` is used.
+    /// `deviceauth_alg_values` array under `client_metadata.vp_formats_supported.mso_mdoc`. Nil when the
+    /// verifier did not constrain it — then `deviceSignature` is used.
     private func deviceAuthAlgValues(_ request: ResolvedRequest) -> [Int64]? {
-        let formats = request.clientMetadata?["vp_formats_supported"] ?? request.clientMetadata?["vp_formats"]
+        let formats = request.clientMetadata?["vp_formats_supported"]
         guard let mdoc = formats?["mso_mdoc"], case let .arr(values)? = mdoc["deviceauth_alg_values"] else { return nil }
         let ids: [Int64] = values.compactMap {
             switch $0 {
@@ -295,9 +295,6 @@ public struct Openid4VpClient {
     private func encValue(_ request: ResolvedRequest) -> JweEnc {
         if case let .arr(items)? = request.clientMetadata?["encrypted_response_enc_values_supported"],
            case let .str(id)? = items.first {
-            return JweEnc.from(id) ?? .a128gcm
-        }
-        if case let .str(id)? = request.clientMetadata?["authorization_encrypted_response_enc"] {
             return JweEnc.from(id) ?? .a128gcm
         }
         return .a128gcm

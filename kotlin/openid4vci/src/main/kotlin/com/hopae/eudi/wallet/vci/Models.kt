@@ -210,7 +210,6 @@ class AuthorizationServerMetadata(
 class TokenResponse(
     val accessToken: String,
     val tokenType: String,
-    val cNonce: String?,
     val expiresIn: Long?,
     val authorizationDetails: JsonValue?,
     /**
@@ -227,7 +226,6 @@ class TokenResponse(
         fun fromObj(o: JsonValue.Obj): TokenResponse = TokenResponse(
             accessToken = o.requireStr("access_token", "token response"),
             tokenType = o.requireStr("token_type", "token response"),
-            cNonce = o.str("c_nonce"),
             expiresIn = (o["expires_in"] as? JsonValue.NumInt)?.value,
             authorizationDetails = o["authorization_details"],
             credentialIdentifiers = parseCredentialIdentifiers(o["authorization_details"]),

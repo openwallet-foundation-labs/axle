@@ -161,7 +161,9 @@ class MockIssuer(
             val idList = ids.joinToString(",") { "\"$it\"" }
             ""","authorization_details":[{"type":"openid_credential","credential_configuration_id":"eu.europa.ec.eudi.pid.1","credential_identifiers":[$idList]}]"""
         } ?: ""
-        return ok("""{"access_token":"$accessToken","token_type":"DPoP","expires_in":3600,"refresh_token":"$issuedRefreshToken","c_nonce":"$cNonce"$authDetails}""")
+        // OpenID4VCI 1.0 §6.2: the token response carries no c_nonce — the client fetches it from the
+        // Nonce Endpoint (handleNonce). cNonce is still set above so that endpoint and the proof check use it.
+        return ok("""{"access_token":"$accessToken","token_type":"DPoP","expires_in":3600,"refresh_token":"$issuedRefreshToken"$authDetails}""")
     }
 
     private var issuedRefreshToken: String? = null

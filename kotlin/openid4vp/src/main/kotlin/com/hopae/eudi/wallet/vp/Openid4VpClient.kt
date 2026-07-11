@@ -299,12 +299,11 @@ class Openid4VpClient(
 
     /**
      * The verifier's accepted mdoc device-authentication algorithms (OpenID4VP §B.2.2): the
-     * `deviceauth_alg_values` array under `client_metadata.vp_formats_supported.mso_mdoc` (or the older
-     * `vp_formats`). Null when the verifier did not constrain it — then `deviceSignature` is used.
+     * `deviceauth_alg_values` array under `client_metadata.vp_formats_supported.mso_mdoc`. Null when the
+     * verifier did not constrain it — then `deviceSignature` is used.
      */
     private fun deviceAuthAlgValues(request: ResolvedRequest): List<Long>? {
-        val formats = (request.clientMetadata?.get("vp_formats_supported")
-            ?: request.clientMetadata?.get("vp_formats")) as? JsonValue.Obj ?: return null
+        val formats = request.clientMetadata?.get("vp_formats_supported") as? JsonValue.Obj ?: return null
         val mdoc = formats["mso_mdoc"] as? JsonValue.Obj ?: return null
         val values = (mdoc["deviceauth_alg_values"] as? JsonValue.Arr)?.items ?: return null
         return values.mapNotNull {
@@ -326,7 +325,6 @@ class Openid4VpClient(
     private fun encValue(request: ResolvedRequest): JweEnc {
         val id = (request.clientMetadata?.get("encrypted_response_enc_values_supported") as? JsonValue.Arr)
             ?.items?.mapNotNull { (it as? JsonValue.Str)?.value }?.firstOrNull()
-            ?: (request.clientMetadata?.get("authorization_encrypted_response_enc") as? JsonValue.Str)?.value
         return id?.let { JweEnc.from(it) } ?: JweEnc.A128GCM
     }
 

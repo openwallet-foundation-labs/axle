@@ -107,6 +107,8 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
         pending = null
         val central = mode == 1
         val nfc = mode == 2
+        // NFC: win the HCE routing conflict while presenting (other wallets register the same NDEF AID).
+        if (nfc) (context as? android.app.Activity)?.let { NfcEngagementService.requestForeground(it) }
         val uuid = UUID.randomUUID()
         val uuidBytes = Ble.uuidToBytes(uuid)
         val scope = CoroutineScope(Dispatchers.Main)
@@ -153,7 +155,11 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
                 LogStore.log("❌ Proximity holder: ${e.message}")
             }
         }
-        onDispose { NfcEngagementService.ndefMessage = null; scope.cancel(); server?.stop(); client?.stop() }
+        onDispose {
+            NfcEngagementService.ndefMessage = null
+            if (nfc) (context as? android.app.Activity)?.let { NfcEngagementService.releaseForeground(it) }
+            scope.cancel(); server?.stop(); client?.stop()
+        }
     }
 
     Dialog(onDismissRequest = onClose) {

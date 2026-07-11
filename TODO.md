@@ -89,6 +89,12 @@ are not lost; each deserves its own triage.
     cancellation aborts; stale callbacks guarded by `g === gatt`. Device-verified (happy path + clean
     cancellation). Note: this is the only meaningful "reconnect" — mdoc has no *session* resumption
     (keys/counters bound to the connection), so a mid-session drop restarts from engagement, by design.
+  - [x] **NFC HCE foreground routing preference** — the NDEF Type-4 AID (`D2760000850101`) is shared by every
+    mdoc/NFC wallet, so with several installed Android shows an HCE routing-conflict picker on tap. While the
+    holder presents over NFC, `NfcEngagementService.requestForeground(activity)` calls
+    `CardEmulation.setPreferredService` (released in `onDispose`), making our service the deterministic tap
+    target. Device-verified: `dumpsys nfc` foreground service flips `null` → our service while armed, and the
+    physical two-phone tap no longer raises the conflict dialog.
   - **#31 promote demo adapters into supported Android library modules** — new `android/` composite build:
     - [x] Phase 1: `android/core` (`com.hopae.eudi.android:core`) — SecureArea, Storage, TxLogStore, Http
       adapters; `OkHttpTransport` decoupled from `LogStore` via an injected `WalletLogger`. Device-verified (`c10e9a8`).

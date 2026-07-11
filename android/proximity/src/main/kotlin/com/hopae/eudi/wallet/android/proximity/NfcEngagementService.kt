@@ -1,5 +1,9 @@
 package com.hopae.eudi.wallet.android.proximity
 
+import android.app.Activity
+import android.content.ComponentName
+import android.nfc.NfcAdapter
+import android.nfc.cardemulation.CardEmulation
 import android.nfc.cardemulation.HostApduService
 import android.os.Bundle
 
@@ -57,6 +61,24 @@ class NfcEngagementService : HostApduService() {
         /** The Handover Select NDEF message to serve over NFC; armed by the holder screen while presenting. */
         @Volatile
         var ndefMessage: ByteArray? = null
+
+        /**
+         * Routes NFC (the shared NDEF Type-4 AID) to *this* service while [activity] is in the foreground,
+         * so a tap reaches this wallet even when other NFC/mdoc wallets register the same AID (Android would
+         * otherwise show an HCE routing-conflict prompt). Call when the holder begins NFC engagement; pair
+         * with [releaseForeground]. Returns false if NFC is unavailable or the preference could not be set.
+         */
+        fun requestForeground(activity: Activity): Boolean {
+            val adapter = NfcAdapter.getDefaultAdapter(activity) ?: return false
+            val component = ComponentName(activity, NfcEngagementService::class.java)
+            return runCatching { CardEmulation.getInstance(adapter).setPreferredService(activity, component) }.getOrDefault(false)
+        }
+
+        /** Releases the foreground routing preference set by [requestForeground]. */
+        fun releaseForeground(activity: Activity) {
+            val adapter = NfcAdapter.getDefaultAdapter(activity) ?: return
+            runCatching { CardEmulation.getInstance(adapter).unsetPreferredService(activity) }
+        }
 
         private val SW_OK = byteArrayOf(0x90.toByte(), 0x00)
         private val SW_NOT_FOUND = byteArrayOf(0x6A, 0x82.toByte())

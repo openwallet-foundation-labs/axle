@@ -65,6 +65,22 @@ no review wait.
 - Copy the **opt-in (“test participation”) link**, open it on the phone, join, then **install from Play**.
 - The app **must be installed via Play** (not side-loaded) to be `PLAY_RECOGNIZED`.
 
+## Store listing (Play Console — separate from the on-device icon)
+
+In Play Console / the store the app shows as `com.hopae.axle.wallet (unreviewed)` **with no icon or name**
+until you fill the **store listing** — this is normal, and different from the on-device icon:
+
+- **Launcher icon + label** ("Axle Wallet") come from the **AAB manifest** — already correct on installed
+  devices, independent of Play.
+- **Store listing** is set separately in **Grow → Store presence → Main store listing**: the store **app
+  name**, a **512×512 PNG icon** (not the adaptive vector — a raster is required), a feature graphic
+  (1024×500), screenshots, and a description.
+- **“(unreviewed)”** just means the app is only on an internal-testing track (not published/reviewed) —
+  expected, and **not required** for internal testing to work.
+
+So fill the store listing only when you want the app to look complete inside Play; testers already see the
+real Axle icon on their devices.
+
 ## What we did / verified
 
 1. Rebranded to **Axle Wallet** (`com.hopae.axle.wallet`) with an EU-palette adaptive icon.

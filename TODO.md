@@ -70,16 +70,18 @@ Grouped; revisit after P1/P2. Rationale per line.
 These were in the broader audit but outside the 1–15 spec-conformance list walked here. Listed so they
 are not lost; each deserves its own triage.
 
-- **Wallet Provider / HAIP attestation** (audit #23–#28). ⚠️ Two of these are **correctness**, not
-  enhancements: the WUA is reused across issuers and its `sub` can carry an instance-unique id — both
-  violate HAIP §4.4.1, so the "HAIP issuance profile complete" claim is currently overstated. Also:
-  `issueKeyAttestation` asserts `iso_18045_high` without verifying anything; `SecureArea.attestation()`
-  has no path to the wallet-provider; `IntegrityService` is a dev stub (no Play Integrity / Android Key
-  Attestation chain verification). Recommend triaging this track next.
+- **Wallet Provider / HAIP attestation** (audit #23–#28) — **← next track (starting)**. ⚠️ Two of these
+  are **correctness**, not enhancements: the WUA is reused across issuers and its `sub` can carry an
+  instance-unique id — both violate HAIP §4.4.1, so the "HAIP issuance profile complete" claim is currently
+  overstated. Also: `issueKeyAttestation` asserts `iso_18045_high` without verifying anything;
+  `SecureArea.attestation()` has no path to the wallet-provider; `IntegrityService` is a dev stub (no Play
+  Integrity / Android Key Attestation chain verification). Scope being planned: Android Key Attestation +
+  Play Integrity device/app checks → real WUA issuance/management wired to the `wallet-provider/` backend.
 - **Trust cluster** (audit #16–#20): DCQL `trusted_authorities` (`aki` → `etsi_tl` → `openid_federation`),
   the `verifier_attestation`/`decentralized_identifier`/`openid_federation` client-ID prefixes, LOTL/CRL/OCSP.
   Already **deliberately sequenced last** in `SPEC-MATRIX.md` (needs standing trust infrastructure).
-- **Transport hardening**, non-iOS (audit #29–#31) — **partly done** (commit `d3e4e61`):
+- **Transport hardening**, non-iOS (audit #29–#31) — **done** (all items below; only NFC negotiated
+  Multipaz cross-check remains as a bonus verification):
   - [x] **#30 BLE Ident characteristic** (§8.3.3.1.1.4) — SDK `bleIdent`/`eDeviceKeyBytes` (both languages,
     tested); demo reader exposes 00000008, holder reads + verifies (central client mode); **device-verified**.
   - [x] **#29 timeouts + cancellation/failure cleanup** — `receive`/peer-wait/notify bounded; connect tears
@@ -117,6 +119,8 @@ are not lost; each deserves its own triage.
       auto-scaled, + per-credential override; demo uses its app icon). Thin `GetCredentialActivity` + consent
       UI stay in the app. Device-checked (registration + branding) (`d0ed915`).
   **#31 complete** — all three android/ modules (core, proximity, dcapi) extracted + device-checked.
+  **Transport hardening track complete** (non-iOS). Remaining bonus: verify NFC **negotiated** handover
+  against Multipaz (static + BLE already cross-verified in `INTEROP.md`; negotiated is our↔our only so far).
 - **Test infrastructure** (audit #21–#22): shared mdoc golden vectors; RFC 9901 end-to-end fixtures.
 - **iOS** (explicitly out of scope here): CoreBluetooth/CoreNFC transport, session termination on that
   transport, iOS demo app.

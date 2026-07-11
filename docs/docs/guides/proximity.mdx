@@ -14,7 +14,7 @@ wallet and the reader exchange credentials directly, device to device.
 The SDK owns the **entire ISO/IEC 18013-5 device-retrieval exchange** — and both roles, the **holder**
 (`wallet.proximity`) presenting an mdoc and the **reader** (`wallet.reader`) verifying one:
 
-- **Device engagement** — a **QR code** or **NFC static handover** (Handover Select over HCE), either
+- **Device engagement** — a **QR code** or **NFC handover** — static or negotiated (Handover Select over HCE), either
   carrying a **BLE** carrier in **peripheral server** or **central client** mode.
 - **ECDH session keys** — deriving `SKDevice`/`SKReader` (HKDF salted by the SessionTranscript) and
   encrypting every `SessionData` frame both ways with AES-256-GCM.

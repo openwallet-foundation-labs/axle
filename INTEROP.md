@@ -281,7 +281,7 @@ against the **Multipaz** reference wallet/reader (`org.multipaz.testapp`) on two
 | --- | --- | --- |
 | our **reader** ← Multipaz **holder** | BLE peripheral-server mode | ✅ read + verified (issuer chain + `deviceMac`) |
 | our **holder** → Multipaz **reader** | BLE peripheral-server & central-client | ✅ accepted |
-| our ↔ our | BLE both modes + NFC static handover | ✅ end-to-end |
+| our ↔ our | BLE both modes + NFC static **and negotiated** handover | ✅ end-to-end |
 
 Three interop bugs this surfaced, each fixed against the ISO text confirmed by reading Multipaz
 source (not just logs):
@@ -298,6 +298,24 @@ source (not just logs):
   `deviceMac` (COSE_Mac0, §9.1.3.5), not `deviceSignature`. Added `CoseMac0` + the `EMacKey`
   derivation (`HKDF(ECDH(EReaderKey, DeviceKey), salt = transcript, info = "EMacKey")`) so the reader
   verifies either form.
+
+### NFC negotiated handover (TNEP) + multi-wallet HCE routing
+
+Beyond static handover, the **negotiated** handover transport (ISO 18013-5 §8.2.2.1) is implemented and
+**device-verified our↔our** (two Samsung phones). The mdoc (holder) runs an NFC Forum Type-4 HCE state
+machine that, in negotiated mode, advertises the Connection Handover service over **TNEP** (Tag NDEF
+Exchange Protocol); the reader auto-detects this (a TNEP Service Parameter record) and runs the exchange —
+Service Select → TNEP status → write Handover Request → read Handover Select — then connects over BLE. Both
+sides bind `[Hs, Hr]` into the SessionTranscript; a successful DeviceResponse decrypt proves the transcripts
+matched. The protocol lives in the SDK (`kotlin/proximity`: `NfcTnep`, `NfcEngagementProcessor`,
+`MdocNfcHandover`, loopback-tested); `android/proximity` is a thin HCE/IsoDep bridge. **Not yet cross-checked
+against Multipaz** (Multipaz also implements TNEP, but BLE-role alignment for negotiated is unverified) — a
+bonus check tracked in `TODO.md`.
+
+Independently, the holder claims the shared **NDEF Type-4 AID** (`D2760000850101`) while presenting via
+`CardEmulation.setPreferredService` (released on teardown), so with several NFC/mdoc wallets installed Android
+routes the tap deterministically to us instead of showing its HCE routing-conflict picker. Device-verified:
+`dumpsys nfc` shows the foreground service flip `null` → our service while armed.
 
 ## Known gaps this exercise surfaced
 

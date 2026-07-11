@@ -14,7 +14,7 @@ import TabItem from '@theme/TabItem';
 SDK가 **ISO/IEC 18013-5 device retrieval 교환 전체**와 **양쪽 역할**을 담당합니다 — mdoc을 제시하는
 **홀더**(`wallet.proximity`)와 검증하는 **리더**(`wallet.reader`):
 
-- **디바이스 인게이지먼트** — **QR 코드** 또는 **NFC static handover**(HCE로 Handover Select 서빙). 어느
+- **디바이스 인게이지먼트** — **QR 코드** 또는 **NFC handover** — static 또는 negotiated(HCE로 Handover Select 서빙). 어느
   쪽이든 **BLE** carrier를 **peripheral server** 또는 **central client** 모드로 담습니다.
 - **ECDH 세션 키** — `SKDevice`/`SKReader` 도출(SessionTranscript로 salt한 HKDF) 및 양방향 `SessionData`
   프레임을 AES-256-GCM으로 암호화.

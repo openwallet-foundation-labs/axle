@@ -26,7 +26,8 @@ the official EUDI reference issuer.
 |---|---|
 | `kotlin/` | Kotlin SDK (pure JVM, Gradle multi-module) |
 | `swift/` | Swift package (no Apple-framework imports; Linux-buildable) |
-| `demo/` | Android debug wallet app (Compose) — consumes `kotlin/` via a composite build |
+| `android/` | Android platform-adapter libraries (`com.hopae.eudi.android:core`/`proximity`/`dcapi`) — Keystore SecureArea, storage, OkHttp, BLE + NFC transports, DC API registrar |
+| `demo/` | Android debug wallet app (Compose) — consumes `kotlin/` + `android/` via composite builds |
 | `docs/` | Docusaurus developer docs (English + 한국어) |
 | `wallet-provider/` | NestJS Wallet Provider backend (WUA / wallet-unit attestation) |
 | `vectors/` | Shared golden test vectors consumed by both test suites |
@@ -48,7 +49,7 @@ Each concern is a separate module (Kotlin name / Swift target), tested in isolat
 | `trust` / `Trust` | X.509 PKIX trust | `X509ChainValidator`, `X509Support`, `X509RequestVerifier`, `X5cIssuerKeyResolver`, `X5cMdocReaderTrust`, `TrustAnchors`; `TestCerts` (fixtures) |
 | `statuslist` / `StatusList` | IETF Token Status List | `StatusListClient` (fetch + verify + index lookup) |
 | `credential-store` / `CredentialStore` | Persisted credential store | `CredentialStore`, `Envelope`, `EnvelopeCodec` (deterministic CBOR) |
-| `proximity` / `Proximity` | ISO 18013-5 session | `ProximitySessionTranscript`, `SessionEncryption` (ECDH+AES-GCM), `SessionMessages`, `Hkdf` |
+| `proximity` / `Proximity` | ISO 18013-5 session + NFC handover | `ProximitySessionTranscript`, `SessionEncryption` (ECDH+AES-GCM), `SessionMessages`, `Hkdf`; NFC handover — `MdocNfcEngagement`, `NfcTnep`, `NfcEngagementProcessor` (holder HCE state machine), `MdocNfcHandover` (reader driver, static + negotiated/TNEP) |
 | `txlog` / `TransactionLog` | Audit log (ARF/GDPR) | `TransactionLog` (record/history/query), `TransactionLogCodec`, `RelyingParty`, `LoggedDocument` |
 | `wallet-api` / `WalletAPI` | Port SPI + shared types | `spi/` ports (`SecureArea`, `StorageDriver`, `HttpTransport`, `ProximityTransport`, …), `Types`, `SecureAreaCoseSigner` |
 | `wallet` / `Wallet` | **The facade** | `Wallet`, `WalletConfig`, `WalletPorts`, `CredentialsService`, `IssuanceService`/`Session`, `PresentationService`/`Session`, `ProximityService`/`Session`, `Credential`, `WalletError` |

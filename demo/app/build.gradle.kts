@@ -34,6 +34,7 @@ dependencies {
     // Android platform adapters — via composite build ../android (distinct group to avoid clashing with the SDK)
     implementation("com.hopae.eudi.android:core:0.0.1-SNAPSHOT")
     implementation("com.hopae.eudi.android:proximity:0.0.1-SNAPSHOT")
+    implementation("com.hopae.eudi.android:dcapi:0.0.1-SNAPSHOT")
     // debug-grade software SecureArea + in-memory helpers
     implementation("com.hopae.eudi:testkit:0.0.1-SNAPSHOT")
 

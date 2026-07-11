@@ -7,25 +7,22 @@ import android.os.Bundle
 import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.credentials.DigitalCredential
-import androidx.credentials.GetCredentialResponse
 import androidx.credentials.GetDigitalCredentialOption
-import androidx.credentials.exceptions.GetCredentialUnknownException
 import androidx.credentials.provider.PendingIntentHandler
-import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.lifecycle.lifecycleScope
 import com.hopae.eudi.wallet.PresentationSelection
 import com.hopae.eudi.wallet.PresentationState
+import com.hopae.eudi.wallet.android.dcapi.DcApiRequest
+import com.hopae.eudi.wallet.android.dcapi.DcApiResult
 import com.hopae.eudi.wallet.mdoc.DeviceRequest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import org.json.JSONObject
-import java.security.MessageDigest
 
 /**
- * Handles a Digital Credentials API (OpenID4VP) request routed to this wallet by the Credential
- * Manager. Extracts the request JSON + caller origin, runs it through the SDK's [startDcApi], and
- * returns the response object. No UI — the OS selector already mediated the user's choice.
+ * Handles a Digital Credentials API (OpenID4VP / org-iso-mdoc) request routed to this wallet by the
+ * Credential Manager. The UI-less plumbing — envelope parsing, origin, and result marshalling — lives in the
+ * `com.hopae.eudi.android:dcapi` library (`DcApiRequest` / `DcApiResult`); this Activity owns the flow: show
+ * the app's consent, drive the SDK, return the response.
  */
 class GetCredentialActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,18 +32,15 @@ class GetCredentialActivity : ComponentActivity() {
 
         val request = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
         val option = request?.credentialOptions?.filterIsInstance<GetDigitalCredentialOption>()?.firstOrNull()
-        if (request == null || option == null) {
-            fail(resultData, "no digital credential request")
-            return
-        }
+        if (request == null || option == null) { finishError(resultData, "no digital credential request"); return }
 
-        val origin = originOf(request)
+        val origin = DcApiRequest.originOf(request, allowlist())
+        LogStore.log("DC API request · origin=$origin · protocols=${DcApiRequest.protocolsOffered(option.requestJson)}")
 
         // org-iso-mdoc (ISO 18013-7): raw mdoc DeviceRequest → HPKE-encrypted DeviceResponse.
-        val mdoc = matchProtocol(option.requestJson, listOf("org-iso-mdoc", "org.iso.mdoc"))
+        val mdoc = DcApiRequest.matchProtocol(option.requestJson, listOf("org-iso-mdoc", "org.iso.mdoc"))
         if (mdoc != null) {
             val (proto, data) = mdoc
-            LogStore.log("DC API [$proto] request · origin=$origin")
             val items = runCatching {
                 DeviceRequest.decode(Base64.decode(data.getString("deviceRequest"), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)).docRequests.map { dr ->
                     ConsentItem(dr.docType, dr.requested.flatMap { (_, els) -> els.map { it.identifier } })
@@ -57,25 +51,19 @@ class GetCredentialActivity : ComponentActivity() {
                     lifecycleScope.launch {
                         runCatching {
                             val response = wallet.proximity.respondDcApiMdoc(data.getString("deviceRequest"), data.getString("encryptionInfo"), origin)
-                            val content = JSONObject().put("protocol", proto).put("data", JSONObject().put("response", response))
-                            PendingIntentHandler.setGetCredentialResponse(resultData, GetCredentialResponse(DigitalCredential(content.toString())))
+                            DcApiResult.setResponse(resultData, DcApiResult.mdocResponseJson(proto, response))
                             LogStore.log("✅ DC API (mdoc) response returned to caller")
                             setResult(RESULT_OK, resultData)
-                        }.onFailure { failException(resultData, it.message) }
+                        }.onFailure { finishExceptionData(resultData, it.message) }
                         finish()
                     }
                 },
-                onDecline = { LogStore.log("DC API (mdoc) declined by user"); failException(resultData, "declined by user"); finish() })
+                onDecline = { finishError(resultData, "declined by user") })
             return
         }
 
-        val openid4vp = extractOpenId4Vp(option.requestJson)
-        if (openid4vp == null) {
-            LogStore.log("DC API: no openid4vp request in envelope: ${option.requestJson.take(200)}")
-            failException(resultData, "no openid4vp request"); finish(); return
-        }
-        LogStore.log("DC API request · origin=$origin")
-        logRequestShape(openid4vp)
+        val openid4vp = DcApiRequest.extractOpenId4Vp(option.requestJson)
+        if (openid4vp == null) { finishError(resultData, "no openid4vp request"); return }
 
         lifecycleScope.launch {
             runCatching {
@@ -94,20 +82,19 @@ class GetCredentialActivity : ComponentActivity() {
                                 session.respond(PresentationSelection.auto(presentation))
                                 when (val done = session.state.first { it.isTerminal }) {
                                     is PresentationState.Completed -> {
-                                        val response = done.dcApiResponse ?: error("no DC API response produced")
-                                        PendingIntentHandler.setGetCredentialResponse(resultData, GetCredentialResponse(DigitalCredential(response)))
+                                        DcApiResult.setResponse(resultData, done.dcApiResponse ?: error("no DC API response produced"))
                                         LogStore.log("✅ DC API response returned to caller")
                                         setResult(RESULT_OK, resultData)
                                     }
                                     is PresentationState.Failed -> throw done.error
                                     else -> error("unexpected terminal state $done")
                                 }
-                            }.onFailure { failException(resultData, it.message) }
+                            }.onFailure { finishExceptionData(resultData, it.message) }
                             finish()
                         }
                     },
-                    onDecline = { LogStore.log("DC API declined by user"); failException(resultData, "declined by user"); finish() })
-            }.onFailure { failException(resultData, it.message); finish() }
+                    onDecline = { finishError(resultData, "declined by user") })
+            }.onFailure { finishError(resultData, it.message) }
         }
     }
 
@@ -115,88 +102,16 @@ class GetCredentialActivity : ComponentActivity() {
         setContent { DcApiConsentScreen(verifier, trusted, items, onApprove, onDecline) }
     }
 
-    /**
-     * The DC API request is an envelope `{"requests":[{"protocol","data"},…]}`; pull out the OpenID4VP
-     * request object (preferring unsigned) that the SDK's [startDcApi] understands. Falls back to the raw
-     * JSON if it's already a flat request.
-     */
-    /** Returns the (protocol, data) of the first request in the envelope matching one of [protocols]. */
-    private fun matchProtocol(requestJson: String, protocols: List<String>): Pair<String, JSONObject>? {
-        val requests = runCatching { JSONObject(requestJson) }.getOrNull()?.optJSONArray("requests") ?: return null
-        for (proto in protocols) {
-            for (i in 0 until requests.length()) {
-                val req = requests.optJSONObject(i) ?: continue
-                if (req.optString("protocol") == proto) return (req.optJSONObject("data") ?: continue).let { proto to it }
-            }
-        }
-        return null
-    }
+    /** The app-owned privileged-caller allowlist (which browsers may present a web origin). */
+    private fun allowlist(): String = runCatching {
+        assets.open("privileged_allowlist.json").bufferedReader().use { it.readText() }
+    }.getOrDefault("""{"apps":[]}""")
 
-    private fun extractOpenId4Vp(requestJson: String): String? {
-        val root = runCatching { JSONObject(requestJson) }.getOrNull() ?: return null
-        val requests = root.optJSONArray("requests") ?: return requestJson
-        val offered = (0 until requests.length()).mapNotNull { requests.optJSONObject(it)?.optString("protocol") }
-        LogStore.log("DC API protocols offered: $offered")
-        for (proto in listOf("openid4vp-v1-unsigned", "openid4vp-v1-signed", "openid4vp")) {
-            for (i in 0 until requests.length()) {
-                val req = requests.optJSONObject(i) ?: continue
-                if (req.optString("protocol") == proto) {
-                    LogStore.log("DC API using protocol: $proto")
-                    return req.get("data").toString()
-                }
-            }
-        }
-        return null
-    }
+    private fun finishError(resultData: Intent, message: String?) { finishExceptionData(resultData, message); finish() }
 
-    /** Web origin for privileged callers (browsers in the allowlist); otherwise the app's signing hash. */
-    private fun originOf(request: ProviderGetCredentialRequest): String {
-        val allowlist = runCatching {
-            assets.open("privileged_allowlist.json").bufferedReader().use { it.readText() }
-        }.getOrDefault("""{"apps":[]}""")
-        runCatching { request.callingAppInfo.getOrigin(allowlist) }.getOrNull()?.let { return it }
-        val cert = runCatching {
-            request.callingAppInfo.signingInfoCompat.signingCertificateHistory.first().toByteArray()
-        }.getOrNull() ?: return "android:apk-key-hash:unknown"
-        val hash = Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(cert), Base64.NO_WRAP or Base64.NO_PADDING)
-        return "android:apk-key-hash:$hash"
-    }
-
-    private fun fail(resultData: Intent, message: String) {
-        failException(resultData, message)
-        finish()
-    }
-
-    /**
-     * Debug aid: signed or unsigned, and — since the SDK now requires it (OpenID4VP A.2) — whether a
-     * signed request actually carries `expected_origins`. Reads the JWS payload without verifying it.
-     */
-    private fun logRequestShape(requestObject: String) {
-        val trimmed = requestObject.trim()
-        val jws = runCatching { JSONObject(trimmed).optString("request").ifEmpty { null } }.getOrNull()
-            ?: trimmed.takeUnless { it.startsWith("{") }
-        if (jws == null) {
-            LogStore.log("DC API request: unsigned")
-            return
-        }
-        fun part(i: Int) = runCatching {
-            JSONObject(String(Base64.decode(jws.split(".")[i], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)))
-        }.getOrNull()
-        val header = part(0)
-        val claims = part(1)
-        if (claims == null) {
-            LogStore.log("DC API request: signed (payload unreadable)")
-            return
-        }
-        // The SDK requires typ=oauth-authz-req+jwt (§5) and expected_origins (A.2) on signed requests.
-        val typ = header?.optString("typ")?.ifEmpty { null } ?: "<ABSENT>"
-        val expected = claims.optJSONArray("expected_origins")?.toString() ?: "<ABSENT>"
-        LogStore.log("DC API request: signed · typ=$typ · client_id=${claims.optString("client_id").ifEmpty { "<absent>" }} · expected_origins=$expected")
-    }
-
-    private fun failException(resultData: Intent, message: String?) {
+    private fun finishExceptionData(resultData: Intent, message: String?) {
         LogStore.log("❌ DC API: ${message ?: "error"}")
-        PendingIntentHandler.setGetCredentialException(resultData, GetCredentialUnknownException(message ?: "error"))
+        DcApiResult.setError(resultData, message)
         setResult(RESULT_OK, resultData)
     }
 }

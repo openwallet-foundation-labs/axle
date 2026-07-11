@@ -59,8 +59,13 @@ class Wallet private constructor(
             val issuerValidator = X509ChainValidator(issuerAnchors, at = { java.util.Date.from(ports.clock.now()) })
             val statusClient = StatusListClient(ports.http, X5cIssuerKeyResolver(issuerValidator), clockSeconds)
 
+            val txlog = TransactionLog(
+                store = ports.transactionLogStore,
+                idGenerator = { "txn-" + Base64Url.encode(ports.rng.nextBytes(12)) },
+                clock = clockSeconds,
+            )
             val vci = Openid4VciClient(ports.http, ports.rng, clockSeconds, config.issuance.clientId)
-            val issuance = IssuanceService(vci, store, ports.storage, ports.defaultSecureArea, scope, ports.rng, ports.clock, config.issuance.redirectUri)
+            val issuance = IssuanceService(vci, store, ports.storage, ports.defaultSecureArea, scope, ports.rng, ports.clock, config.issuance.redirectUri, txlog)
 
             // Reader trust: one validator over the configured reader anchors, shared by remote (signed OpenID4VP
             // request objects) and proximity (mdoc reader authentication). No anchors → readers stay untrusted.
@@ -68,11 +73,6 @@ class Wallet private constructor(
                 X509ChainValidator(TrustAnchorSource { TrustAnchors.ofDer(anchors) }, at = { java.util.Date.from(ports.clock.now()) })
             }
             val vp = Openid4VpClient(ports.http, clockSeconds, readerValidator?.let { X509RequestVerifier(it) }, ports.rng)
-            val txlog = TransactionLog(
-                store = ports.transactionLogStore,
-                idGenerator = { "txn-" + Base64Url.encode(ports.rng.nextBytes(12)) },
-                clock = clockSeconds,
-            )
             val recordFailures = config.transactionLog.recordFailures
             val presentation = PresentationService(vp, store, txlog, ports.secureAreas, scope, recordFailures, config.presentation.mdocDeviceAuth, config.presentation.mdocTransactionDataBinder)
             val proximity = ProximityService(store, txlog, ports.secureAreas, scope, readerValidator?.let { X5cMdocReaderTrust(it) }, recordFailures, config.presentation.mdocDeviceAuth, config.presentation.proximitySessionCurve)

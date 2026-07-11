@@ -36,9 +36,13 @@ public struct Wallet {
         let validator = X509ChainValidator(anchorSource: anchorSource, validationTime: ports.clock.now())
         let statusClient = StatusListClient(http: ports.http, keyResolver: X5cIssuerKeyResolver(validator: validator), clock: clockSeconds)
 
+        let txlog = TransactionLog(
+            store: ports.transactionLogStore,
+            idGenerator: { "txn-" + Base64Url.encode(ports.rng.nextBytes(12)) },
+            clock: clockSeconds)
         let vci = Openid4VciClient(http: ports.http, rng: ports.rng, clock: clockSeconds, clientId: config.issuance.clientId)
         let issuance = IssuanceService(vci: vci, store: store, storage: ports.storage, secureArea: ports.defaultSecureArea,
-                                       rng: ports.rng, clock: ports.clock, redirectUri: config.issuance.redirectUri)
+                                       rng: ports.rng, clock: ports.clock, redirectUri: config.issuance.redirectUri, txlog: txlog)
 
         // Reader trust: one validator over the configured reader anchors, shared by remote (signed OpenID4VP
         // request objects) and proximity (mdoc reader authentication). No anchors → readers stay untrusted.
@@ -46,10 +50,6 @@ public struct Wallet {
             X509ChainValidator(anchorSource: LazyIssuerAnchorSource(ders: config.trust.readerAnchorsDer), validationTime: ports.clock.now())
         let vpTrust: (any RequestTrustVerifier)? = readerValidator.map { X509RequestVerifier(validator: $0) }
         let vp = Openid4VpClient(http: ports.http, clock: clockSeconds, trust: vpTrust, rng: ports.rng)
-        let txlog = TransactionLog(
-            store: ports.transactionLogStore,
-            idGenerator: { "txn-" + Base64Url.encode(ports.rng.nextBytes(12)) },
-            clock: clockSeconds)
         let recordFailures = config.transactionLog.recordFailures
         let presentation = PresentationService(vp: vp, store: store, txlog: txlog, secureAreas: ports.secureAreas,
                                                recordFailures: recordFailures,

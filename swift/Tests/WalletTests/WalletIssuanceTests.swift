@@ -1,4 +1,5 @@
 import Foundation
+import TransactionLog
 import Wallet
 import WalletAPI
 import WalletTestKit
@@ -79,6 +80,13 @@ final class WalletIssuanceTests: XCTestCase {
         XCTAssertEqual("Hopae Test Issuer", credential.issuer?.displayName)
         XCTAssertEqual("Personal ID", credential.display?.name)
         XCTAssertEqual("eu.europa.ec.eudi.pid.1", credential.configurationId)
+
+        // ARF/GDPR audit trail: the issuance was recorded as an ISSUANCE transaction
+        let issuanceLog = await wallet.transactions.query(type: .issuance)
+        XCTAssertEqual(1, issuanceLog.count, "one issuance recorded")
+        XCTAssertEqual(.success, issuanceLog[0].status)
+        XCTAssertFalse((issuanceLog[0].issuer ?? "").isEmpty, "issuer recorded")
+        XCTAssertEqual("dc+sd-jwt", issuanceLog[0].documents.first?.format, "PID is an SD-JWT VC")
         wallet.close()
     }
 

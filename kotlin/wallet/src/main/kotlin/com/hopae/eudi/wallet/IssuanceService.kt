@@ -23,6 +23,9 @@ import com.hopae.eudi.wallet.store.CredentialInstance
 import com.hopae.eudi.wallet.store.CredentialMetadata
 import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.EnvelopeLifecycle
+import com.hopae.eudi.wallet.txlog.LoggedDocument
+import com.hopae.eudi.wallet.txlog.TransactionLog
+import com.hopae.eudi.wallet.txlog.TransactionStatus
 import com.hopae.eudi.wallet.vci.CredentialResponse
 import com.hopae.eudi.wallet.vci.IssuanceKeys
 import com.hopae.eudi.wallet.vci.IssuedCredential
@@ -42,6 +45,7 @@ class IssuanceService internal constructor(
     private val rng: Rng,
     private val clock: WalletClock,
     private val redirectUri: String,
+    private val txlog: TransactionLog,
 ) {
     private class BuiltKeys(val keys: IssuanceKeys, val proofKeys: List<KeyInfo>, val dpopKey: KeyInfo)
 
@@ -168,10 +172,18 @@ class IssuanceService internal constructor(
         val instances = response.credentials.mapIndexed { i, credential -> CredentialInstance(proofKeys[i], decode(credential).second) }
         val id = existingId ?: newId()
         store.save(CredentialEnvelope(id, format, clock.now(), EnvelopeLifecycle.Issued(policy, instances), captureMetadata(response)))
+        // ARF/GDPR audit trail: record the issuance (covers immediate, deferred-completed, and reissued).
+        txlog.recordIssuance(response.credentialIssuer ?: "", listOf(loggedDocument(format)), TransactionStatus.SUCCESS)
         // Persist reissue context and best-effort notify the issuer of acceptance.
         storage.put("followup", id.value, contextOf(response, proofKeys, dpopKey, policy, response.configurationId ?: "").encode())
         autoNotify(response, dpopKey)
         return id
+    }
+
+    /** The issued credential as an audit-log document (type only — the full credential is already stored). */
+    private fun loggedDocument(format: CredentialFormat): LoggedDocument = when (format) {
+        is CredentialFormat.MsoMdoc -> LoggedDocument(format = "mso_mdoc", type = format.docType)
+        is CredentialFormat.SdJwtVc -> LoggedDocument(format = "dc+sd-jwt", type = format.vct)
     }
 
     private fun contextOf(response: CredentialResponse, proofKeys: List<KeyHandle>, dpopKey: KeyHandle, policy: CredentialPolicy, configurationId: String) = FollowUpContext(

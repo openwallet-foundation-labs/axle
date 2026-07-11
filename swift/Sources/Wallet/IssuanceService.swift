@@ -4,6 +4,7 @@ import Foundation
 import MDoc
 import OpenID4VCI
 import SdJwt
+import TransactionLog
 import WalletAPI
 
 /// OpenID4VCI issuance. Owns key creation, issuance, persistence, and follow-ups.
@@ -15,6 +16,7 @@ public struct IssuanceService {
     let rng: any Rng
     let clock: any WalletClock
     let redirectUri: String
+    let txlog: TransactionLog
 
     private struct BuiltKeys { let keys: IssuanceKeys; let proofKeys: [KeyInfo]; let dpopKey: KeyInfo }
 
@@ -168,9 +170,19 @@ public struct IssuanceService {
         let id = existingId ?? newId()
         try await store.save(CredentialEnvelope(id: id, format: format, createdAt: clock.now(),
                                                 lifecycle: .issued(policy: policy, instances: instances), metadata: await captureMetadata(response)))
+        // ARF/GDPR audit trail: record the issuance (covers immediate, deferred-completed, and reissued).
+        _ = await txlog.recordIssuance(issuer: response.credentialIssuer ?? "", documents: [loggedDocument(format)], status: .success)
         try await storage.put(collection: "followup", key: id.value, value: contextOf(response, proofKeys, dpopKey, policy, response.configurationId ?? "").encode())
         await autoNotify(response, dpopKey)
         return id
+    }
+
+    /// The issued credential as an audit-log document (type only — the full credential is already stored).
+    private func loggedDocument(_ format: CredentialFormat) -> LoggedDocument {
+        switch format {
+        case let .msoMdoc(docType): return LoggedDocument(format: "mso_mdoc", type: docType)
+        case let .sdJwtVc(vct): return LoggedDocument(format: "dc+sd-jwt", type: vct)
+        }
     }
 
     private func contextOf(_ response: CredentialResponse, _ proofKeys: [KeyHandle], _ dpopKey: KeyHandle, _ policy: CredentialPolicy, _ configurationId: String) -> FollowUpContext {

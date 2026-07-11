@@ -53,6 +53,14 @@ class WalletIssuanceTest {
         assertEquals("https://logo.example/pid.png", credential.display?.logoUri)
         assertEquals("eu.europa.ec.eudi.pid.1", credential.configurationId)
 
+        // ARF/GDPR audit trail: the issuance was recorded as an ISSUANCE transaction
+        val issuanceLog = wallet.transactions.query(type = com.hopae.eudi.wallet.txlog.TransactionType.ISSUANCE)
+        assertEquals(1, issuanceLog.size, "one issuance recorded")
+        val entry = issuanceLog.single()
+        assertEquals(com.hopae.eudi.wallet.txlog.TransactionStatus.SUCCESS, entry.status)
+        assertTrue(entry.issuer!!.isNotBlank(), "issuer recorded")
+        assertEquals("dc+sd-jwt", entry.documents.single().format, "PID is an SD-JWT VC")
+
         wallet.close()
     }
 

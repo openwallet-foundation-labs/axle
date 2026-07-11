@@ -40,7 +40,13 @@ public struct Wallet {
             store: ports.transactionLogStore,
             idGenerator: { "txn-" + Base64Url.encode(ports.rng.nextBytes(12)) },
             clock: clockSeconds)
-        let vci = Openid4VciClient(http: ports.http, rng: ports.rng, clock: clockSeconds, clientId: config.issuance.clientId)
+        // HAIP attestation-based client auth: enabled when a Wallet Provider is wired (else plain client_id).
+        let clientAuth: (any ClientAuthProvider)? = ports.walletAttestation.map {
+            AttestationClientAuth(clientId: config.issuance.clientId, provider: $0, secureArea: ports.defaultSecureArea,
+                                  storage: ports.storage, rng: ports.rng, clock: clockSeconds)
+        }
+        let vci = Openid4VciClient(http: ports.http, rng: ports.rng, clock: clockSeconds,
+                                   clientId: config.issuance.clientId, clientAuth: clientAuth)
         let issuance = IssuanceService(vci: vci, store: store, storage: ports.storage, secureArea: ports.defaultSecureArea,
                                        rng: ports.rng, clock: ports.clock, redirectUri: config.issuance.redirectUri, txlog: txlog)
 

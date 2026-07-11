@@ -99,8 +99,14 @@ are not lost; each deserves its own triage.
     default. Client compiles with the Play Integrity SDK; backend compiles and the dev WUA loop still passes
     against the restarted backend. **Not exercisable here** (needs a Google Cloud project + service account) —
     the real path is coded and documented, dev fallback is operative.
-  - [ ] **Track follow-ups:** Swift parity (App Attest / SecureEnclave attestation); demo on-device wiring;
-    full §4.4.1 unlinkability (per-use WUA key batch); WP verifying the Android Key Attestation chain.
+  - [x] **Swift parity — platform-agnostic layer.** `ClientAuthProvider` protocol (`WalletClientAuth`
+    conforms), vci `clientAuth` takes it; `AttestationClientAuth` (Wallet — persistent instance key,
+    fresh WUA per issuer, §4.4.1) wired in `Wallet.swift`; new `WalletProvider` SPM target with the reference
+    `WalletProviderAttestation` (actor) + `IntegrityTokenProvider`/`DevIntegrityTokenProvider`. Offline +
+    §4.4.1 unit tests pass; existing `ClientAttestationTests` green.
+  - [ ] **Track follow-ups:** iOS platform layer (App Attest / SecureEnclave `SecureArea` attestation — the
+    Swift equivalents of Phase 2/3, distinct APIs); demo on-device wiring; full §4.4.1 unlinkability (per-use
+    WUA key batch); WP verifying the Android Key Attestation chain; OpenID4VCI `key_attestation` proof wiring.
 - **Trust cluster** (audit #16–#20): DCQL `trusted_authorities` (`aki` → `etsi_tl` → `openid_federation`),
   the `verifier_attestation`/`decentralized_identifier`/`openid_federation` client-ID prefixes, LOTL/CRL/OCSP.
   Already **deliberately sequenced last** in `SPEC-MATRIX.md` (needs standing trust infrastructure).

@@ -32,10 +32,19 @@ public struct ClientAttestationPop {
     }
 }
 
+/// Supplies HAIP attestation-based client-auth headers (`OAuth-Client-Attestation[-PoP]`) for a given
+/// authorization-server `audience`. The wallet injects an implementation that fetches the WUA fresh per
+/// issuer (HAIP §4.4.1 unlinkability — a WUA is never reused across authorization servers); a fixed
+/// `WalletClientAuth` is the simplest case.
+public protocol ClientAuthProvider {
+    var clientId: String { get }
+    func headers(audience: String) async throws -> [(String, String)]
+}
+
 /// Attestation-based client authentication (HAIP): pairs the wallet-provider-issued attestation JWT
 /// with a per-request `ClientAttestationPop`. Attached to PAR and token requests as the
 /// `OAuth-Client-Attestation` and `OAuth-Client-Attestation-PoP` headers.
-public struct WalletClientAuth {
+public struct WalletClientAuth: ClientAuthProvider {
     public let clientId: String
     public let attestationJwt: String
     private let pop: ClientAttestationPop

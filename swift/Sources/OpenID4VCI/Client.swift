@@ -73,7 +73,7 @@ public struct Openid4VciClient {
     private let clock: () -> Int64
     private let clientId: String
     /// HAIP attestation-based client authentication (adds OAuth-Client-Attestation[-PoP] to PAR/token).
-    private let clientAuth: WalletClientAuth?
+    private let clientAuth: (any ClientAuthProvider)?
     /// Optional Key Attestation for the proof key(s), added to each key-proof header (HAIP).
     private let keyAttestation: (any KeyAttestationSource)?
     /// How to negotiate signed issuer metadata (OpenID4VCI §12.2.2/§12.2.3). Default: unsigned JSON.
@@ -86,7 +86,7 @@ public struct Openid4VciClient {
     private let preferAttestationProof: Bool
 
     public init(http: any HttpTransport, rng: any Rng, clock: @escaping () -> Int64,
-                clientId: String = "wallet-dev", clientAuth: WalletClientAuth? = nil,
+                clientId: String = "wallet-dev", clientAuth: (any ClientAuthProvider)? = nil,
                 keyAttestation: (any KeyAttestationSource)? = nil,
                 metadataPolicy: IssuerMetadataPolicy = .ignoreSigned,
                 credentialEncryption: CredentialEncryption = .whenRequired,

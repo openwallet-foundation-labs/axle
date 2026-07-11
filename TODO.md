@@ -96,7 +96,12 @@ are not lost; each deserves its own triage.
       retry) + NFC (HCE service, reader) transports; BLE `LogStore`→`WalletLogger`; library manifest merges the
       BLE/NFC permissions + HCE service. android/ modules use group `com.hopae.eudi.android` (avoids clashing
       with the SDK's `com.hopae.eudi:proximity`). Builds + launches on device (`337ca1a`).
-    - [ ] Phase 3: `android/dcapi` — CredMan registration; needs UI/Activity separation (hardest).
+    - [x] Phase 3: `android/dcapi` (`com.hopae.eudi.android:dcapi`) — decomposed (no single SDK port):
+      `DcApiRegistrar` (CredMan registration + matcher, bundled asset w/ override), `DcApiRequest` (envelope
+      parse + origin), `DcApiResult` (marshalling). **Selector branding** (`DcApiBranding` — default logo,
+      auto-scaled, + per-credential override; demo uses its app icon). Thin `GetCredentialActivity` + consent
+      UI stay in the app. Device-checked (registration + branding) (`d0ed915`).
+  **#31 complete** — all three android/ modules (core, proximity, dcapi) extracted + device-checked.
 - **Test infrastructure** (audit #21–#22): shared mdoc golden vectors; RFC 9901 end-to-end fixtures.
 - **iOS** (explicitly out of scope here): CoreBluetooth/CoreNFC transport, session termination on that
   transport, iOS demo app.

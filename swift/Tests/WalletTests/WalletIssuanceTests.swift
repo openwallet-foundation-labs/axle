@@ -90,6 +90,19 @@ final class WalletIssuanceTests: XCTestCase {
         wallet.close()
     }
 
+    func testFailedIssuanceRecordsError() async throws {
+        let (wallet, _, _) = try await makeWallet()
+        // Reissuing a credential that does not exist fails inside the issuance flow.
+        let session = wallet.issuance.reissue(CredentialId("does-not-exist"))
+        guard case .failed = await drive(session) else { return XCTFail("expected .failed") }
+
+        // ARF/GDPR: the failed attempt was recorded as an ERROR issuance transaction
+        let log = await wallet.transactions.query(type: .issuance)
+        XCTAssertEqual(1, log.count, "one issuance attempt recorded")
+        XCTAssertEqual(.error, log[0].status)
+        wallet.close()
+    }
+
     func testAuthorizationCodeWithBrowserStep() async throws {
         let (wallet, mock, _) = try await makeWallet()
         let session = wallet.issuance.start(.fromIssuer("https://issuer.example", configurationId: "eu.europa.ec.eudi.pid.1"))

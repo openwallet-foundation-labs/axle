@@ -33,6 +33,7 @@ import com.hopae.eudi.wallet.vci.NotificationEvent
 import com.hopae.eudi.wallet.vci.Openid4VciClient
 import com.hopae.eudi.wallet.vci.ProofKey
 import com.hopae.eudi.wallet.vci.VciException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 
 /** OpenID4VCI issuance. Owns key creation, issuance, persistence, and follow-ups. */
@@ -112,7 +113,18 @@ class IssuanceService internal constructor(
     }
 
     private fun session(flow: suspend IssuanceSession.() -> Unit): IssuanceSession =
-        IssuanceSession(scope, flow).also { it.launch() }
+        IssuanceSession(scope) {
+            try {
+                flow()
+            } catch (e: CancellationException) {
+                throw e // a cancelled session is not a failed issuance — don't record it
+            } catch (e: Throwable) {
+                // ARF/GDPR: record the failed issuance attempt. Covers start / resumeDeferred / reissue; the
+                // error message carries the context. Rethrown so the session still ends in Failed.
+                txlog.recordIssuance(issuer = "", documents = emptyList(), status = TransactionStatus.ERROR, error = e.message ?: e.toString())
+                throw e
+            }
+        }.also { it.launch() }
 
     private suspend fun issueFromOffer(session: IssuanceSession, offer: CredentialOffer, request: IssuanceRequest, keys: IssuanceKeys): CredentialResponse =
         if (offer.raw.preAuthorizedCode != null) {

@@ -91,7 +91,19 @@ public struct IssuanceService {
     }
 
     private func session(_ flow: @escaping (IssuanceSession) async throws -> Void) -> IssuanceSession {
-        let s = IssuanceSession(flow)
+        let txlog = self.txlog
+        let s = IssuanceSession { session in
+            do {
+                try await flow(session)
+            } catch is CancellationError {
+                throw CancellationError() // a cancelled session is not a failed issuance — don't record it
+            } catch {
+                // ARF/GDPR: record the failed issuance attempt (start / resumeDeferred / reissue); the error
+                // message carries the context. Rethrown so the session still ends in .failed.
+                _ = await txlog.recordIssuance(issuer: "", documents: [], status: .error, error: String(describing: error))
+                throw error
+            }
+        }
         s.launch()
         return s
     }

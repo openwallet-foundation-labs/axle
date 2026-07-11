@@ -65,6 +65,28 @@ class WalletIssuanceTest {
     }
 
     @Test
+    fun failedIssuanceRecordsError() = runBlocking {
+        val area = SoftwareSecureArea()
+        val issuerKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val mock = MockIssuer(area, issuerKey, now = 1_700_000_000L)
+        val wallet = Wallet.create(WalletConfig(), WalletPorts(listOf(area), InMemoryStorageDriver(), mock))
+
+        val offer = wallet.issuance.resolveOffer(mock.credentialOfferJson)
+        // The mock requires tx_code "1234"; a wrong code fails the token request → the issuance fails.
+        val session = wallet.issuance.start(IssuanceRequest.fromOffer(offer, "eu.europa.ec.eudi.pid.1", txCode = "0000"))
+        val terminal = withTimeout(15_000) { session.state.first { it.isTerminal } }
+        assertTrue(terminal is IssuanceState.Failed, "expected Failed, got $terminal")
+        assertEquals(0, wallet.credentials.list().size, "nothing stored on failure")
+
+        // ARF/GDPR: the failed attempt was recorded as an ERROR issuance transaction
+        val log = wallet.transactions.query(type = com.hopae.eudi.wallet.txlog.TransactionType.ISSUANCE)
+        assertEquals(1, log.size, "one issuance attempt recorded")
+        assertEquals(com.hopae.eudi.wallet.txlog.TransactionStatus.ERROR, log.single().status)
+
+        wallet.close()
+    }
+
+    @Test
     fun authorizationCodeIssuanceWithBrowserStep() = runBlocking {
         val area = SoftwareSecureArea()
         val issuerKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))

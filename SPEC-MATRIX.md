@@ -47,7 +47,7 @@ Legend: ✅ implemented · 🟡 partial · ⬜ not yet.
 | Spec | Anchor version | Status |
 |---|---|---|
 | IETF Token Status List | draft-ietf-oauth-status-list | ✅ `statuslist` / `StatusList` — fetch + verify status token (signature + issuer chain), cached, index lookup |
-| Transaction log (ARF / GDPR) | ARF transaction logging | ✅ `txlog` / `TransactionLog` — relying party (id/name/trusted/chain), per-document disclosed claims, history/query |
+| Transaction log (ARF / GDPR) | ARF transaction logging | ✅ `txlog` / `TransactionLog` — **presentations** (relying party id/name/trusted/chain, per-document disclosed claims) **and issuances** (issuer + credential type, recorded on every successful issue / deferred-complete / reissue); history/query by type/party/time |
 
 ## Detailed coverage & known gaps
 

@@ -1,4 +1,4 @@
-package com.hopae.eudi.demo.adapters
+package com.hopae.eudi.wallet.android
 
 import android.util.Base64
 import com.hopae.eudi.wallet.spi.StorageDriver
@@ -6,8 +6,9 @@ import com.hopae.eudi.wallet.spi.StorageTx
 import java.io.File
 
 /**
- * Persistent [StorageDriver] over the app's private files directory. Debug-grade: values are stored as
- * plain files. A production wallet should wrap this with an encrypted store (e.g. EncryptedFile / SQLCipher).
+ * Persistent [StorageDriver] over a base directory (typically the app's private files dir). Debug-grade:
+ * values are stored as plain files. A production wallet should wrap this with an encrypted store
+ * (e.g. EncryptedFile / SQLCipher).
  */
 class FileStorageDriver(private val baseDir: File) : StorageDriver {
 

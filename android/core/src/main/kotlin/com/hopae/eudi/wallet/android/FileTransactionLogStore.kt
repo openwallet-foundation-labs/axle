@@ -1,4 +1,4 @@
-package com.hopae.eudi.demo.adapters
+package com.hopae.eudi.wallet.android
 
 import com.hopae.eudi.wallet.txlog.TransactionLogCodec
 import com.hopae.eudi.wallet.txlog.TransactionLogEntry

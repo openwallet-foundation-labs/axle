@@ -1,11 +1,11 @@
 package com.hopae.eudi.demo
 
 import android.content.Context
-import com.hopae.eudi.demo.adapters.AndroidKeystoreSecureArea
-import com.hopae.eudi.demo.adapters.FileStorageDriver
-import com.hopae.eudi.demo.adapters.FileTransactionLogStore
 import com.hopae.eudi.demo.adapters.LogWalletLogger
-import com.hopae.eudi.demo.adapters.OkHttpTransport
+import com.hopae.eudi.wallet.android.AndroidKeystoreSecureArea
+import com.hopae.eudi.wallet.android.FileStorageDriver
+import com.hopae.eudi.wallet.android.FileTransactionLogStore
+import com.hopae.eudi.wallet.android.OkHttpTransport
 import com.hopae.eudi.wallet.IssuanceConfig
 import com.hopae.eudi.wallet.TransactionLogConfig
 import com.hopae.eudi.wallet.Wallet
@@ -35,6 +35,7 @@ object DemoWallet {
             val logsDir = File(filesDir, "logs").apply { mkdirs() }
             LogStore.attach(File(logsDir, "debug.log"))
             transactionStore = FileTransactionLogStore(File(logsDir, "transactions.log"))
+            val logger = LogWalletLogger() // routes SDK + adapter logs into the in-app LogStore
             Wallet.create(
                 config = WalletConfig(
                     // Authorization-code redirect — matches the EUDI reference wallet's scheme.
@@ -45,8 +46,8 @@ object DemoWallet {
                 ports = WalletPorts(
                     secureAreas = listOf(AndroidKeystoreSecureArea()),
                     storage = FileStorageDriver(File(filesDir, "wallet")),
-                    http = OkHttpTransport(),
-                    logger = LogWalletLogger(),
+                    http = OkHttpTransport(logger = logger),
+                    logger = logger,
                     transactionLogStore = transactionStore,
                 ),
             ).also {

@@ -1,4 +1,4 @@
-package com.hopae.eudi.demo.adapters
+package com.hopae.eudi.wallet.android
 
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
@@ -29,8 +29,8 @@ import javax.crypto.KeyAgreement
 
 /**
  * [SecureArea] backed by the **Android Keystore**: holder keys are hardware-bound and **persist across
- * app restarts** (unlike the in-memory [SoftwareSecureArea][com.hopae.eudi.wallet.testkit.SoftwareSecureArea]),
- * so credentials issued in one session can still be presented after a restart. Private keys never leave the TEE.
+ * app restarts** (unlike an in-memory software secure area), so credentials issued in one session can still
+ * be presented after a restart. Private keys never leave the TEE.
  */
 class AndroidKeystoreSecureArea(
     override val id: SecureAreaId = SecureAreaId("android-keystore"),

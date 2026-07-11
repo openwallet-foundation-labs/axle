@@ -1,18 +1,24 @@
-package com.hopae.eudi.demo.adapters
+package com.hopae.eudi.wallet.android
 
-import com.hopae.eudi.demo.LogStore
 import com.hopae.eudi.wallet.spi.HttpMethod
 import com.hopae.eudi.wallet.spi.HttpRequest
 import com.hopae.eudi.wallet.spi.HttpResponse
 import com.hopae.eudi.wallet.spi.HttpTransport
+import com.hopae.eudi.wallet.spi.WalletLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
-/** [HttpTransport] backed by OkHttp — logs every call to [LogStore] and honours the per-request redirect policy. */
-class OkHttpTransport(private val base: OkHttpClient = OkHttpClient()) : HttpTransport {
+/**
+ * [HttpTransport] backed by OkHttp. Honours the per-request redirect policy and logs each call through the
+ * injected [WalletLogger] (null = no logging) — no coupling to any app's log sink.
+ */
+class OkHttpTransport(
+    private val base: OkHttpClient = OkHttpClient(),
+    private val logger: WalletLogger? = null,
+) : HttpTransport {
 
     override suspend fun execute(request: HttpRequest): HttpResponse = withContext(Dispatchers.IO) {
         val client = if (request.followRedirects) base
@@ -29,16 +35,16 @@ class OkHttpTransport(private val base: OkHttpClient = OkHttpClient()) : HttpTra
             HttpMethod.DELETE -> if (body != null) builder.delete(body) else builder.delete()
         }
 
-        LogStore.log("HTTP → ${request.method} ${request.url}")
+        logger?.log(WalletLogger.Level.Debug, "HTTP → ${request.method} ${request.url}")
         val t0 = System.currentTimeMillis()
         try {
             client.newCall(builder.build()).execute().use { response ->
                 val bytes = response.body?.bytes() ?: ByteArray(0)
-                LogStore.log("HTTP ← ${response.code} ${request.url}  (${System.currentTimeMillis() - t0}ms, ${bytes.size}B)")
+                logger?.log(WalletLogger.Level.Debug, "HTTP ← ${response.code} ${request.url}  (${System.currentTimeMillis() - t0}ms, ${bytes.size}B)")
                 HttpResponse(response.code, response.headers.map { it.first to it.second }, bytes)
             }
         } catch (e: Exception) {
-            LogStore.log("HTTP ✗ ${request.url}  ${e.javaClass.simpleName}: ${e.message}")
+            logger?.log(WalletLogger.Level.Warn, "HTTP ✗ ${request.url}", e)
             throw e
         }
     }

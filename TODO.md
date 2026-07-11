@@ -89,8 +89,11 @@ are not lost; each deserves its own triage.
     cancellation aborts; stale callbacks guarded by `g === gatt`. Device-verified (happy path + clean
     cancellation). Note: this is the only meaningful "reconnect" — mdoc has no *session* resumption
     (keys/counters bound to the connection), so a mid-session drop restarts from engagement, by design.
-  - [ ] **#31 promote demo adapters into a supported Android library module** — not started (needs a new
-    AGP library module; the pure-Kotlin `kotlin/` tree can't host `android.bluetooth`).
+  - **#31 promote demo adapters into supported Android library modules** — new `android/` composite build:
+    - [x] Phase 1: `android/core` (`com.hopae.eudi:core`) — SecureArea, Storage, TxLogStore, Http adapters;
+      `OkHttpTransport` decoupled from `LogStore` via an injected `WalletLogger`. Device-verified (commit `c10e9a8`).
+    - [ ] Phase 2: `android/proximity` — move BLE/NFC transports (swap `LogStore`→`WalletLogger` first).
+    - [ ] Phase 3: `android/dcapi` — CredMan registration; needs UI/Activity separation (hardest).
 - **Test infrastructure** (audit #21–#22): shared mdoc golden vectors; RFC 9901 end-to-end fixtures.
 - **iOS** (explicitly out of scope here): CoreBluetooth/CoreNFC transport, session termination on that
   transport, iOS demo app.

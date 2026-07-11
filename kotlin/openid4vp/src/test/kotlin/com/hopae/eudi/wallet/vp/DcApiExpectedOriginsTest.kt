@@ -110,4 +110,15 @@ class DcApiExpectedOriginsTest {
         assertEquals(origin, request.origin)
         assertEquals(origin, request.clientId)
     }
+
+    /** 18013-7 C.5: the Origin binds the presentation, so a blank/whitespace Origin is rejected outright. */
+    @Test
+    fun blankOriginIsRejected() = runBlocking<Unit> {
+        assertFailsWith<VpException.InvalidRequest> {
+            client().resolveDcApiRequest(claims(clientId = null, expectedOrigins = null), "")
+        }
+        assertFailsWith<VpException.InvalidRequest> {
+            client().resolveDcApiRequest(claims(clientId = null, expectedOrigins = null), "   ")
+        }
+    }
 }

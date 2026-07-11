@@ -105,6 +105,9 @@ public struct AuthorizationRequestResolver {
     /// object (unsigned JSON or a signed JWS) has no `response_uri`; `origin` is supplied by the
     /// platform and binds the presentation. Uses `dc_api` / `dc_api.jwt` response modes.
     public func resolveDcApi(_ requestObject: String, origin: String) async throws -> ResolvedRequest {
+        // OpenID4VP DC API / 18013-7 C.5: the platform Origin binds the presentation (and, unsigned, is the
+        // verifier's identity). A blank origin binds nothing and must be rejected before it is used.
+        guard !origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VpError.invalidRequest("DC API origin must not be blank") }
         let trimmed = requestObject.trimmingCharacters(in: .whitespacesAndNewlines)
         let claims: JsonValue
         let verifier: VerifierInfo

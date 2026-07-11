@@ -28,6 +28,12 @@ final class DeviceRequestTests: XCTestCase {
             validUntil: MdocTestIssuer.isoFormatter.date(from: "2027-01-01T00:00:00Z")!)
     }
 
+    /// 18013-7 C.5: a blank/whitespace origin cannot bind the response, so the transcript is not built.
+    func testDcApiTranscriptRejectsBlankOrigin() {
+        XCTAssertThrowsError(try MdocSessionTranscript.dcApiIsoMdoc(encryptionInfoBase64: "ZW5j", origin: ""))
+        XCTAssertThrowsError(try MdocSessionTranscript.dcApiIsoMdoc(encryptionInfoBase64: "ZW5j", origin: "   "))
+    }
+
     func testParsesDeviceRequest() async throws {
         let area = SoftwareSecureArea()
         let readerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))

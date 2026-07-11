@@ -8,6 +8,9 @@ public enum MdocSessionTranscript {
     /// SessionTranscript for the ISO `org-iso-mdoc` Digital Credentials API protocol
     /// (ISO/IEC TS 18013-7:2025 Annex C): `[null, null, ["dcapi", SHA-256(CBOR([base64url(EncryptionInfo), origin]))]]`.
     public static func dcApiIsoMdoc(encryptionInfoBase64: String, origin: String) throws -> Cbor {
+        // 18013-7 C.5: the origin binds the response to the requesting site. A blank origin cannot bind
+        // anything, so the transcript must not be built from one — abort rather than emit a useless binding.
+        guard !origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw MdocError("DC API origin must not be blank") }
         let info = Cbor.array([.text(encryptionInfoBase64), .text(origin)])
         let hash = [UInt8](SHA256.hash(data: Data(try CborEncoder.encode(info))))
         return .array([.null, .null, .array([.text("dcapi"), .bytes(hash)])])

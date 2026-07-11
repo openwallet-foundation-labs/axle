@@ -90,6 +90,9 @@ class AuthorizationRequestResolver(
      * platform and binds the presentation. Uses `dc_api` / `dc_api.jwt` response modes.
      */
     suspend fun resolveDcApi(requestObject: String, origin: String): ResolvedRequest {
+        // OpenID4VP DC API / 18013-7 C.5: the platform Origin binds the presentation (and, unsigned, is the
+        // verifier's identity). A blank origin binds nothing and must be rejected before it is used.
+        if (origin.isBlank()) throw VpException.InvalidRequest("DC API origin must not be blank")
         val trimmed = requestObject.trim()
         val (claims, verifier) = if (trimmed.startsWith("{")) {
             val c = JsonValue.parse(trimmed) as? JsonValue.Obj ?: throw VpException.InvalidRequest("DC API request must be JSON")

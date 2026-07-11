@@ -40,6 +40,13 @@ class DeviceRequestTest {
 
     private fun readerTrust(key: EcPublicKey) = MdocReaderTrust { key }
 
+    /** 18013-7 C.5: a blank/whitespace origin cannot bind the response, so the transcript is not built. */
+    @Test
+    fun dcApiTranscriptRejectsBlankOrigin() {
+        assertFailsWith<MdocException> { MdocSessionTranscript.dcApiIsoMdoc("ZW5j", "") }
+        assertFailsWith<MdocException> { MdocSessionTranscript.dcApiIsoMdoc("ZW5j", "   ") }
+    }
+
     @Test
     fun parsesDeviceRequest() = runBlocking {
         val f = Fixture()

@@ -106,4 +106,11 @@ final class DcApiExpectedOriginsTests: XCTestCase {
         XCTAssertEqual(origin, request.origin)
         XCTAssertEqual(origin, request.clientId)
     }
+
+    /// 18013-7 C.5: the Origin binds the presentation, so a blank/whitespace Origin is rejected outright.
+    func testBlankOriginIsRejected() async throws {
+        let unsigned = claims(clientId: nil, expectedOrigins: nil)
+        await expectInvalidRequest(unsigned, "", "blank origin must be rejected")
+        await expectInvalidRequest(unsigned, "   ", "whitespace origin must be rejected")
+    }
 }

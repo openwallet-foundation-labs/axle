@@ -19,8 +19,11 @@ import android.os.ParcelUuid
 import com.hopae.eudi.demo.LogStore
 import com.hopae.eudi.wallet.proximity.DeviceEngagement
 import com.hopae.eudi.wallet.spi.ProximityTransport
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import java.io.ByteArrayOutputStream
 import java.util.UUID
@@ -41,6 +44,10 @@ class BleGattClientTransport(
     identKey: ByteArray? = null,
     /** Upper bound on a single [receive]; guards against a stalled peer (no infinite wait). */
     private val receiveTimeoutMs: Long = 60_000,
+    /** Initial-connection attempts (Android BLE connect is flaky — GATT_ERROR 133 etc.); each re-scans + reconnects. */
+    private val connectAttempts: Int = 3,
+    /** Backoff between connect attempts. */
+    private val retryDelayMs: Long = 400,
 ) : ProximityTransport {
     override fun retrievalMethods(): List<ByteArray> = advertisedMethods
 
@@ -64,35 +71,64 @@ class BleGattClientTransport(
 
     private val incoming = Channel<ByteArray>(Channel.UNLIMITED)
     private val assembling = ByteArrayOutputStream()
-    private val connectedSignal = CompletableDeferred<Boolean>()
+    @Volatile private var connectedSignal = CompletableDeferred<Boolean>() // fresh per connect attempt
     private var pending: CompletableDeferred<Boolean>? = null
     private var pendingRead: CompletableDeferred<ByteArray>? = null
 
     /**
-     * Scans, connects, subscribes to notifications, negotiates MTU, and signals start. On any failure (or
-     * coroutine cancellation) the half-open GATT connection and scanner are torn down before rethrowing, so a
-     * failed attempt never leaks a connection.
+     * Connects and subscribes, retrying the flaky initial connection up to [connectAttempts] times (Android BLE
+     * often fails the first `connectGatt` with GATT_ERROR 133). Each attempt re-scans and reconnects with fresh
+     * per-attempt state; the half-open GATT is torn down between attempts, but the message channel survives.
+     * There is no *session* resumption (mdoc keys/counters are bound to the connection) — this only hardens the
+     * initial link setup. Coroutine cancellation aborts immediately without retrying.
      */
     suspend fun connect() {
-        try {
-            val device = scan()
-            gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
-            withTimeout(15_000) { connectedSignal.await() }
-            awaitOp { gatt!!.requestMtu(517) }
-            awaitOp { gatt!!.discoverServices() }
-            val service = gatt!!.getService(serviceUuid) ?: error("peer service $serviceUuid not found")
-            stateChar = service.getCharacteristic(uuids.state)
-            c2sChar = service.getCharacteristic(uuids.client2Server)
-            s2cChar = service.getCharacteristic(uuids.server2Client)
-            enableNotify(stateChar!!)
-            enableNotify(s2cChar!!)
-            verifyIdent(service) // §8.3.3.1.1.4 — no-op unless identKey was supplied
-            writeChar(stateChar!!, byteArrayOf(0x01), BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) // STATE_START
-            LogStore.log("BLE client connected + subscribed (mtu=$mtu)")
-        } catch (e: Throwable) {
-            stop() // failure/cancellation: don't leak the half-open GATT + scanner
-            throw e
+        var lastError: Throwable? = null
+        for (attempt in 1..connectAttempts) {
+            try {
+                connectOnce()
+                return
+            } catch (e: TimeoutCancellationException) {
+                lastError = e // a connect/op timeout is retryable (must precede CancellationException — it is a subtype)
+            } catch (e: CancellationException) {
+                cleanupGatt() // genuine cancellation (caller closed the scope) — abort, don't retry
+                throw e
+            } catch (e: Throwable) {
+                lastError = e
+            }
+            LogStore.log("BLE client connect attempt $attempt/$connectAttempts failed: ${lastError?.message}")
+            cleanupGatt() // drop the half-open GATT + scanner; keep the message channel for the next attempt
+            if (attempt < connectAttempts) delay(retryDelayMs)
         }
+        stop()
+        throw lastError ?: IllegalStateException("BLE connect failed after $connectAttempts attempts")
+    }
+
+    private suspend fun connectOnce() {
+        connectedSignal = CompletableDeferred() // fresh signal so a stale callback can't complete this attempt
+        assembling.reset()
+        val device = scan()
+        gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+        withTimeout(15_000) { connectedSignal.await() }
+        awaitOp { gatt!!.requestMtu(517) }
+        awaitOp { gatt!!.discoverServices() }
+        val service = gatt!!.getService(serviceUuid) ?: error("peer service $serviceUuid not found")
+        stateChar = service.getCharacteristic(uuids.state)
+        c2sChar = service.getCharacteristic(uuids.client2Server)
+        s2cChar = service.getCharacteristic(uuids.server2Client)
+        enableNotify(stateChar!!)
+        enableNotify(s2cChar!!)
+        verifyIdent(service) // §8.3.3.1.1.4 — no-op unless identKey was supplied
+        writeChar(stateChar!!, byteArrayOf(0x01), BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) // STATE_START
+        LogStore.log("BLE client connected + subscribed (mtu=$mtu)")
+    }
+
+    /** Tears down the half-open GATT + scanner without closing the message channel (so a retry can reuse it). */
+    private fun cleanupGatt() {
+        if (pendingRead?.isCompleted == false) pendingRead?.completeExceptionally(IllegalStateException("connect attempt aborted"))
+        runCatching { gatt?.disconnect() }
+        runCatching { gatt?.close() }
+        gatt = null
     }
 
     /**
@@ -153,10 +189,7 @@ class BleGattClientTransport(
 
     /** Synchronous teardown, safe to call from a Compose `onDispose`. */
     fun stop() {
-        if (pendingRead?.isCompleted == false) pendingRead?.completeExceptionally(IllegalStateException("transport closed"))
-        runCatching { gatt?.disconnect() }
-        runCatching { gatt?.close() }
-        gatt = null
+        cleanupGatt()
         runCatching { incoming.close() }
     }
 
@@ -194,6 +227,7 @@ class BleGattClientTransport(
 
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            if (g !== gatt) return // a late callback from a prior (retried) connection — ignore
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 if (!connectedSignal.isCompleted) connectedSignal.complete(true)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -202,15 +236,17 @@ class BleGattClientTransport(
         }
 
         override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            if (g !== gatt) return
             this@BleGattClientTransport.mtu = mtu
             pending?.complete(status == BluetoothGatt.GATT_SUCCESS)
         }
 
-        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) { pending?.complete(status == BluetoothGatt.GATT_SUCCESS) }
-        override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) { pending?.complete(status == BluetoothGatt.GATT_SUCCESS) }
-        override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) { pending?.complete(status == BluetoothGatt.GATT_SUCCESS) }
+        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) { if (g === gatt) pending?.complete(status == BluetoothGatt.GATT_SUCCESS) }
+        override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) { if (g === gatt) pending?.complete(status == BluetoothGatt.GATT_SUCCESS) }
+        override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) { if (g === gatt) pending?.complete(status == BluetoothGatt.GATT_SUCCESS) }
 
         override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+            if (g !== gatt) return
             if (status == BluetoothGatt.GATT_SUCCESS) pendingRead?.complete(value)
             else pendingRead?.completeExceptionally(IllegalStateException("Ident read failed (status $status)"))
         }

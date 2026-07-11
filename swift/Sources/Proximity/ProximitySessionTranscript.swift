@@ -16,9 +16,12 @@ public enum ProximitySessionTranscript {
     /// SessionTranscript bytes fed to session-key derivation (HKDF salt = SHA-256 of these).
     public static func encode(_ sessionTranscript: Cbor) throws -> [UInt8] { try CborEncoder.encode(sessionTranscript) }
 
-    /// The NFC static-handover `Handover` for the SessionTranscript (ISO 18013-5 §9.1.5.1): `[HandoverSelectMessage, null]`.
-    public static func nfcHandover(_ handoverSelectMessage: [UInt8]) -> Cbor {
-        .array([.bytes(handoverSelectMessage), .null])
+    /// The NFC `Handover` for the SessionTranscript (ISO 18013-5 §9.1.5.1):
+    /// `[HandoverSelectMessage, HandoverRequestMessage / null]`. Static handover passes no request message
+    /// (the second element is `null`, §8.2.2.1); negotiated handover passes the reader's Handover Request
+    /// Message so both messages are bound into the transcript.
+    public static func nfcHandover(_ handoverSelectMessage: [UInt8], handoverRequestMessage: [UInt8]? = nil) -> Cbor {
+        .array([.bytes(handoverSelectMessage), handoverRequestMessage.map { Cbor.bytes($0) } ?? .null])
     }
 }
 

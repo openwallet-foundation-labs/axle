@@ -7,6 +7,8 @@ ARF **Wallet Provider** 백엔드. wallet 인스턴스 무결성을 보증하고
 
 SDK의 `WalletAttestationProvider` 포트가 이 백엔드에 붙어 HAIP attestation-based client auth를 실물로 완성한다. (모노레포: `eudi-wallet-sdk/wallet-provider`.)
 
+**Play Integrity 설정·검증**(Google Cloud 프로젝트·서비스 계정·클라이언트/백엔드 배선·verdict 읽기·내부테스트로 `PLAY_RECOGNIZED` 받기)은 [`PLAY-INTEGRITY.md`](PLAY-INTEGRITY.md) 참고.
+
 ## 엔드포인트
 
 | 메서드 | 경로 | 역할 |

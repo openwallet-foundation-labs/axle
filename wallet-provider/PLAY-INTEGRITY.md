@@ -97,7 +97,8 @@ Play — the `certificateSha256Digest` is the debug signing key) + `appLicensing
 ## 7. Getting `PLAY_RECOGNIZED` (Play Console internal testing)
 
 `appIntegrity` is `UNRECOGNIZED_VERSION` for a side-loaded build. To get `PLAY_RECOGNIZED` **without a public
-release or review**, use the **Internal testing** track:
+release or review**, use the **Internal testing** track (the full release-build + upload + tester workflow is
+[`demo/RELEASE.md`](../demo/RELEASE.md); the short version):
 
 1. Build a **signed release AAB** (the debug APK won't do — Play recognises the Play-distributed, Play-signed
    build, not a locally debug-signed one).

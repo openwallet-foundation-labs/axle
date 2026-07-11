@@ -27,7 +27,7 @@ the official EUDI reference issuer.
 | `kotlin/` | Kotlin SDK (pure JVM, Gradle multi-module) |
 | `swift/` | Swift package (no Apple-framework imports; Linux-buildable) |
 | `android/` | Android platform-adapter libraries (`com.hopae.eudi.android:core`/`proximity`/`dcapi`) — Keystore SecureArea, storage, OkHttp, BLE + NFC transports, DC API registrar |
-| `demo/` | Android debug wallet app (Compose) — consumes `kotlin/` + `android/` via composite builds |
+| `demo/` | Android wallet app (Compose) — consumes `kotlin/` + `android/` via composite builds; release + Play internal-testing distribution in [`demo/RELEASE.md`](demo/RELEASE.md) |
 | `docs/` | Docusaurus developer docs (English + 한국어) |
 | `wallet-provider/` | NestJS Wallet Provider backend (WUA / wallet-unit attestation) |
 | `vectors/` | Shared golden test vectors consumed by both test suites |

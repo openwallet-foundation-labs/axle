@@ -102,7 +102,14 @@ let package = Package(
         .testTarget(
             name: "TrustTests",
             dependencies: ["Trust", "WalletTestKit", .product(name: "X509", package: "swift-certificates")],
-            resources: [.copy("Resources/pid_issuer_ca_ut_02.der")]
+            resources: [
+                .copy("Resources/pid_issuer_ca_ut_02.der"),
+                .copy("Resources/registrar_ca.der"),
+                .copy("Resources/wrpac_leaf.der"),
+                .copy("Resources/wrprc.jwt"),
+                .copy("Resources/wrpac_leaf_mediated.der"),
+                .copy("Resources/wrprc_intermediated.jwt"),
+            ]
         ),
     ]
 )

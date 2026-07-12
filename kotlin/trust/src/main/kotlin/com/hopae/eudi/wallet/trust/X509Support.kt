@@ -10,6 +10,7 @@ import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.security.interfaces.ECPublicKey
 import java.util.Base64
+import javax.security.auth.x500.X500Principal
 
 class TrustException(message: String) : Exception(message)
 
@@ -54,6 +55,23 @@ object X509Support {
     /** The subject CommonName of a leaf certificate given its DER bytes (null if unparseable). */
     fun commonNameFromDer(der: ByteArray): String? = runCatching {
         commonName(CertificateFactory.getInstance("X.509").generateCertificate(ByteArrayInputStream(der)) as X509Certificate)
+    }.getOrNull()
+
+    /**
+     * subject organizationIdentifier (OID 2.5.4.97) — the registered semantic identifier a WRPAC carries
+     * and a WRPRC `sub` must match (ETSI TS 119 475 GEN-5.1.1-02). JCA has no keyword for this attribute,
+     * so render the DN with an explicit OID→keyword map before extracting it.
+     */
+    fun organizationIdentifier(cert: X509Certificate): String? {
+        val dn = cert.subjectX500Principal.getName(
+            X500Principal.RFC2253,
+            mapOf("2.5.4.97" to "organizationIdentifier"),
+        )
+        return Regex("organizationIdentifier=([^,]+)").find(dn)?.groupValues?.get(1)
+    }
+
+    fun organizationIdentifierFromDer(der: ByteArray): String? = runCatching {
+        organizationIdentifier(parse(der))
     }.getOrNull()
 
     /** base64url(SHA-256(DER)) — the x509_hash client_id value. */

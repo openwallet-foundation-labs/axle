@@ -73,6 +73,24 @@ public enum X509Support {
         return commonName(cert)
     }
 
+    /// subject organizationIdentifier (OID 2.5.4.97) — the registered semantic identifier a WRPAC
+    /// carries and a WRPRC `sub` must match (ETSI TS 119 475 GEN-5.1.1-02). swift-certificates has no
+    /// named constant for this attribute, so match the raw OID.
+    static func organizationIdentifier(_ cert: Certificate) -> String? {
+        let oid: ASN1ObjectIdentifier = [2, 5, 4, 97]
+        for rdn in cert.subject {
+            for attr in rdn where attr.type == oid {
+                return attr.value.description
+            }
+        }
+        return nil
+    }
+
+    public static func organizationIdentifier(fromDer der: [UInt8]) -> String? {
+        guard let cert = try? Certificate(derEncoded: der) else { return nil }
+        return organizationIdentifier(cert)
+    }
+
     /// base64url(SHA-256(DER)) — the x509_hash client_id value.
     static func sha256Thumbprint(_ cert: Certificate) throws -> String {
         Base64Url.encode([UInt8](SHA256.hash(data: Data(try der(cert)))))

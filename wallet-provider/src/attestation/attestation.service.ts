@@ -15,14 +15,21 @@ export class AttestationService {
    * Wallet Unit Attestation = OAuth 2.0 client attestation
    * (draft-ietf-oauth-attestation-based-client-auth). Binds the wallet instance key via `cnf.jwk`;
    * the wallet later signs a matching `oauth-client-attestation-pop+jwt` to authenticate to issuers.
+   * `statusRef` embeds a Token Status List reference so relying parties can check revocation.
    */
-  async issueWalletAttestation(instanceKey: jose.JWK, clientId: string): Promise<string> {
-    return new jose.SignJWT({
+  async issueWalletAttestation(
+    instanceKey: jose.JWK,
+    clientId: string,
+    statusRef?: { idx: number; uri: string },
+  ): Promise<string> {
+    const payload: jose.JWTPayload = {
       cnf: { jwk: instanceKey },
       wallet_name: 'Hopae EUDI Wallet',
       wallet_link: 'https://wallet.hopae.dev',
       aal: 'https://trust-list.eu/aal/high',
-    })
+    };
+    if (statusRef) payload.status = { status_list: { idx: statusRef.idx, uri: statusRef.uri } };
+    return new jose.SignJWT(payload)
       .setProtectedHeader({ typ: 'oauth-client-attestation+jwt', alg: 'ES256', x5c: this.keystore.x5c })
       .setIssuer(this.keystore.issuer)
       .setSubject(clientId)

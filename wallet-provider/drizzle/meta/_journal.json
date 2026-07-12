@@ -8,6 +8,13 @@
       "when": 1783814710596,
       "tag": "0000_previous_elektra",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783821662948,
+      "tag": "0001_pretty_phalanx",
+      "breakpoints": true
     }
   ]
 }

@@ -11,6 +11,7 @@ export interface WalletInstance {
   createdAt: number; // epoch ms
   revoked: boolean;
   revokedAt: number | null; // epoch ms | null
+  statusIdx: number; // Token Status List bit index for this instance's WUA
 }
 
 /** Registry of wallet instances, persisted in Postgres via Drizzle. */
@@ -38,6 +39,13 @@ export class InstanceRepository {
     return true;
   }
 
+  /** All instances' Token Status List bit index + revocation flag, for building the status list. */
+  async allStatusEntries(): Promise<{ statusIdx: number; revoked: boolean }[]> {
+    return this.db
+      .select({ statusIdx: walletInstances.statusIdx, revoked: walletInstances.revoked })
+      .from(walletInstances);
+  }
+
   private toModel(row: WalletInstanceRow): WalletInstance {
     return {
       instanceId: row.instanceId,
@@ -46,6 +54,7 @@ export class InstanceRepository {
       createdAt: row.createdAt.getTime(),
       revoked: row.revoked,
       revokedAt: row.revokedAt ? row.revokedAt.getTime() : null,
+      statusIdx: row.statusIdx,
     };
   }
 }

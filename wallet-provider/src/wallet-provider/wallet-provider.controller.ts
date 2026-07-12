@@ -13,6 +13,8 @@ import * as jose from 'jose';
 import { AttestationService } from '../attestation/attestation.service';
 import { KeystoreService } from '../attestation/keystore.service';
 import { PlatformVerifierRegistry } from '../platform/platform-verifier';
+import { statusListUri } from '../status-list/status-list.codec';
+import { StatusListRevision } from '../status-list/status-list-revision';
 import { KeyAttestationDto, RegisterInstanceDto, WalletAttestationDto } from './dto';
 import { InstanceRepository } from './instance.repository';
 import { NonceService } from './nonce.service';
@@ -25,6 +27,7 @@ export class WalletProviderController {
     private readonly verifiers: PlatformVerifierRegistry,
     private readonly instances: InstanceRepository,
     private readonly attestation: AttestationService,
+    private readonly statusRevision: StatusListRevision,
   ) {}
 
   /** Challenge nonce for registration and attestation PoP. */
@@ -48,6 +51,7 @@ export class WalletProviderController {
   @Post('wallet-instances/:id/revoke')
   async revoke(@Param('id') id: string): Promise<{ revoked: boolean }> {
     if (!(await this.instances.revoke(id))) throw new NotFoundException('unknown instance');
+    this.statusRevision.bump(); // invalidate the cached status list so the flip is reflected promptly
     return { revoked: true };
   }
 
@@ -74,7 +78,14 @@ export class WalletProviderController {
     }
     if (!this.nonce.consume(pop.nonce as string | undefined)) throw new BadRequestException('invalid or expired nonce');
 
-    const wua = await this.attestation.issueWalletAttestation(instance.publicJwk, dto.clientId ?? instance.instanceId);
+    // Reference the Token Status List by the instance's stable index — refreshing a WUA reuses it; only
+    // revoking the instance flips the bit. (The instance owns the index, not the individual WUA.)
+    const statusRef = { idx: instance.statusIdx, uri: statusListUri(this.keystore.issuer) };
+    const wua = await this.attestation.issueWalletAttestation(
+      instance.publicJwk,
+      dto.clientId ?? instance.instanceId,
+      statusRef,
+    );
     return { wallet_attestation: wua };
   }
 

@@ -13,5 +13,6 @@ import { WalletProviderController } from './wallet-provider.controller';
   imports: [AttestationModule, PlatformModule],
   controllers: [WalletProviderController],
   providers: [NonceService, InstanceRepository],
+  exports: [InstanceRepository],
 })
 export class WalletProviderModule {}

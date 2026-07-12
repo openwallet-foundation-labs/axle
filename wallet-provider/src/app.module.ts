@@ -7,6 +7,8 @@ import { createLoggerConfig } from './logger.config';
 import { DrizzleModule } from './db/drizzle.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
+import { StatusListModule } from './status-list/status-list.module';
+import { StatusListRevisionModule } from './status-list/status-list-revision';
 import { WalletProviderModule } from './wallet-provider/wallet-provider.module';
 
 @Module({
@@ -20,7 +22,9 @@ import { WalletProviderModule } from './wallet-provider/wallet-provider.module';
     PrometheusModule.register({ defaultMetrics: { enabled: true } }),
     MetricsModule,
     HealthModule,
+    StatusListRevisionModule,
     WalletProviderModule,
+    StatusListModule,
   ],
 })
 export class AppModule {}

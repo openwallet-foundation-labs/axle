@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, timestamp, boolean, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, timestamp, boolean, jsonb, integer } from 'drizzle-orm/pg-core';
 import { randomUUID } from 'node:crypto';
 import type { JWK } from 'jose';
 
@@ -12,6 +12,8 @@ export const walletInstances = pgTable('wallet_instances', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   revoked: boolean('revoked').notNull().default(false),
   revokedAt: timestamp('revoked_at'),
+  // Token Status List index for this instance's WUA (bit flipped to 1 on revoke).
+  statusIdx: integer('status_idx').generatedByDefaultAsIdentity().notNull(),
 });
 
 export type WalletInstanceRow = typeof walletInstances.$inferSelect;

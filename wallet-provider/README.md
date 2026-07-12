@@ -21,6 +21,7 @@ SDK의 `WalletAttestationProvider` 포트가 이 백엔드에 붙어 HAIP attest
 | POST | `/key-attestation` | `{attestedKeys(JWK[]), nonce?}` → `{key_attestation}`. `nonce`=이슈어 c_nonce |
 | POST | `/wallet-instances/:id/revoke` | 인스턴스 revoke (이후 WUA 발급 거부) |
 | GET | `/wallet-instances/:id/status` | 인스턴스 상태 `{revoked, createdAt, revokedAt}` — 이슈어의 revocation 체크 |
+| GET | `/status-lists/:id` | Token Status List Token(`statuslist+jwt`) — WUA가 `status.status_list{idx,uri}`로 참조. RP가 인스턴스별 조회 없이 압축 비트열로 revoke 확인 (IETF draft-ietf-oauth-status-list). revoke 시 해당 인스턴스의 비트가 INVALID로 flip |
 | GET | `/.well-known/jwks.json` | WP 서명 공개키 |
 | GET | `/.well-known/wallet-provider-ca.pem` | WP CA 인증서(PEM) — 릴라잉 wallet/issuer가 trust anchor로 설치 |
 

@@ -279,7 +279,9 @@ export class VciService {
       };
       return this.sdJwt.issue(payload, { _sd: c.sdJwtDisclose ?? [] } as never, c.signer);
     }
-    // mso_mdoc
+    // mso_mdoc — NOTE: the issuance is recorded in the status list (status.idx above) but the reference is NOT
+    // embedded in the credential: @lukas.j.han/mdoc 0.5.11 has no MSO `status` element (ISO/IEC 18013-5 2nd
+    // edition). So mdoc revocation via status list is deferred; mdoc currently relies on validityInfo (exp).
     return this.mdoc.issue(c.doctype!, c.mdocNamespaces!, holderJwk, c.signer);
   }
 

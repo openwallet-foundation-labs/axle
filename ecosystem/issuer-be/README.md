@@ -50,6 +50,13 @@ migration Job/init-container, then `node dist/main`. The k8s manifests live in t
 with wallet-provider). Set `ISSUER_BASE_URL`, `ISSUER_FE_URL`, `DATABASE_URL`, `REDIS_URL`, the two signer
 secrets, and unset `DEV_ATTESTATION_BYPASS`.
 
+## Known limitations
+
+- **mdoc status list**: SD-JWT VC credentials carry the `status.status_list` reference, but mdoc (PID/mDL)
+  do not — `@lukas.j.han/mdoc` 0.5.11 (latest) has no MSO `status` element (ISO/IEC 18013-5 2nd edition).
+  The issuance is still recorded in the status list; embedding the mdoc reference is deferred until the
+  library supports the MSO `status` field. mdoc currently relies on `validityInfo` (expiry).
+
 ## Standards
 
 OpenID4VCI 1.0 · OpenID4VC HAIP 1.0 · IETF SD-JWT VC · ISO/IEC 18013-5 mdoc · IETF Token Status List ·

@@ -1,0 +1,21 @@
+# deps & build artifacts — rebuilt inside the image
+node_modules
+dist
+coverage
+
+# secrets & local env — must never enter the build context
+.env
+.env.*
+
+# vcs & tooling
+.git
+.gitignore
+*.log
+.DS_Store
+.vscode
+.idea
+
+# not needed to build the app
+test
+k8s
+*.md

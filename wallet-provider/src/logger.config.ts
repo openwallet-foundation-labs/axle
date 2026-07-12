@@ -3,9 +3,9 @@ import type { Params } from 'nestjs-pino';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 /**
- * Structured (pino) logging. Pretty single-line logs in dev; JSON in prod for the log pipeline.
- * Health/metrics probes are not request-logged (they'd dominate), auth/cookie headers are redacted,
- * and request/response *bodies are never logged* — they carry instance keys, PoP JWTs and integrity tokens.
+ * Structured (JSON) pino logging for the log pipeline. Health/metrics probes are not request-logged
+ * (they'd dominate), auth/cookie headers are redacted, and request/response *bodies are never logged* —
+ * they carry instance keys, PoP JWTs and integrity tokens.
  */
 export function createLoggerConfig(config: ConfigService): Params {
   const isProd = config.get<string>('STAGE') === 'prod';
@@ -16,7 +16,6 @@ export function createLoggerConfig(config: ConfigService): Params {
   return {
     pinoHttp: {
       level,
-      transport: isProd ? undefined : { target: 'pino-pretty', options: { singleLine: true } },
       redact: {
         paths: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]'],
         censor: '[REDACTED]',

@@ -10,11 +10,11 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as jose from 'jose';
-import { AttestationService } from './attestation.service';
+import { AttestationService } from '../attestation/attestation.service';
+import { KeystoreService } from '../attestation/keystore.service';
+import { PlatformVerifierRegistry } from '../platform/platform-verifier';
 import { KeyAttestationDto, RegisterInstanceDto, WalletAttestationDto } from './dto';
 import { InstanceRepository } from './instance.repository';
-import { IntegrityService } from './integrity.service';
-import { KeystoreService } from './keystore.service';
 import { NonceService } from './nonce.service';
 
 @Controller()
@@ -22,7 +22,7 @@ export class WalletProviderController {
   constructor(
     private readonly keystore: KeystoreService,
     private readonly nonce: NonceService,
-    private readonly integrity: IntegrityService,
+    private readonly verifiers: PlatformVerifierRegistry,
     private readonly instances: InstanceRepository,
     private readonly attestation: AttestationService,
   ) {}
@@ -37,7 +37,8 @@ export class WalletProviderController {
   @Post('wallet-instances')
   async register(@Body() dto: RegisterInstanceDto): Promise<{ instanceId: string }> {
     if (!this.nonce.consume(dto.nonce)) throw new BadRequestException('invalid or expired nonce');
-    const integrity = await this.integrity.verify(dto.integrityToken, dto.nonce);
+    const verifier = this.verifiers.for(dto.platform ?? 'android');
+    const integrity = await verifier.verifyIntegrity(dto.integrityToken, dto.nonce);
     if (!integrity.trusted) throw new UnauthorizedException(`device integrity failed: ${integrity.reason}`);
     const instance = await this.instances.create(dto.instanceKey, integrity.platform);
     return { instanceId: instance.instanceId };
@@ -81,7 +82,9 @@ export class WalletProviderController {
   @Post('key-attestation')
   async keyAttestation(@Body() dto: KeyAttestationDto): Promise<{ key_attestation: string }> {
     if (!dto.attestedKeys?.length) throw new BadRequestException('attestedKeys required');
-    const ka = await this.attestation.issueKeyAttestation(dto.attestedKeys, dto.nonce, dto.keyAttestations);
+    const verifier = this.verifiers.for(dto.platform ?? 'android');
+    const { level } = await verifier.verifyKeyAttestation(dto.keyAttestations, dto.nonce);
+    const ka = await this.attestation.issueKeyAttestation(dto.attestedKeys, level, dto.nonce);
     return { key_attestation: ka };
   }
 

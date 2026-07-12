@@ -1,8 +1,9 @@
 // Dev tool: decode a Google Play Integrity token and print the verdict. No secrets here — it reads the
-// service account from GOOGLE_APPLICATION_CREDENTIALS and the app id from PLAY_INTEGRITY_PACKAGE_NAME.
+// service account from GOOGLE_SERVICE_ACCOUNT_JSON (a JSON string, same secret the backend uses) or falls
+// back to GOOGLE_APPLICATION_CREDENTIALS / ADC, and the app id from PLAY_INTEGRITY_PACKAGE_NAME.
 //
 //   cd wallet-provider
-//   GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json \
+//   GOOGLE_SERVICE_ACCOUNT_JSON="$(cat /path/to/service-account.json)" \
 //   PLAY_INTEGRITY_PACKAGE_NAME=com.hopae.axle.wallet \
 //   node tools/decode-integrity.mjs "<integrity-token>"
 //
@@ -18,7 +19,11 @@ const asFile = (p) => { try { return readFileSync(p, 'utf8').trim(); } catch { r
 if (token && token.length < 300) token = asFile(token) || token; // allow a file path
 if (!token) { console.error('usage: node tools/decode-integrity.mjs <token|tokenFile>'); process.exit(1); }
 
-const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/playintegrity'] });
+const saJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+const auth = new GoogleAuth({
+  scopes: ['https://www.googleapis.com/auth/playintegrity'],
+  ...(saJson ? { credentials: JSON.parse(saJson) } : {}),
+});
 const accessToken = await (await auth.getClient()).getAccessToken();
 
 const res = await fetch(`https://playintegrity.googleapis.com/v1/${pkg}:decodeIntegrityToken`, {

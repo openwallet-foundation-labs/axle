@@ -1,14 +1,17 @@
 import { Module } from '@nestjs/common';
-import { AttestationService } from './attestation.service';
+import { AttestationModule } from '../attestation/attestation.module';
+import { PlatformModule } from '../platform/platform.module';
 import { InstanceRepository } from './instance.repository';
-import { IntegrityService } from './integrity.service';
-import { KeystoreService } from './keystore.service';
 import { NonceService } from './nonce.service';
 import { WalletProviderController } from './wallet-provider.controller';
 
-/** ARF Wallet Provider: registers wallet instances and issues WUA + key attestations. */
+/**
+ * ARF Wallet Provider: registers wallet instances and issues WUA + key attestations. The HTTP surface is
+ * platform-neutral; per-platform verification comes from `PlatformModule`, issuance from `AttestationModule`.
+ */
 @Module({
+  imports: [AttestationModule, PlatformModule],
   controllers: [WalletProviderController],
-  providers: [KeystoreService, NonceService, IntegrityService, InstanceRepository, AttestationService],
+  providers: [NonceService, InstanceRepository],
 })
 export class WalletProviderModule {}

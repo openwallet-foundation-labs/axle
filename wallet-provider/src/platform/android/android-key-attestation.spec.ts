@@ -8,7 +8,7 @@ import { verifyAndroidKeyAttestation } from './android-key-attestation';
  * true storage level — the basis for asserting `iso_18045_high` truthfully.
  */
 describe('verifyAndroidKeyAttestation', () => {
-  const chain = new Uint8Array(readFileSync(join(__dirname, '..', '..', 'test', 'fixtures', 'key-attestation-chain.der')));
+  const chain = new Uint8Array(readFileSync(join(__dirname, '..', '..', '..', 'test', 'fixtures', 'key-attestation-chain.der')));
   const challenge = new TextEncoder().encode('eudi-attestation-challenge');
 
   it('verifies a real device chain: hardware-backed, matching challenge', async () => {

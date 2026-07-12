@@ -1,5 +1,6 @@
-import { IsArray, IsNotEmpty, IsObject, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsIn, IsNotEmpty, IsObject, IsOptional, IsString } from 'class-validator';
 import type { JWK } from 'jose';
+import type { WalletPlatform } from '../platform/platform-verifier';
 
 /** POST /wallet-instances — register a wallet instance after a device-integrity check. */
 export class RegisterInstanceDto {
@@ -13,6 +14,10 @@ export class RegisterInstanceDto {
   @IsString()
   @IsNotEmpty()
   nonce!: string; // from GET /nonce
+
+  @IsOptional()
+  @IsIn(['android', 'ios'])
+  platform?: WalletPlatform; // selects the verifier; defaults to 'android'
 }
 
 /** POST /wallet-attestation — obtain a WUA; `pop` proves possession of the instance key. */
@@ -42,4 +47,8 @@ export class KeyAttestationDto {
   @IsOptional()
   @IsArray()
   keyAttestations?: string[]; // base64 android-keystore-x5c chains (one per key) → verified to assert the storage level
+
+  @IsOptional()
+  @IsIn(['android', 'ios'])
+  platform?: WalletPlatform; // selects the verifier; defaults to 'android'
 }

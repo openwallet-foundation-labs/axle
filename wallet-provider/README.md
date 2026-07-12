@@ -56,10 +56,16 @@ node test/wp-flow.mjs                            # 전체 플로우 e2e (서버 
 
 로컬 Postgres 예시: `docker run -d --name wp-pg -p 5432:5432 -e POSTGRES_USER=wp -e POSTGRES_PASSWORD=wp -e POSTGRES_DB=wallet_provider postgres:16`
 
+## 옵저버빌리티
+
+Fastify 어댑터 + `@willsoto/nestjs-prometheus`. Prometheus 메트릭은 글로벌 prefix 아래 **`GET /wp/metrics`** — default Node 메트릭 + HTTP 요청 지연 히스토그램(`http_request_duration_seconds{method,route,status_code}`, health/metrics 경로는 제외). 파드에 `prometheus.io/scrape:"true"`, `prometheus.io/port:"3200"`, `prometheus.io/path:"/wp/metrics"` 어노테이션으로 스크레이프.
+
 ## 컨테이너 / 배포
 
 - **Dockerfile** — x64(amd64), node:24-alpine 멀티스테이지, non-root(`wp`), config 없음(런타임 env 주입). `docker build -t wp-api .`
-- **k8s** — `k8s/dev/`에 Deployment/Service/Ingress/ExternalSecret 템플릿. `DATABASE_URL`은 AWS Secrets Manager → External Secrets Operator로 주입, 마이그레이션은 initContainer(`node dist/migrate`)가 부팅 전 실행. (infra 레포 `k8s-manifests/…/dev/` 스타일 미러링 — 실제 배치는 그쪽으로 복사.)
+- **시크릿** — `DATABASE_URL`, (선택) `GOOGLE_SERVICE_ACCOUNT_JSON`(서비스계정 키를 파일이 아닌 **JSON 문자열**로 주입)을 런타임 env로. 프로덕션은 AWS Secrets Manager → External Secrets Operator.
+- **마이그레이션** — 배포 시 `node dist/migrate`(예: initContainer)로 부팅 전 스키마 적용.
+- **k8s 매니페스트는 이 레포에 없음** — 별도 인프라 프로젝트(`k8s-manifests/…/dev/` 스타일)에서 관리한다.
 
 ## 영속 (Drizzle + SQLite)
 

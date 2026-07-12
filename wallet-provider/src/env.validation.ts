@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { IsNotEmpty, IsOptional, IsString, validateSync } from 'class-validator';
+import { IsJSON, IsNotEmpty, IsOptional, IsString, validateSync } from 'class-validator';
 
 class EnvironmentVariables {
   @IsString()
@@ -19,15 +19,24 @@ class EnvironmentVariables {
   @IsNotEmpty()
   WP_ISSUER: string;
 
+  /** pino log level override (default: debug in non-prod, info in prod). */
+  @IsOptional()
+  @IsString()
+  LOG_LEVEL?: string;
+
   /** Android app package for real Play Integrity verification (else the dev-integrity stub is used). */
   @IsOptional()
   @IsString()
   PLAY_INTEGRITY_PACKAGE_NAME?: string;
 
-  /** Service-account key path for Google decode (Play Integrity). Consumed by google-auth-library directly. */
+  /**
+   * Google service-account key as a JSON *string* (not a file path) for Play Integrity decode.
+   * Injected as a k8s secret; parsed and handed to google-auth-library at runtime. Omit to fall
+   * back to Application Default Credentials (e.g. `gcloud auth` locally).
+   */
   @IsOptional()
-  @IsString()
-  GOOGLE_APPLICATION_CREDENTIALS?: string;
+  @IsJSON()
+  GOOGLE_SERVICE_ACCOUNT_JSON?: string;
 }
 
 export function validate(config: Record<string, unknown>) {

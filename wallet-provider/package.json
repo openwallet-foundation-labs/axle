@@ -44,6 +44,7 @@
     "class-validator": "^0.14.3",
     "drizzle-orm": "^0.45.2",
     "google-auth-library": "^10.9.0",
+    "ioredis": "^5.4.1",
     "jose": "^6.2.3",
     "nestjs-pino": "^4.6.0",
     "pino": "^10.3.1",

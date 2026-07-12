@@ -35,14 +35,14 @@ export class WalletProviderController {
 
   /** Challenge nonce for registration and attestation PoP. */
   @Get('nonce')
-  getNonce(): { nonce: string } {
-    return { nonce: this.nonce.issue() };
+  async getNonce(): Promise<{ nonce: string }> {
+    return { nonce: await this.nonce.issue() };
   }
 
   /** Register a wallet instance after a device-integrity check. */
   @Post('wallet-instances')
   async register(@Body() dto: RegisterInstanceDto): Promise<{ instanceId: string }> {
-    if (!this.nonce.consume(dto.nonce)) throw new BadRequestException('invalid or expired nonce');
+    if (!(await this.nonce.consume(dto.nonce))) throw new BadRequestException('invalid or expired nonce');
     const verifier = this.verifiers.for(dto.platform ?? 'android');
     const integrity = await verifier.verifyIntegrity(dto.integrityToken, dto.nonce);
     if (!integrity.trusted) throw new UnauthorizedException(`device integrity failed: ${integrity.reason}`);
@@ -80,7 +80,7 @@ export class WalletProviderController {
     } catch {
       throw new UnauthorizedException('invalid instance PoP');
     }
-    if (!this.nonce.consume(pop.nonce as string | undefined)) throw new BadRequestException('invalid or expired nonce');
+    if (!(await this.nonce.consume(pop.nonce as string | undefined))) throw new BadRequestException('invalid or expired nonce');
 
     // Reference the Token Status List by the instance's stable index — refreshing a WUA reuses it; only
     // revoking the instance flips the bit. (The instance owns the index, not the individual WUA.)

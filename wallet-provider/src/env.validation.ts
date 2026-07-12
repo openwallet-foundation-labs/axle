@@ -37,6 +37,11 @@ class EnvironmentVariables {
   @IsString()
   LOG_LEVEL?: string;
 
+  /** Redis URL for the shared nonce store (required for multi-replica). Unset ⇒ in-memory (single-replica). */
+  @IsOptional()
+  @IsString()
+  REDIS_URL?: string;
+
   /** Admin API key for admin-only endpoints (revoke). Unset ⇒ those endpoints are unprotected (dev only). */
   @IsOptional()
   @IsString()

@@ -19,6 +19,19 @@ class EnvironmentVariables {
   @IsNotEmpty()
   WP_ISSUER: string;
 
+  /** Persistent signing keystore (PEM). All three together ⇒ a stable trust anchor; unset ⇒ ephemeral dev keys. */
+  @IsOptional()
+  @IsString()
+  WP_SIGNER_PRIVATE_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  WP_SIGNER_CERT?: string;
+
+  @IsOptional()
+  @IsString()
+  WP_CA_CERT?: string;
+
   /** pino log level override (default: debug in non-prod, info in prod). */
   @IsOptional()
   @IsString()

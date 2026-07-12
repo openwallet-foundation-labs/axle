@@ -33,7 +33,7 @@ async function main() {
   // 5) verify the WUA: header, x5c, signature, cnf binding
   const header = jose.decodeProtectedHeader(wua);
   assert(header.typ === 'oauth-client-attestation+jwt', 'WUA typ');
-  assert(Array.isArray(header.x5c) && header.x5c.length === 2, 'x5c = [signer, CA]');
+  assert(Array.isArray(header.x5c) && header.x5c.length === 1, 'x5c = [signer] (CA is a separate trust anchor)');
   const signerPub = await jose.importX509(`-----BEGIN CERTIFICATE-----\n${header.x5c[0]}\n-----END CERTIFICATE-----`, 'ES256');
   const { payload } = await jose.jwtVerify(wua, signerPub, { issuer: ISS });
   // JWK key order is insignificant (jsonb round-trips do not preserve it), so compare canonically.

@@ -5,6 +5,7 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { X509Certificate } from 'node:crypto';
 import { buildLote } from './build-lote.mjs';
 import { signJades } from './sign-jades.mjs';
 
@@ -65,6 +66,18 @@ for (const list of lists) {
 
   console.log(`  ${list.title}: ${list.slug}.jades.json (${jadesStr.length}B) + .jws · ${lote.trustedEntitiesList.length} entity(ies) · next update ${info.nextUpdate.slice(0, 10)}`);
 }
+
+// The Scheme Operator certificate — the trust anchor for EVERY list (also embedded as x5c[0] in each JAdES).
+// Published so a verifier can download and pin it (verify the fingerprint out-of-band, then trust the lists).
+const soCert = new X509Certificate(soKeystore.certPem);
+writeFileSync(join(root, 'public/tl/scheme-operator.pem'), soKeystore.certPem);
+manifest.schemeOperator = {
+  file: 'scheme-operator.pem',
+  subject: soCert.subject.replace(/\n/g, ', '),
+  fingerprintSha256: soCert.fingerprint256.replace(/:/g, '').toLowerCase(),
+  validTo: soCert.validTo,
+};
+console.log('  scheme-operator.pem (SO trust anchor)');
 
 writeFileSync(join(root, 'public/tl/lists.json'), JSON.stringify(manifest, null, 2) + '\n'); // portal manifest
 console.log(`  lists.json (${manifest.lists.length} lists)`);

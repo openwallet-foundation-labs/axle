@@ -30,8 +30,15 @@ interface TrustList {
   entities: Entity[];
   formats: Format[];
 }
+interface SchemeOperator {
+  file: string;
+  subject: string;
+  fingerprintSha256: string;
+  validTo: string;
+}
 interface Manifest {
   generatedAt: string;
+  schemeOperator?: SchemeOperator;
   lists: TrustList[];
 }
 
@@ -82,6 +89,27 @@ export default function App() {
 
         {error && <p className="text-sm text-red-600">Could not load the lists: {error}</p>}
         {!manifest && !error && <p className="text-sm text-muted-foreground">Loading…</p>}
+
+        {manifest?.schemeOperator && (
+          <Card className="mb-4 border-dashed">
+            <CardHeader>
+              <CardTitle className="text-base">Scheme Operator — trust anchor</CardTitle>
+              <CardDescription className="flex flex-col gap-1 pt-1">
+                <span>Every list below is JAdES-signed by this certificate. Download and pin it (verify the fingerprint), then you can trust the lists.</span>
+                <span className="pt-1 font-mono text-[11px] text-foreground">{manifest.schemeOperator.subject}</span>
+                <span className="font-mono text-[11px]">SHA-256 {manifest.schemeOperator.fingerprintSha256}</span>
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild size="sm" variant="outline">
+                <a href={`/tl/${manifest.schemeOperator.file}`} download={manifest.schemeOperator.file}>
+                  <Download />
+                  Download certificate (PEM)
+                </a>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="space-y-4">
           {manifest?.lists.map((list) => (

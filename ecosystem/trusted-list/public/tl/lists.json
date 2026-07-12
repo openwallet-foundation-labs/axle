@@ -1,5 +1,11 @@
 {
   "generatedAt": "2026-07-12T11:02:35.291Z",
+  "schemeOperator": {
+    "file": "scheme-operator.pem",
+    "subject": "CN=Hopae Scheme Operator, O=Hopae, C=EU",
+    "fingerprintSha256": "e5418dfd7173396738200c97ffa4e728a5dc05bee5f1e3062dee0eafe3cbac66",
+    "validTo": "Jul 12 06:07:08 2036 GMT"
+  },
   "lists": [
     {
       "slug": "wallet-providers",

@@ -79,5 +79,11 @@ manifest.schemeOperator = {
 };
 console.log('  scheme-operator.pem (SO trust anchor)');
 
+// Publish each listed CA certificate so the Document Signers' AIA (caIssuers) URIs resolve at /tl/<ca>.pem.
+for (const f of readdirSync(join(root, 'config/certs'))) {
+  if (f.endsWith('.pem')) writeFileSync(join(root, 'public/tl', f), readFileSync(join(root, 'config/certs', f)));
+}
+console.log('  config/certs/*.pem → public/tl/ (CA certs for AIA)');
+
 writeFileSync(join(root, 'public/tl/lists.json'), JSON.stringify(manifest, null, 2) + '\n'); // portal manifest
 console.log(`  lists.json (${manifest.lists.length} lists)`);

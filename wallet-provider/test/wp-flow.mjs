@@ -3,8 +3,9 @@ import * as jose from 'jose';
 
 const BASE = process.env.BASE ?? 'http://localhost:3200/wp';
 const ISS = process.env.WP_ISSUER ?? BASE; // the instance-PoP audience = the backend's WP_ISSUER
+const adminHeaders = process.env.ADMIN_API_KEY ? { 'x-api-key': process.env.ADMIN_API_KEY } : {};
 const post = (path, body) =>
-  fetch(`${BASE}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  fetch(`${BASE}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...adminHeaders }, body: JSON.stringify(body) });
 const assert = (cond, msg) => { if (!cond) throw new Error(`assertion failed: ${msg}`); };
 
 async function main() {

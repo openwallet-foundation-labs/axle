@@ -6,10 +6,13 @@ import {
   Header,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Post,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import * as jose from 'jose';
+import { AdminApiKeyGuard } from './admin-api-key.guard';
 import { AttestationService } from '../attestation/attestation.service';
 import { KeystoreService } from '../attestation/keystore.service';
 import { PlatformVerifierRegistry } from '../platform/platform-verifier';
@@ -47,9 +50,10 @@ export class WalletProviderController {
     return { instanceId: instance.instanceId };
   }
 
-  /** Revoke a wallet instance — it can no longer obtain a WUA (soft revocation). */
+  /** Revoke a wallet instance — it can no longer obtain a WUA (soft revocation). Admin-only. */
   @Post('wallet-instances/:id/revoke')
-  async revoke(@Param('id') id: string): Promise<{ revoked: boolean }> {
+  @UseGuards(AdminApiKeyGuard)
+  async revoke(@Param('id', ParseUUIDPipe) id: string): Promise<{ revoked: boolean }> {
     if (!(await this.instances.revoke(id))) throw new NotFoundException('unknown instance');
     this.statusRevision.bump(); // invalidate the cached status list so the flip is reflected promptly
     return { revoked: true };
@@ -57,7 +61,7 @@ export class WalletProviderController {
 
   /** Instance status — issuers/relying parties check whether a WUA's instance is still valid. */
   @Get('wallet-instances/:id/status')
-  async status(@Param('id') id: string): Promise<{ instanceId: string; revoked: boolean; createdAt: number; revokedAt: number | null }> {
+  async status(@Param('id', ParseUUIDPipe) id: string): Promise<{ instanceId: string; revoked: boolean; createdAt: number; revokedAt: number | null }> {
     const instance = await this.instances.get(id);
     if (!instance) throw new NotFoundException('unknown instance');
     return { instanceId: instance.instanceId, revoked: instance.revoked, createdAt: instance.createdAt, revokedAt: instance.revokedAt };

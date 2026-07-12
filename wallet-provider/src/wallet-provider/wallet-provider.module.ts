@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AttestationModule } from '../attestation/attestation.module';
 import { PlatformModule } from '../platform/platform.module';
+import { AdminApiKeyGuard } from './admin-api-key.guard';
 import { InstanceRepository } from './instance.repository';
 import { NonceService } from './nonce.service';
 import { WalletProviderController } from './wallet-provider.controller';
@@ -12,7 +13,7 @@ import { WalletProviderController } from './wallet-provider.controller';
 @Module({
   imports: [AttestationModule, PlatformModule],
   controllers: [WalletProviderController],
-  providers: [NonceService, InstanceRepository],
+  providers: [NonceService, InstanceRepository, AdminApiKeyGuard],
   exports: [InstanceRepository],
 })
 export class WalletProviderModule {}

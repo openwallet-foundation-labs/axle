@@ -24,6 +24,11 @@ class EnvironmentVariables {
   @IsString()
   LOG_LEVEL?: string;
 
+  /** Admin API key for admin-only endpoints (revoke). Unset ⇒ those endpoints are unprotected (dev only). */
+  @IsOptional()
+  @IsString()
+  ADMIN_API_KEY?: string;
+
   /** Android app package for real Play Integrity verification (else the dev-integrity stub is used). */
   @IsOptional()
   @IsString()

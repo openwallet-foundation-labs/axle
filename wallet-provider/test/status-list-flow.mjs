@@ -7,7 +7,8 @@ const BASE = process.env.BASE ?? 'http://localhost:3200/wp';
 const ISS = process.env.WP_ISSUER ?? BASE;
 let ok = true;
 const assert = (c, m) => { if (!c) { console.log('❌', m); ok = false; } else console.log('✓', m); };
-const post = (p, b) => fetch(`${BASE}${p}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+const adminHeaders = process.env.ADMIN_API_KEY ? { 'x-api-key': process.env.ADMIN_API_KEY } : {};
+const post = (p, b) => fetch(`${BASE}${p}`, { method: 'POST', headers: { 'content-type': 'application/json', ...adminHeaders }, body: JSON.stringify(b) });
 
 const statusAt = (lst, bits, idx) => {
   const bytes = inflateSync(Buffer.from(lst.replace(/-/g, '+').replace(/_/g, '/'), 'base64'));

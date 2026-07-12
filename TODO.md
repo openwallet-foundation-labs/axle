@@ -10,6 +10,47 @@ Buckets, most important first: **P1 (do now)** · **P2 (scoped)** · **Deferred*
 
 ---
 
+## Next session (2026-07-14) — full ecosystem end-to-end dry-run
+
+Goal: **one wallet that runs the whole ecosystem** — issue → hold → present → verify — with the RP
+authenticated by a **registrar-issued** WRPAC and described by a **WRPRC**.
+
+1. **Wire today's `WRPRCVerifier` into the live flow** (the two follow-ups left standalone):
+   - Add `TrustConfig.registrarAnchorsDer`; build a registrar-CA `X509ChainValidator` + `WRPRCVerifier`
+     in `Wallet.create` (swift + kotlin).
+   - Decide **where the WRPRC arrives** in the OpenID4VP request (verifier_attestation / client_metadata /
+     out-of-band) and invoke the verifier at the `X509RequestVerifier` chokepoint (WRPAC leaf already in
+     hand); surface `entitlements` / `purpose` / `intermediary` on the consent screen.
+   - **Status-list check**: feed the returned `status` to the existing `StatusListClient`
+     (swift `StatusList` / kotlin `statuslist`) — refuse a revoked WRPRC.
+2. **Make a real RP with today's registrar** (`https://api.dev.hopae.app/registrar`): register the RP,
+   issue its **WRPAC** (reader access cert, `x509_san_dns`) + **WRPRC**, and have the verifier sign its
+   OpenID4VP request with the WRPAC. Wallet trusts it via `readerAnchorsDer` = registrar CA.
+3. **Verify credentials end-to-end**: issuer (`tiss` / EUDI issuer) issues PID (SD-JWT VC) + mDL (mdoc) →
+   wallet holds → the RP/verifier requests → wallet presents → verify. Confirm the **EUDI issuer + verifier
+   interop** work too.
+4. Result: every ecosystem piece (wallet-provider WUA, issuer, registrar WRPAC/WRPRC, verifier) exercised
+   by a single wallet run.
+
+---
+
+## Done (2026-07-13)
+
+- [x] **Wallet SDK: verify WRPRC (Wallet-Relying Party Registration Certificate)** — commit `667e5ce`.
+  New `WRPRCVerifier` (swift `Sources/Trust/` + kotlin `trust/`) validates a registrar-issued `rc-wrp+jwt`
+  (JAdES baseline B-B): verifies the JAdES signature against the registrar CA (parsed directly — `Jws.verify`
+  rejects the `crit:[sigT,b64]` per RFC 7515 §4.1.11 — after a `typ/alg/crit/b64` allow-list + optional
+  `x5t#S256`), binds `sub` == WRPAC `organizationIdentifier` (ETSI TS 119 475 GEN-5.1.1-02; new
+  `X509Support.organizationIdentifier`, OID 2.5.4.97), and surfaces `entitlements`, `purpose`, the raw
+  `status` reference, and the **optional** `intermediary` (nil when absent; `act.sub` == `intermediary.sub`,
+  GEN-5.2.4-09). Tested against real registrar fixtures (direct + intermediated WRPRC, WRPAC leaf, CA) —
+  4 tests each language. **Follow-ups → see "Next session" above** (config wiring + status-list check).
+  - *Registrar side (separate repo `hopae-official/registrar`, branch `dev`, all deployed + live-verified):*
+    WRPRC → JAdES B-B via `@lukas.j.han/jades@1.0.6` + TS 119 475 §5.2.4 payload + IETF status list;
+    WRPAC → TS 119 475 Table 1 subject/SAN + TS 119 411-8 §6.6.1 certificatePolicies (NCP-l `0.4.0.194118.1.2`).
+
+---
+
 ## Done (2026-07-11)
 
 - [x] **#12 · DC API: abort on a blank origin — 18013-7 C.5** — commit `3fd4ff9`.

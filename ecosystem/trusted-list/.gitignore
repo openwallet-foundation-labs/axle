@@ -1,0 +1,6 @@
+node_modules
+dist
+# SO signing private key — the sandbox root. NEVER commit; keep offline / move to KMS.
+secrets/
+*.log
+.DS_Store

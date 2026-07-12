@@ -1,0 +1,22 @@
+[
+  {
+    "_note": "ETSI TS 119 602 Annex E, Tables E.2 & E.3 — one wallet provider. teTradeName carries the EN 319 412-1 registration identifier; the service digital identity is the WP certificate the wallet-unit artifacts (WUAs) chain to.",
+    "teName": "Hopae S.A.",
+    "teTradeName": "NTRLU-B000000",
+    "teAddress": {
+      "postal": { "country": "LU", "locality": "Luxembourg" },
+      "electronic": ["mailto:trust@hopae.dev"]
+    },
+    "teInformationUri": [
+      "https://wallet.hopae.dev/policy",
+      "http://uri.etsi.org/19602/ListOfTrustedEntities/WalletProvider/LU"
+    ],
+    "services": [
+      {
+        "serviceTypeIdentifier": "http://uri.etsi.org/19602/SvcType/WalletSolution/Issuance",
+        "serviceName": "Axle Wallet",
+        "certFile": "config/certs/wp-ca.pem"
+      }
+    ]
+  }
+]

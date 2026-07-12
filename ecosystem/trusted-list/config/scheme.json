@@ -1,0 +1,18 @@
+{
+  "_note": "ETSI TS 119 602 Annex E — List of Wallet Providers scheme information (Table E.1). URIs are the normative registered values; bump loteSequenceNumber on every re-issue.",
+  "loteVersionIdentifier": "1",
+  "loteSequenceNumber": 1,
+  "loteType": "http://uri.etsi.org/19602/LoTEType/EUWalletProvidersList",
+  "schemeOperatorName": "Hopae",
+  "schemeName": "Hopae EUDI Sandbox — List of Wallet Providers",
+  "schemeInformationUri": [
+    "https://trust.hopae.dev/",
+    "https://trust.hopae.dev/tl/wallet-providers/archive/"
+  ],
+  "statusDeterminationApproach": "http://uri.etsi.org/19602/WalletProvidersList/StatusDetn/EU",
+  "schemeTypeCommunityRules": "http://uri.etsi.org/19602/WalletProvidersList/schemerules/EU",
+  "schemeTerritory": "EU",
+  "distributionPoints": ["https://trust.hopae.dev/tl/wallet-providers.jws"],
+  "selfPointerUri": "https://trust.hopae.dev/tl/wallet-providers.jws",
+  "nextUpdateMonths": 6
+}

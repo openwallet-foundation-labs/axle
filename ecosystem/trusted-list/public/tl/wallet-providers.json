@@ -1,0 +1,56 @@
+{
+  "listAndSchemeInformation": {
+    "loteVersionIdentifier": "1",
+    "loteSequenceNumber": 1,
+    "loteType": "http://uri.etsi.org/19602/LoTEType/EUWalletProvidersList",
+    "schemeOperatorName": "Hopae",
+    "schemeName": "Hopae EUDI Sandbox — List of Wallet Providers",
+    "schemeInformationUri": [
+      "https://trust.hopae.dev/",
+      "https://trust.hopae.dev/tl/wallet-providers/archive/"
+    ],
+    "statusDeterminationApproach": "http://uri.etsi.org/19602/WalletProvidersList/StatusDetn/EU",
+    "schemeTypeCommunityRules": "http://uri.etsi.org/19602/WalletProvidersList/schemerules/EU",
+    "schemeTerritory": "EU",
+    "pointersToOtherLoTE": [
+      "https://trust.hopae.dev/tl/wallet-providers.jws"
+    ],
+    "listIssueDateTime": "2026-07-12T07:06:34.451Z",
+    "nextUpdate": "2027-01-12T07:06:34.451Z",
+    "distributionPoints": [
+      "https://trust.hopae.dev/tl/wallet-providers.jws"
+    ]
+  },
+  "trustedEntitiesList": [
+    {
+      "trustedEntityInformation": {
+        "teName": "Hopae S.A.",
+        "teTradeName": "NTRLU-B000000",
+        "teAddress": {
+          "postal": {
+            "country": "LU",
+            "locality": "Luxembourg"
+          },
+          "electronic": [
+            "mailto:trust@hopae.dev"
+          ]
+        },
+        "teInformationUri": [
+          "https://wallet.hopae.dev/policy",
+          "http://uri.etsi.org/19602/ListOfTrustedEntities/WalletProvider/LU"
+        ]
+      },
+      "trustedEntityServices": [
+        {
+          "serviceTypeIdentifier": "http://uri.etsi.org/19602/SvcType/WalletSolution/Issuance",
+          "serviceName": "Axle Wallet",
+          "serviceDigitalIdentity": {
+            "x509Certificate": "MIICAjCCAaigAwIBAgIBATAKBggqhkjOPQQDAjBnMSswKQYDVQQDEyJIb3BhZSBTLkEuIEVVREkgV2FsbGV0IFByb3ZpZGVyIENBMRYwFAYDVQRhEw1OVFJMVS1CMDAwMDAwMRMwEQYDVQQKEwpIb3BhZSBTLkEuMQswCQYDVQQGEwJMVTAeFw0yNjA3MTEwMzU2NTRaFw0zNjA3MTIwMzU2NTRaMGcxKzApBgNVBAMTIkhvcGFlIFMuQS4gRVVESSBXYWxsZXQgUHJvdmlkZXIgQ0ExFjAUBgNVBGETDU5UUkxVLUIwMDAwMDAxEzARBgNVBAoTCkhvcGFlIFMuQS4xCzAJBgNVBAYTAkxVMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfs84JQ0kM4Pju0K7EL5gyKYQIP1qSj7v27XsawPwGYiz1vttjoEgSMXz67Lzj8/xEvZiPO1OZKVIhjkpS10cJ6NFMEMwEgYDVR0TAQH/BAgwBgEB/wIBATAOBgNVHQ8BAf8EBAMCAQYwHQYDVR0OBBYEFO1zlYYZAIvBqOKtpn2XIcL9BQxKMAoGCCqGSM49BAMCA0gAMEUCICPl12X5SmxLjHJB/8Txa0lYLR4+Ay7sU69mlNKx1iXMAiEA6SUeIsMwKZVIv5jmaJ5GrdigmDj/zaUWL6tIWjNZalg=",
+            "x509SubjectName": "CN=Hopae S.A. EUDI Wallet Provider CA, 2.5.4.97=NTRLU-B000000, O=Hopae S.A., C=LU",
+            "x509Ski": "ed73958619008bc1a8e2ada67d9721c2fd050c4a"
+          }
+        }
+      ]
+    }
+  ]
+}

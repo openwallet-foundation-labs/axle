@@ -49,10 +49,13 @@ public struct VerifierRegistration {
     /// Token Status List result: true = valid, false = revoked/suspended, nil = not checked. A revoked WRPRC
     /// is refused before the consent screen, so a surfaced registration is always valid or unchecked.
     public let statusValid: Bool?
-    /// True iff a registrar-issued WRPRC attested this registration (authoritative, registrar-sealed). False
-    /// when only the RP's self-declared `registrar_dataset` backs it (no WRPRC) — treat those fields as
-    /// unverified unless a registrar TS5 lookup confirmed them.
+    /// True iff a registrar-issued WRPRC attested this registration (authoritative, registrar-sealed, verified
+    /// offline). False when only the RP's self-declared `registrar_dataset` backs it (no WRPRC).
     public let attested: Bool
+    /// True iff the registration is registrar-verified — either WRPRC-attested (`attested`) OR confirmed
+    /// online against the registrar's TS5 API (RPRC_16/18) for a dataset-only request. When false, the
+    /// surfaced registration fields are only the RP's self-declaration.
+    public let registrarVerified: Bool
     /// The RP's registry base URI (`registrar_dataset.registryURI`), for the transaction log / TS5 lookup.
     public let registryURI: String?
     /// The RP's privacy-policy URL (`registrar_dataset.policyURI`), for the consent screen.
@@ -64,8 +67,8 @@ public struct VerifierRegistration {
 
     public init(subject: String, entitlements: [String], purpose: [PurposeText],
                 intermediarySub: String?, intermediaryName: String?, statusValid: Bool?,
-                attested: Bool = false, registryURI: String? = nil, policyURI: String? = nil,
-                unregisteredClaims: [[String]] = []) {
+                attested: Bool = false, registrarVerified: Bool = false, registryURI: String? = nil,
+                policyURI: String? = nil, unregisteredClaims: [[String]] = []) {
         self.subject = subject
         self.entitlements = entitlements
         self.purpose = purpose
@@ -73,6 +76,7 @@ public struct VerifierRegistration {
         self.intermediaryName = intermediaryName
         self.statusValid = statusValid
         self.attested = attested
+        self.registrarVerified = registrarVerified
         self.registryURI = registryURI
         self.policyURI = policyURI
         self.unregisteredClaims = unregisteredClaims

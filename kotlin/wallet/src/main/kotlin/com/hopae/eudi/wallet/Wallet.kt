@@ -5,6 +5,7 @@ import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.trust.TrustAnchorSource
 import com.hopae.eudi.wallet.trust.TrustAnchors
 import com.hopae.eudi.wallet.trust.X509ChainValidator
+import com.hopae.eudi.wallet.trust.RegistrarApiClient
 import com.hopae.eudi.wallet.trust.WRPRCVerifier
 import com.hopae.eudi.wallet.trust.X509RequestVerifier
 import com.hopae.eudi.wallet.trust.X5cIssuerKeyResolver
@@ -87,10 +88,13 @@ class Wallet private constructor(
             }
             val wrprcVerifier = registrarValidator?.let { WRPRCVerifier(it, JwtTimeValidator(now = { ports.clock.now() })) }
             val registrarStatusClient = registrarValidator?.let { StatusListClient(ports.http, X5cIssuerKeyResolver(it), clockSeconds) }
+            // Registrar TS5 API client for the dataset-only path (verifier presents no WRPRC): the wallet can
+            // confirm the RP's registration against the registrar's signed record when the User opts in.
+            val registrarApi = registrarValidator?.let { RegistrarApiClient(ports.http, X5cIssuerKeyResolver(it)) }
 
             val vp = Openid4VpClient(ports.http, clockSeconds, readerValidator?.let { X509RequestVerifier(it, wrprcVerifier) }, ports.rng)
             val recordFailures = config.transactionLog.recordFailures
-            val presentation = PresentationService(vp, store, txlog, ports.secureAreas, scope, registrarStatusClient, recordFailures, config.presentation.mdocDeviceAuth, config.presentation.mdocTransactionDataBinder)
+            val presentation = PresentationService(vp, store, txlog, ports.secureAreas, scope, registrarStatusClient, registrarApi, config.presentation.verifyRegistrationViaRegistrarApi, recordFailures, config.presentation.mdocDeviceAuth, config.presentation.mdocTransactionDataBinder)
             val proximity = ProximityService(store, txlog, ports.secureAreas, scope, readerValidator?.let { X5cMdocReaderTrust(it) }, recordFailures, config.presentation.mdocDeviceAuth, config.presentation.proximitySessionCurve)
             // Reader side: verify presented mdocs against the same issuer anchors used for status/issuance.
             val reader = ProximityReaderService(X5cMdocIssuerTrust(issuerValidator))

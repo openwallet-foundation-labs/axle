@@ -53,11 +53,16 @@ class VerifierRegistration(
      */
     val statusValid: Boolean?,
     /**
-     * True iff a registrar-issued WRPRC attested this registration (authoritative, registrar-sealed). False
-     * when only the RP's self-declared `registrar_dataset` backs it (no WRPRC) — treat those fields as
-     * unverified unless a registrar TS5 lookup confirmed them.
+     * True iff a registrar-issued WRPRC attested this registration (authoritative, registrar-sealed, verified
+     * offline). False when only the RP's self-declared `registrar_dataset` backs it (no WRPRC).
      */
     val attested: Boolean = false,
+    /**
+     * True iff the registration is registrar-verified — either WRPRC-attested ([attested]) OR confirmed
+     * online against the registrar's TS5 API (RPRC_16/18) for a dataset-only request. When false, the
+     * surfaced registration fields are only the RP's self-declaration.
+     */
+    val registrarVerified: Boolean = false,
     /** The RP's registry base URI (`registrar_dataset.registryURI`), for the transaction log / TS5 lookup. */
     val registryURI: String? = null,
     /** The RP's privacy-policy URL (`registrar_dataset.policyURI`), for the consent screen. */

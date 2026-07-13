@@ -19,6 +19,7 @@ import com.hopae.eudi.wallet.store.CredentialEnvelope
 import com.hopae.eudi.wallet.store.CredentialInstance
 import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.EnvelopeLifecycle
+import com.hopae.eudi.wallet.trust.RegistrarApiClient
 import com.hopae.eudi.wallet.trust.TrustException
 import com.hopae.eudi.wallet.txlog.LoggedClaim
 import com.hopae.eudi.wallet.txlog.LoggedDocument
@@ -30,6 +31,7 @@ import com.hopae.eudi.wallet.vp.HeldMdoc
 import com.hopae.eudi.wallet.vp.HeldSdJwtVc
 import com.hopae.eudi.wallet.vp.Openid4VpClient
 import com.hopae.eudi.wallet.vp.PresentableCredential
+import com.hopae.eudi.wallet.vp.RegisteredCredential
 import com.hopae.eudi.wallet.vp.RegistrationScope
 import com.hopae.eudi.wallet.vp.ResolvedRequest
 import com.hopae.eudi.wallet.vp.VpErrorCode
@@ -49,6 +51,13 @@ class PresentationService internal constructor(
      * anchors are configured. Used to refuse a revoked WRPRC before the consent screen.
      */
     private val registrarStatusClient: StatusListClient? = null,
+    /**
+     * Registrar TS5 API client for the dataset-only path (no WRPRC); null when no registrar anchors are
+     * configured. Consulted only when [verifyRegistrationViaApi] is on (RPRC_16).
+     */
+    private val registrarApi: RegistrarApiClient? = null,
+    /** RPRC_16 opt-in: consult [registrarApi] to confirm a dataset-only RP's registration before consent. */
+    private val verifyRegistrationViaApi: Boolean = false,
     /** When true, a failed final submission is recorded with ERROR status (opt-in via config). */
     private val recordFailures: Boolean = false,
     /** ISO 18013-5 §9.1.3.5 device-auth preference for mdoc presentations (deviceMac when the verifier requests it). */
@@ -89,11 +98,14 @@ class PresentationService internal constructor(
             // Refuse a revoked RP registration cert (WRPRC) before any matching / consent. Only runs when
             // the request actually carried a WRPRC (registration != null); absent → nothing to check.
             catchingVp { checkRegistrationStatus(resolved) }
+            // Dataset-only path (no WRPRC): if the User opted in, confirm the RP's registration against the
+            // registrar's TS5 API (RPRC_18). Best-effort — a failure leaves the self-declared dataset unverified.
+            val registrarVerifiedCreds = resolveRegistrarApi(resolved)
 
             val envelopes = store.list().filter { it.lifecycle is EnvelopeLifecycle.Issued }
             val held = envelopes.mapNotNull { presentableFor(it, it.firstInstance()) }
             val matches = vp.match(resolved, held)
-            val request = buildRequest(resolved, matches)
+            val request = buildRequest(resolved, matches, registrarVerifiedCreds)
 
             when (val selection = awaitDecision(request)) {
                 null -> {
@@ -128,7 +140,31 @@ class PresentationService internal constructor(
         return session
     }
 
-    private fun buildRequest(resolved: ResolvedRequest, matches: DcqlMatchResult): PresentationRequest {
+    /**
+     * Dataset-only registration confirmation (wrprc.md §5, RPRC_16/18). Returns the RP's registrar-signed
+     * registered credentials when the request carried only a self-declared `registrar_dataset` AND the User
+     * opted in AND the TS5 lookup succeeds; null otherwise (WRPRC-attested, opted out, or the call failed —
+     * in which case we proceed with the self-declared dataset, unverified, per §5.3).
+     */
+    private suspend fun resolveRegistrarApi(resolved: ResolvedRequest): List<RegisteredCredential>? {
+        val reg = resolved.verifier.registration ?: return null
+        if (reg.attested) return null // a WRPRC already gives authoritative, offline-verified registration
+        if (!verifyRegistrationViaApi) return null // RPRC_16: no online call unless the User opted in
+        val api = registrarApi ?: return null
+        val registryURI = reg.dataset?.registryURI ?: return null
+        val identifier = reg.dataset?.identifier ?: return null
+        return try {
+            api.fetchRegisteredCredentials(registryURI, identifier, reg.dataset?.intendedUseIdentifier)
+        } catch (_: Exception) {
+            null // §5.3: could not obtain the registered info — proceed, the dataset stays unverified
+        }
+    }
+
+    private fun buildRequest(
+        resolved: ResolvedRequest,
+        matches: DcqlMatchResult,
+        registrarVerifiedCreds: List<RegisteredCredential>? = null,
+    ): PresentationRequest {
         val required = matches.requiredQueryIds
         val queries = matches.candidatesByQuery.map { (queryId, candidates) ->
             QueryPresentation(
@@ -140,8 +176,11 @@ class PresentationService internal constructor(
         }
         val v = resolved.verifier
         val registration = v.registration?.let { r ->
+            // Prefer the registrar-signed credentials from the TS5 lookup (dataset-only + opt-in) over the
+            // self-declared ones; a WRPRC-attested request already carries authoritative registeredCredentials.
+            val registered = registrarVerifiedCreds ?: r.registeredCredentials
             // RPRC_21 attribute-scope check: which requested attributes fall outside what the RP registered.
-            val unregistered = RegistrationScope.unregistered(resolved.dcqlQuery, r.registeredCredentials)
+            val unregistered = RegistrationScope.unregistered(resolved.dcqlQuery, registered)
             VerifierRegistration(
                 subject = r.subject,
                 entitlements = r.entitlements,
@@ -151,6 +190,7 @@ class PresentationService internal constructor(
                 // Reaching here means any revoked WRPRC was already refused; validated iff a status client ran.
                 statusValid = if (r.status != null && registrarStatusClient != null) true else null,
                 attested = r.attested,
+                registrarVerified = r.attested || registrarVerifiedCreds != null,
                 registryURI = r.dataset?.registryURI,
                 policyURI = r.dataset?.policyURI,
                 unregisteredClaims = unregistered.map { it.path },

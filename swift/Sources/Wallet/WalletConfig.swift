@@ -57,12 +57,20 @@ public struct PresentationConfig {
     /// (default), P-384 or P-521 — the reader matches whatever the mdoc offers. Remote OpenID4VP response
     /// encryption already follows the verifier's chosen curve, so no wallet setting is needed there.
     public let proximitySessionCurve: EcCurve
+    /// ETSI TS 119 475 RPRC_16: when a verifier presents only a self-declared `registrar_dataset` (no
+    /// registrar-sealed WRPRC), consult the registrar's TS5 API to obtain the *registrar-signed* registration
+    /// before consent (wrprc.md §5). This is an online call keyed by the RP identifier, so it is opt-in and off
+    /// by default; when off, the self-declared dataset is still shown but not presented as registrar-verified.
+    /// A WRPRC-attested request never triggers a lookup (it is already authoritative + offline-verifiable).
+    public let verifyRegistrationViaRegistrarApi: Bool
     public init(mdocDeviceAuth: MdocDeviceAuthMode = .signature,
                 mdocTransactionDataBinder: OpenID4VP.MdocTransactionDataBinder? = nil,
-                proximitySessionCurve: EcCurve = .p256) {
+                proximitySessionCurve: EcCurve = .p256,
+                verifyRegistrationViaRegistrarApi: Bool = false) {
         self.mdocDeviceAuth = mdocDeviceAuth
         self.mdocTransactionDataBinder = mdocTransactionDataBinder
         self.proximitySessionCurve = proximitySessionCurve
+        self.verifyRegistrationViaRegistrarApi = verifyRegistrationViaRegistrarApi
     }
 }
 

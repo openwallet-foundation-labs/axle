@@ -220,6 +220,70 @@ final class TrustTests: XCTestCase {
         XCTAssertNil(info.registration)
     }
 
+    // ---- registrar TS5 API client ----
+
+    private func registryToken(_ leaf: Cert, _ payload: String) async throws -> String {
+        let header = JsonValue.obj([
+            ("alg", .str("ES256")),
+            ("typ", .str("wrp-registry+jwt")),
+            ("x5c", .arr([.str(Data(try leaf.der).base64EncodedString())])),
+        ])
+        return try await Jws.sign(header: header, payload: [UInt8](payload.utf8), signer: LeafSigner(d: leaf.key.rawRepresentation)).compact()
+    }
+
+    private struct FixedHttp: HttpTransport {
+        let body: String
+        let status: Int
+        init(_ body: String, status: Int = 200) { self.body = body; self.status = status }
+        func execute(_ request: HttpRequest) async throws -> HttpResponse {
+            HttpResponse(status: status, headers: [], body: [UInt8](body.utf8))
+        }
+    }
+
+    private let recordPayload = #"{"iss":"https://r.example/registrar","legalName":"Demo RP","intendedUse":[{"intendedUseIdentifier":"iu-1","credential":[{"format":"mso_mdoc","meta":{"doctype_value":"org.iso.18013.5.1.mDL"},"claim":[{"path":["org.iso.18013.5.1","given_name"]}]}]},{"intendedUseIdentifier":"iu-2","credential":[{"format":"dc+sd-jwt","meta":{"vct_values":["urn:eudi:pid:1"]},"claim":[{"path":["family_name"]}]}]}]}"#
+
+    private func apiClient(_ http: any HttpTransport, _ ca: Cert) -> RegistrarApiClient {
+        RegistrarApiClient(http: http, keyResolver: X5cIssuerKeyResolver(validator: X509ChainValidator(anchors: TrustAnchors(roots: [ca.certificate]), validationTime: validAt)))
+    }
+
+    func testFetchesRegisteredCredentialsForIntendedUse() async throws {
+        let ca = try makeCa("Registrar CA")
+        let leaf = try makeLeaf(ca, cn: "Registrar Signer")
+        let creds = try await apiClient(FixedHttp(try await registryToken(leaf, recordPayload)), ca)
+            .fetchRegisteredCredentials(registryURI: "https://r.example/registrar", identifier: "RP-1", intendedUseIdentifier: "iu-2")
+        XCTAssertEqual(1, creds.count)
+        XCTAssertEqual("dc+sd-jwt", creds.first?.format)
+        XCTAssertEqual([["family_name"]], creds.first?.claims)
+    }
+
+    func testDefaultsToFirstIntendedUseWhenIdUnknown() async throws {
+        let ca = try makeCa("Registrar CA")
+        let leaf = try makeLeaf(ca, cn: "Registrar Signer")
+        let creds = try await apiClient(FixedHttp(try await registryToken(leaf, recordPayload)), ca)
+            .fetchRegisteredCredentials(registryURI: "https://r.example/registrar", identifier: "RP-1", intendedUseIdentifier: nil)
+        XCTAssertEqual("mso_mdoc", creds.first?.format, "no intended-use id → first entry")
+    }
+
+    func testRegistryUntrustedSignerRejected() async throws {
+        let ca = try makeCa("Registrar CA")
+        let rogue = try makeCa("Rogue CA")
+        let leaf = try makeLeaf(rogue, cn: "Rogue Signer") // not under the trusted registrar CA
+        do {
+            _ = try await apiClient(FixedHttp(try await registryToken(leaf, recordPayload)), ca)
+                .fetchRegisteredCredentials(registryURI: "https://r.example/registrar", identifier: "RP-1", intendedUseIdentifier: "iu-1")
+            XCTFail("untrusted signer must be rejected")
+        } catch { /* TrustError from the chain validator */ }
+    }
+
+    func testRegistryHttpErrorRejected() async throws {
+        let ca = try makeCa("Registrar CA")
+        do {
+            _ = try await apiClient(FixedHttp("not found", status: 404), ca)
+                .fetchRegisteredCredentials(registryURI: "https://r.example/registrar", identifier: "RP-1", intendedUseIdentifier: "iu-1")
+            XCTFail("HTTP error must be rejected")
+        } catch { /* RegistrarApiError */ }
+    }
+
     // ---- issuer key resolution ----
 
     func testX5cIssuerKeyResolves() async throws {

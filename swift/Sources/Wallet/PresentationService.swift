@@ -18,6 +18,11 @@ public struct PresentationService {
     /// Registrar-scoped Token Status List client for RP registration certs (WRPRC); nil when no registrar
     /// anchors are configured. Used to refuse a revoked WRPRC before the consent screen.
     var registrarStatusClient: StatusListClient?
+    /// Registrar TS5 API client for the dataset-only path (no WRPRC); nil when no registrar anchors are
+    /// configured. Consulted only when `verifyRegistrationViaApi` is on (RPRC_16).
+    var registrarApi: RegistrarApiClient?
+    /// RPRC_16 opt-in: consult `registrarApi` to confirm a dataset-only RP's registration before consent.
+    var verifyRegistrationViaApi: Bool = false
     /// When true, a failed final submission is recorded with `.error` status (opt-in via config).
     var recordFailures: Bool = false
     /// ISO 18013-5 §9.1.3.5 device-auth preference for mdoc presentations (deviceMac when the verifier requests it).
@@ -60,6 +65,9 @@ public struct PresentationService {
             // Refuse a revoked RP registration cert (WRPRC) before doing any matching / consent. Only runs
             // when the request actually carried a WRPRC (registration != nil); absent → nothing to check.
             try await catchingVp { try await checkRegistrationStatus(resolved) }
+            // Dataset-only path (no WRPRC): if the User opted in, confirm the RP's registration against the
+            // registrar's TS5 API (RPRC_18). Best-effort — a failure leaves the self-declared dataset unverified.
+            let registrarVerifiedCreds = await resolveRegistrarApi(resolved)
 
             let envelopes = try await store.list().filter { if case .issued = $0.lifecycle { return true }; return false }
             var held: [any PresentableCredential] = []
@@ -67,7 +75,7 @@ public struct PresentationService {
                 if let p = presentableFor(envelope, firstInstance(envelope)) { held.append(p) }
             }
             let matches = vp.match(resolved, held: held)
-            let request = buildRequest(resolved, matches)
+            let request = buildRequest(resolved, matches, registrarVerifiedCreds: registrarVerifiedCreds)
 
             switch await s.awaitDecision(request) {
             case .none:
@@ -103,7 +111,22 @@ public struct PresentationService {
         return session
     }
 
-    private func buildRequest(_ resolved: ResolvedRequest, _ matches: DcqlMatchResult) -> PresentationRequest {
+    /// Dataset-only registration confirmation (wrprc.md §5, RPRC_16/18). Returns the RP's registrar-signed
+    /// registered credentials when the request carried only a self-declared `registrar_dataset` AND the User
+    /// opted in AND the TS5 lookup succeeds; nil otherwise (WRPRC-attested, opted out, or the call failed — in
+    /// which case we proceed with the self-declared dataset, unverified, per §5.3).
+    private func resolveRegistrarApi(_ resolved: ResolvedRequest) async -> [RegisteredCredential]? {
+        guard let reg = resolved.verifier.registration else { return nil }
+        if reg.attested { return nil }                 // a WRPRC already gives authoritative, offline-verified registration
+        guard verifyRegistrationViaApi, let api = registrarApi else { return nil } // RPRC_16 opt-in
+        guard let registryURI = reg.dataset?.registryURI, let identifier = reg.dataset?.identifier else { return nil }
+        // §5.3: could not obtain the registered info → proceed, the dataset stays unverified.
+        return try? await api.fetchRegisteredCredentials(registryURI: registryURI, identifier: identifier,
+                                                         intendedUseIdentifier: reg.dataset?.intendedUseIdentifier)
+    }
+
+    private func buildRequest(_ resolved: ResolvedRequest, _ matches: DcqlMatchResult,
+                              registrarVerifiedCreds: [RegisteredCredential]? = nil) -> PresentationRequest {
         let required = matches.requiredQueryIds
         let queries = matches.candidatesByQuery.map { queryId, candidates in
             QueryPresentation(
@@ -113,8 +136,11 @@ public struct PresentationService {
         }
         let v = resolved.verifier
         let registration = v.registration.map { r -> VerifierRegistration in
+            // Prefer the registrar-signed credentials from the TS5 lookup (dataset-only + opt-in) over the
+            // self-declared ones; a WRPRC-attested request already carries authoritative registeredCredentials.
+            let registered = registrarVerifiedCreds ?? r.registeredCredentials
             // RPRC_21 attribute-scope check: which requested attributes fall outside what the RP registered.
-            let unregistered = RegistrationScope.unregistered(resolved.dcqlQuery, registered: r.registeredCredentials)
+            let unregistered = RegistrationScope.unregistered(resolved.dcqlQuery, registered: registered)
             return VerifierRegistration(
                 subject: r.subject, entitlements: r.entitlements,
                 purpose: r.purpose.map { PurposeText(lang: $0.lang, value: $0.value) },
@@ -122,6 +148,7 @@ public struct PresentationService {
                 // Reaching here means any revoked WRPRC was already refused; validated iff a status client ran.
                 statusValid: (r.status != nil && registrarStatusClient != nil) ? true : nil,
                 attested: r.attested,
+                registrarVerified: r.attested || registrarVerifiedCreds != nil,
                 registryURI: r.dataset?.registryURI,
                 policyURI: r.dataset?.policyURI,
                 unregisteredClaims: unregistered.map { $0.path })

@@ -64,12 +64,17 @@ public struct Wallet {
         let registrarStatusClient = registrarValidator.map {
             StatusListClient(http: ports.http, keyResolver: X5cIssuerKeyResolver(validator: $0), clock: clockSeconds)
         }
+        // Registrar TS5 API client for the dataset-only path (verifier presents no WRPRC): the wallet can
+        // confirm the RP's registration against the registrar's signed record when the User opts in.
+        let registrarApi = registrarValidator.map { RegistrarApiClient(http: ports.http, keyResolver: X5cIssuerKeyResolver(validator: $0)) }
 
         let vpTrust: (any RequestTrustVerifier)? = readerValidator.map { X509RequestVerifier(validator: $0, wrprcVerifier: wrprcVerifier) }
         let vp = Openid4VpClient(http: ports.http, clock: clockSeconds, trust: vpTrust, rng: ports.rng)
         let recordFailures = config.transactionLog.recordFailures
         let presentation = PresentationService(vp: vp, store: store, txlog: txlog, secureAreas: ports.secureAreas,
                                                registrarStatusClient: registrarStatusClient,
+                                               registrarApi: registrarApi,
+                                               verifyRegistrationViaApi: config.presentation.verifyRegistrationViaRegistrarApi,
                                                recordFailures: recordFailures,
                                                deviceAuthMode: config.presentation.mdocDeviceAuth,
                                                transactionDataBinder: config.presentation.mdocTransactionDataBinder)

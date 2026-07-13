@@ -176,19 +176,53 @@ async function createRelyingParty(token) {
       phone: '+352261060',
       infoURI: ['https://cnpd.public.lu'],
     },
+    // The intended use REGISTERS the credentials/claims this RP will request. The registrar assigns an
+    // intendedUseIdentifier (UUID) to it; the wallet can then verify a presentation's requested attributes
+    // against this registration via TS5 GET {registryURI}/wrp/check-intended-use (ETSI TS 119 475 B.2.7).
     intendedUse: [
       {
         purpose: [{ lang: 'en', content: 'Age verification' }],
-        privacyPolicy: [{ type: 'url', uri: PRIVACY_URI }],
-        credential: [],
+        privacyPolicy: [{ type: 'http://data.europa.eu/eudi/policy/privacy-policy', uri: PRIVACY_URI }],
+        credential: [
+          {
+            format: 'mso_mdoc',
+            meta: { doctype_value: 'org.iso.18013.5.1.mDL' },
+            claim: [['org.iso.18013.5.1', 'given_name'], ['org.iso.18013.5.1', 'family_name'], ['org.iso.18013.5.1', 'birth_date'], ['org.iso.18013.5.1', 'driving_privileges']].map((path) => ({ path })),
+          },
+          {
+            format: 'dc+sd-jwt',
+            meta: { vct_values: ['urn:eudi:pid:1'] },
+            claim: [['given_name'], ['family_name'], ['age_over_18']].map((path) => ({ path })),
+          },
+        ],
       },
     ],
     isIntermediary: false,
   };
 
   const rp = await api('POST', '/portal/wrp', { token, body: dto });
-  process.stderr.write(`[mint-rp] created WRP ${rp.id}\n`);
+  process.stderr.write(`[mint-rp] created WRP ${rp.id} (intendedUseIdentifier ${rp.intendedUse?.[0]?.intendedUseIdentifier})\n`);
   return rp;
+}
+
+/**
+ * Build the ETSI TS 119 475 Annex B `registrar_dataset` from the registrar's created RP record — using the
+ * REGISTRAR-ASSIGNED intendedUseIdentifier + registryURI (not a hardcoded value), so it matches the
+ * registration and the wallet can resolve `${registryURI}/wrp/check-intended-use` against it.
+ */
+function buildRegistrarDataset(rp) {
+  const iu = rp.intendedUse?.[0] ?? {};
+  // Map the registrar identifier {type,value} to the ETSI dataset shape {type:URI, identifier}.
+  const idTypeUri = { LEI: 'http://data.europa.eu/eudi/id/LEI', VAT: 'http://data.europa.eu/eudi/id/VATIN', NTR: 'http://data.europa.eu/eudi/id/EUID' };
+  return {
+    identifier: (rp.identifier ?? []).map((i) => ({ type: idTypeUri[i.type] ?? i.type, identifier: i.value })),
+    srvDescription: rp.srvDescription,
+    registryURI: rp.registryURI,
+    intendedUseIdentifier: iu.intendedUseIdentifier,
+    purpose: iu.purpose,
+    policyURI: (iu.privacyPolicy ?? []).map((p) => ({ type: p.type, policyURI: p.uri })),
+    credential: iu.credential,
+  };
 }
 
 /**
@@ -217,16 +251,19 @@ async function issueWrpac(token, rpId) {
 
 /**
  * Mint the WRPRC (`rc-wrp+jwt` compact JWS). Response is { id, jwt, intendedUse }; the compact JWS
- * string we want is `.jwt`. Most WRPRC content is derived from the RP record; the request only
- * supplies the per-issuance bits (support/privacy URIs, purpose).
+ * string we want is `.jwt`. Most WRPRC content is derived from the RP record; the request supplies the
+ * per-issuance bits (support/privacy URIs, purpose) and the `credentials` list — which the registrar
+ * embeds verbatim into the WRPRC payload (ETSI TS 119 475 §5.2.4), so it MUST match the registered
+ * intendedUse credentials for the wallet's transparency check to line up.
  */
-async function issueWrprc(token, rpId) {
+async function issueWrprc(token, rpId, credentials) {
   const res = await api('POST', `/portal/wrp/${rpId}/registration-certs`, {
     token,
     body: {
       support_uri: SUPPORT_URI,
       privacy_policy: PRIVACY_URI,
       purpose: [{ lang: 'en', content: 'Age verification' }],
+      credentials,
     },
   });
   process.stderr.write(`[mint-rp] issued WRPRC jti ${res.id}\n`);
@@ -240,7 +277,7 @@ async function main() {
   const rpId = rp.id;
 
   const wrpac = await issueWrpac(token, rpId);
-  const wrprc = await issueWrprc(token, rpId);
+  const wrprc = await issueWrprc(token, rpId, rp.intendedUse?.[0]?.credential ?? []);
 
   // Registrar CA (trust anchor) in both encodings.
   const registrarCaPem = (await api('GET', '/ca-certificate', { accept: 'application/x-pem-file' })).trim();
@@ -264,6 +301,9 @@ async function main() {
       sha256Thumbprint,
     },
     wrprc, // compact `rc-wrp+jwt` JWS
+    // ETSI TS 119 475 Annex B registrar_dataset with the REGISTRAR-ASSIGNED intendedUseIdentifier +
+    // registryURI — drop into the verifier's VERIFIER_REGISTRAR_DATASET.
+    registrarDataset: buildRegistrarDataset(rp),
     registrarCaPem,
     registrarCaDerBase64,
   };

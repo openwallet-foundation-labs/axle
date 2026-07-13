@@ -195,18 +195,32 @@ final class TrustTests: XCTestCase {
     }
 
     /// Presence matrix (§2): a `registration_cert` without the mandatory `registrar_dataset` is malformed.
-    func testRegistrationCertWithoutDatasetRejected() async throws {
+    /// A malformed `verifier_info` (registration_cert without the mandatory dataset) is best-effort: no
+    /// registration rather than a failure — signature is authentic and the chain trusted.
+    func testRegistrationCertWithoutDatasetIgnored() async throws {
         let ca = try makeCa()
         let leaf = try makeLeaf(ca, cn: "Verifier", dns: "verifier.example.com")
         let validator = X509ChainValidator(anchors: TrustAnchors(roots: [ca.certificate]), validationTime: validAt)
         let fakeCert = Base64Url.encode([UInt8]("not-a-real-wrprc".utf8))
         let payload = #"{"nonce":"n","verifier_info":[{"format":"registration_cert","data":"\#(fakeCert)"}]}"#
         let jws = try await signedRequest(leaf, payload)
-        do {
-            _ = try await X509RequestVerifier(validator: validator, wrprcVerifier: try registrarVerifier())
-                .verifyRequestObject(jws, clientId: "x509_san_dns:verifier.example.com", scheme: "x509_san_dns")
-            XCTFail("a registration_cert without a registrar_dataset must be rejected")
-        } catch { /* VpError.invalidRequest */ }
+        let info = try await X509RequestVerifier(validator: validator, wrprcVerifier: try registrarVerifier())
+            .verifyRequestObject(jws, clientId: "x509_san_dns:verifier.example.com", scheme: "x509_san_dns")
+        XCTAssertTrue(info.trusted, "signature + chain are fine")
+        XCTAssertNil(info.registration, "a registration_cert without the mandatory dataset → no registration (soft)")
+    }
+
+    /// Trust is informational: a request signed by a cert that does NOT chain to a trusted anchor still
+    /// resolves — with `trusted = false` — so the wallet can show "not trusted" and let the User decide.
+    func testUntrustedVerifierResolvesAsNotTrusted() async throws {
+        let rogue = try makeCa("Rogue CA")
+        let leaf = try makeLeaf(rogue, cn: "Verifier", dns: "verifier.example.com")
+        let validator = X509ChainValidator(anchors: TrustAnchors(roots: [try makeCa("Real CA").certificate]), validationTime: validAt)
+        let jws = try await signedRequest(leaf, #"{"nonce":"n"}"#)
+        let info = try await X509RequestVerifier(validator: validator)
+            .verifyRequestObject(jws, clientId: "x509_san_dns:verifier.example.com", scheme: "x509_san_dns")
+        XCTAssertFalse(info.trusted, "an untrusted chain surfaces as trusted=false, not an error")
+        XCTAssertEqual("Verifier", info.commonName)
     }
 
     /// No `verifier_info` at all → registration stays nil even with registrar trust configured (interop).

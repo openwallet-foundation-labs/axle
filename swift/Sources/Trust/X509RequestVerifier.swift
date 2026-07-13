@@ -19,16 +19,16 @@ public struct X509RequestVerifier: RequestTrustVerifier {
 
     public func verifyRequestObject(_ jws: Jws, clientId: String, scheme: String) async throws -> VerifierInfo {
         guard let x5c = jws.x5c else { throw VpError.verifierNotTrusted("x509 request without x5c") }
-        let chain = try await validator.validate(x5c) // throws if chain not trusted
-        let leaf = chain[0]
+        let leaf = try X509Support.parse(x5c[0]) // the request's signing cert — not yet trusted
 
+        // --- Authenticity (HARD fail) --- a request whose signature does not verify, or whose client_id does
+        // not identify this exact certificate, is forged / spoofed (not merely "untrusted") and is rejected.
         guard case let .str(algName)? = jws.header["alg"], let alg = signingAlgorithmFromJwsName(algName) else {
             throw VpError.invalidRequest("unsupported request alg")
         }
         guard jws.verify(key: try X509Support.ecPublicKey(leaf), expected: alg) else {
             throw VpError.verifierNotTrusted("request signature invalid")
         }
-
         switch scheme {
         case "x509_san_dns":
             let expected = clientId.hasPrefix("x509_san_dns:") ? String(clientId.dropFirst("x509_san_dns:".count)) : clientId
@@ -44,55 +44,59 @@ public struct X509RequestVerifier: RequestTrustVerifier {
             throw VpError.unsupported("client_id scheme '\(scheme)' for x509 verification")
         }
 
-        let chainDer = try chain.map { try X509Support.der($0) }
-
-        // ETSI TS 119 472-2 §6.3: the RP puts its Registrar data in the request's `verifier_info` array —
-        // a `registrar_dataset` (self-declared, mandatory REQ-RO-02) and, if it holds one, a `registration_cert`
-        // (the registrar-sealed WRPRC). We build a registration only when registrar trust is configured; an
-        // entirely absent `verifier_info` leaves registration nil (interop with verifiers carrying no data).
-        var registration: RegistrationInfo?
-        if let wrprcVerifier {
-            let (dataset, wrprc) = Self.extractVerifierInfo(jws)
-            if let wrprc, dataset == nil {
-                // Presence matrix (§2): a WRPRC without the mandatory dataset is malformed.
-                throw VpError.invalidRequest("verifier_info carries a registration_cert but no registrar_dataset (REQ-RO-02)")
-            } else if let wrprc {
-                // Both present → the WRPRC wins (registrar-attested, offline-verifiable); dataset is for display/log.
-                let verified = try await wrprcVerifier.verify(wrprc, wrpacLeafDer: chainDer[0])
-                registration = RegistrationInfo(
-                    subject: verified.subject,
-                    entitlements: verified.entitlements,
-                    purpose: verified.purpose.map { RegistrationLocalizedText(lang: $0.lang, value: $0.value) },
-                    intermediarySub: verified.intermediary?.sub,
-                    intermediaryName: verified.intermediary?.name,
-                    status: verified.status,
-                    attested: true,
-                    dataset: dataset,
-                    registeredCredentials: verified.registeredCredentials
-                )
-            } else if let dataset {
-                // Dataset only → self-declared registration (not registrar-attested). The wallet layer may upgrade
-                // it via the registrar's TS5 API when the User opts in (RPRC_16/18); until then `attested = false`.
-                registration = RegistrationInfo(
-                    subject: dataset.identifier ?? "",
-                    entitlements: [],
-                    purpose: dataset.purpose.map { RegistrationLocalizedText(lang: $0.lang, value: $0.value) },
-                    intermediarySub: nil,
-                    intermediaryName: nil,
-                    status: nil,
-                    attested: false,
-                    dataset: dataset,
-                    registeredCredentials: dataset.credentials
-                )
-            }
-        }
+        // --- Trust (SOFT) --- whether the certificate chains to a trusted reader anchor. A failure is NOT an
+        // error: it surfaces as `trusted = false` so the wallet can show "not trusted" and let the User decide.
+        // Registration (WRPRC / registrar_dataset) is likewise best-effort — any problem yields no registration.
+        let trusted = (try? await validator.validate(x5c)) != nil
+        let registration = try? await buildRegistration(jws, x5c)
 
         return VerifierInfo(
             clientId: clientId, clientIdScheme: scheme,
-            certificateChainDer: chainDer,
-            commonName: X509Support.commonName(leaf), trusted: true,
+            certificateChainDer: x5c,
+            commonName: X509Support.commonName(leaf), trusted: trusted,
             registration: registration
         )
+    }
+
+    /// The RP's registration from `verifier_info` (ETSI TS 119 472-2 §6.3), when registrar trust is configured.
+    /// Throws on a verification problem; the caller treats that as "no registration" (soft) so an untrusted /
+    /// invalid registration does not block the presentation.
+    private func buildRegistration(_ jws: Jws, _ x5c: [[UInt8]]) async throws -> RegistrationInfo? {
+        guard let wrprcVerifier else { return nil }
+        let (dataset, wrprc) = Self.extractVerifierInfo(jws)
+        if let wrprc, dataset == nil {
+            // Presence matrix (§2): a WRPRC without the mandatory dataset is malformed.
+            throw VpError.invalidRequest("verifier_info carries a registration_cert but no registrar_dataset (REQ-RO-02)")
+        } else if let wrprc {
+            // Both present → the WRPRC wins (registrar-attested, offline-verifiable); dataset is for display/log.
+            let verified = try await wrprcVerifier.verify(wrprc, wrpacLeafDer: x5c[0])
+            return RegistrationInfo(
+                subject: verified.subject,
+                entitlements: verified.entitlements,
+                purpose: verified.purpose.map { RegistrationLocalizedText(lang: $0.lang, value: $0.value) },
+                intermediarySub: verified.intermediary?.sub,
+                intermediaryName: verified.intermediary?.name,
+                status: verified.status,
+                attested: true,
+                dataset: dataset,
+                registeredCredentials: verified.registeredCredentials
+            )
+        } else if let dataset {
+            // Dataset only → self-declared registration (not registrar-attested). The wallet layer may upgrade
+            // it via the registrar's TS5 API when the User opts in (RPRC_16/18); until then `attested = false`.
+            return RegistrationInfo(
+                subject: dataset.identifier ?? "",
+                entitlements: [],
+                purpose: dataset.purpose.map { RegistrationLocalizedText(lang: $0.lang, value: $0.value) },
+                intermediarySub: nil,
+                intermediaryName: nil,
+                status: nil,
+                attested: false,
+                dataset: dataset,
+                registeredCredentials: dataset.credentials
+            )
+        }
+        return nil
     }
 
     /// Reads the request object's `verifier_info` array (ETSI TS 119 472-2 §6.3): the self-declared

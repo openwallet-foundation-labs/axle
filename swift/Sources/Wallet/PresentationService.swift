@@ -64,7 +64,7 @@ public struct PresentationService {
             let resolved = try await resolve()
             // Refuse a revoked RP registration cert (WRPRC) before doing any matching / consent. Only runs
             // when the request actually carried a WRPRC (registration != nil); absent → nothing to check.
-            try await catchingVp { try await checkRegistrationStatus(resolved) }
+            let statusValid = await checkRegistrationStatus(resolved)
             // Dataset-only path (no WRPRC): if the User opted in, confirm the RP's registration against the
             // registrar's TS5 API (RPRC_18). Best-effort — a failure leaves the self-declared dataset unverified.
             let registrarVerifiedCreds = await resolveRegistrarApi(resolved)
@@ -75,7 +75,7 @@ public struct PresentationService {
                 if let p = presentableFor(envelope, firstInstance(envelope)) { held.append(p) }
             }
             let matches = vp.match(resolved, held: held)
-            let request = buildRequest(resolved, matches, registrarVerifiedCreds: registrarVerifiedCreds)
+            let request = buildRequest(resolved, matches, registrarVerifiedCreds: registrarVerifiedCreds, statusValid: statusValid)
 
             switch await s.awaitDecision(request) {
             case .none:
@@ -126,7 +126,8 @@ public struct PresentationService {
     }
 
     private func buildRequest(_ resolved: ResolvedRequest, _ matches: DcqlMatchResult,
-                              registrarVerifiedCreds: [RegisteredCredential]? = nil) -> PresentationRequest {
+                              registrarVerifiedCreds: [RegisteredCredential]? = nil,
+                              statusValid: Bool? = nil) -> PresentationRequest {
         let required = matches.requiredQueryIds
         let queries = matches.candidatesByQuery.map { queryId, candidates in
             QueryPresentation(
@@ -146,7 +147,7 @@ public struct PresentationService {
                 purpose: r.purpose.map { PurposeText(lang: $0.lang, value: $0.value) },
                 intermediarySub: r.intermediarySub, intermediaryName: r.intermediaryName,
                 // Reaching here means any revoked WRPRC was already refused; validated iff a status client ran.
-                statusValid: (r.status != nil && registrarStatusClient != nil) ? true : nil,
+                statusValid: statusValid,
                 attested: r.attested,
                 registrarVerified: r.attested || registrarVerifiedCreds != nil,
                 registryURI: r.dataset?.registryURI,
@@ -163,15 +164,15 @@ public struct PresentationService {
     /// Refuses a revoked/suspended RP registration cert (WRPRC) via the Token Status List, when the request
     /// carried a WRPRC (`resolved.verifier.registration`) and a registrar status client is configured. A
     /// missing WRPRC or missing status client is a no-op — interop with verifiers that don't send one yet.
-    private func checkRegistrationStatus(_ resolved: ResolvedRequest) async throws {
-        guard let status = resolved.verifier.registration?.status, let client = registrarStatusClient else { return }
+    /// The RP registration cert (WRPRC) Token Status List result, surfaced (not enforced): true = valid,
+    /// false = revoked/suspended (or the check failed), nil = nothing to check. The wallet shows it and the
+    /// User decides — a revoked verifier does not hard-fail the presentation.
+    private func checkRegistrationStatus(_ resolved: ResolvedRequest) async -> Bool? {
+        guard let status = resolved.verifier.registration?.status, let client = registrarStatusClient else { return nil }
         do {
-            let result = try await client.check(claims: .obj([("status", status)]))
-            guard result == .valid else {
-                throw VpError.verifierNotTrusted("WRPRC status is \(result) (revoked or suspended)")
-            }
-        } catch let e as StatusListError {
-            throw VpError.verifierNotTrusted("WRPRC status list check failed: \(e.description)")
+            return try await client.check(claims: .obj([("status", status)])) == .valid
+        } catch {
+            return false // could not confirm the status → treat as not-valid, surfaced to the User (not a hard fail)
         }
     }
 

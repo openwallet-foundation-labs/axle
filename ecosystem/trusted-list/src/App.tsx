@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, Download, ShieldCheck, FileSignature } from 'lucide-react';
+import { Check, Copy, Download, ShieldCheck, FileSignature, CalendarClock } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -182,8 +182,9 @@ export default function App() {
                 <CardHeader>
                   <div className="flex items-start justify-between gap-3">
                     <CardTitle className="text-xl">{list.title}</CardTitle>
-                    <Badge variant="outline" className="shrink-0 font-mono text-[11px]">
-                      #{list.sequenceNumber}
+                    <Badge variant="outline" className="shrink-0 gap-1 text-[11px] font-normal">
+                      <CalendarClock className="h-3.5 w-3.5" />
+                      Issued {list.issued.slice(0, 10)}
                     </Badge>
                   </div>
                   <CardDescription className="flex flex-col gap-1.5 pt-1">

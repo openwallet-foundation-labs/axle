@@ -5,6 +5,7 @@ import { BadgeCheck, Check, Copy, Loader2, QrCode, ShieldAlert, Smartphone, X } 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 const BE = import.meta.env.VITE_ISSUER_BE_URL ?? 'http://localhost:3400';
 
@@ -98,10 +99,83 @@ interface OfferConfig {
   format: string;
   description: string;
 }
+
+// Issuance options the operator picks; they are baked into the credential offer (the wallet SDK reads them).
+type FlowChoice = 'authorization_code' | 'pre-authorized_code';
+interface Options {
+  flow: FlowChoice;
+  deferred: boolean;
+  encrypted: boolean;
+  batchSize: 1 | 3;
+}
+// PID's natural flow is authorization_code (with consent); mDL is pre-authorized. Either can be overridden.
+const defaultOptions = (id: string): Options => ({
+  flow: id.includes('pid') ? 'authorization_code' : 'pre-authorized_code',
+  deferred: false,
+  encrypted: false,
+  batchSize: 1,
+});
+
 interface Offer {
   name: string;
   deepLink: string;
   uri: string;
+  options: Options;
+}
+
+/** A compact segmented control for a small set of mutually-exclusive choices. */
+function Segmented<T extends string | number>({
+  value,
+  onChange,
+  opts,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  opts: { v: T; label: string }[];
+}) {
+  return (
+    <div className="inline-flex rounded-md border border-border p-0.5">
+      {opts.map((o) => (
+        <button
+          key={String(o.v)}
+          type="button"
+          onClick={() => onChange(o.v)}
+          className={cn(
+            'rounded px-2.5 py-1 text-xs font-medium transition-colors',
+            value === o.v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** An on/off pill toggle. */
+function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!on)}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+        on ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground',
+      )}
+    >
+      <span className={cn('h-2 w-2 rounded-full', on ? 'bg-primary' : 'bg-muted-foreground/40')} />
+      {label}
+    </button>
+  );
+}
+
+function OptionField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
 }
 
 function LandingView() {
@@ -109,6 +183,10 @@ function LandingView() {
   const [err, setErr] = useState<string | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [options, setOptions] = useState<Record<string, Options>>({});
+  const optFor = (id: string) => options[id] ?? defaultOptions(id);
+  const setOpt = (id: string, patch: Partial<Options>) =>
+    setOptions((o) => ({ ...o, [id]: { ...optFor(id), ...patch } }));
 
   useEffect(() => {
     fetch(`${BE}/.well-known/openid-credential-issuer/eudi-issuer`)
@@ -132,14 +210,21 @@ function LandingView() {
 
   async function getOffer(c: OfferConfig) {
     setBusy(c.id);
+    const o = optFor(c.id);
     try {
       const r = await fetch(`${BE}/eudi-issuer/credential-offer/create`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ credential_configuration_id: c.id }),
+        body: JSON.stringify({
+          credential_configuration_id: c.id,
+          flow: o.flow,
+          deferred: o.deferred,
+          encrypted: o.encrypted,
+          batch_size: o.batchSize,
+        }),
       });
       const { deep_link, credential_offer_uri } = await r.json();
-      setOffer({ name: c.name, deepLink: deep_link, uri: credential_offer_uri });
+      setOffer({ name: c.name, deepLink: deep_link, uri: credential_offer_uri, options: o });
     } catch {
       setErr('Could not create the credential offer.');
     } finally {
@@ -173,7 +258,40 @@ function LandingView() {
                   </div>
                   {c.description && <CardDescription>{c.description}</CardDescription>}
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
+                  {(() => {
+                    const o = optFor(c.id);
+                    return (
+                      <div className="grid gap-3 rounded-lg border border-border bg-muted/20 p-3 sm:grid-cols-2">
+                        <OptionField label="Flow">
+                          <Segmented
+                            value={o.flow}
+                            onChange={(v) => setOpt(c.id, { flow: v })}
+                            opts={[
+                              { v: 'authorization_code', label: 'Auth code' },
+                              { v: 'pre-authorized_code', label: 'Pre-auth' },
+                            ]}
+                          />
+                        </OptionField>
+                        <OptionField label="Batch size">
+                          <Segmented
+                            value={o.batchSize}
+                            onChange={(v) => setOpt(c.id, { batchSize: v })}
+                            opts={[
+                              { v: 1, label: '1' },
+                              { v: 3, label: '3' },
+                            ]}
+                          />
+                        </OptionField>
+                        <OptionField label="Response">
+                          <Toggle on={o.encrypted} onChange={(v) => setOpt(c.id, { encrypted: v })} label="Encrypted (JWE)" />
+                        </OptionField>
+                        <OptionField label="Issuance">
+                          <Toggle on={o.deferred} onChange={(v) => setOpt(c.id, { deferred: v })} label="Deferred" />
+                        </OptionField>
+                      </div>
+                    );
+                  })()}
                   <Button onClick={() => getOffer(c)} disabled={busy === c.id} className="w-full sm:w-auto">
                     {busy === c.id ? <Loader2 className="animate-spin" /> : <QrCode />}
                     Get credential
@@ -202,6 +320,12 @@ function OfferModal({ offer, onClose }: { offer: Offer; onClose: () => void }) {
         <CardContent className="flex flex-col items-center gap-4">
           <div className="rounded-xl border bg-white p-3">
             <QRCodeSVG value={offer.deepLink} size={216} level="M" />
+          </div>
+          <div className="flex w-full flex-wrap justify-center gap-1.5">
+            <Badge variant="secondary">{offer.options.flow === 'authorization_code' ? 'Auth code' : 'Pre-auth'}</Badge>
+            <Badge variant="secondary">Batch {offer.options.batchSize}</Badge>
+            {offer.options.encrypted && <Badge variant="secondary">Encrypted</Badge>}
+            {offer.options.deferred && <Badge variant="secondary">Deferred</Badge>}
           </div>
           <Button asChild className="w-full">
             <a href={offer.deepLink}>

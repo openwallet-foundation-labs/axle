@@ -49,8 +49,22 @@ export class VciController {
   // ---- Pre-authorized code flow (mDL) ----
   @Post('credential-offer/create')
   @HttpCode(200)
-  createOffer(@Body() body: { credential_configuration_id: string }) {
-    return this.vci.createCredentialOffer(body.credential_configuration_id);
+  createOffer(
+    @Body()
+    body: {
+      credential_configuration_id: string;
+      flow?: 'authorization_code' | 'pre-authorized_code';
+      deferred?: boolean;
+      encrypted?: boolean;
+      batch_size?: number;
+    },
+  ) {
+    return this.vci.createCredentialOffer(body.credential_configuration_id, {
+      flow: body.flow,
+      deferred: body.deferred === true,
+      encrypted: body.encrypted === true,
+      batchSize: Number(body.batch_size) === 3 ? 3 : 1,
+    });
   }
 
   @Get('credential-offer/:id')
@@ -76,10 +90,36 @@ export class VciController {
   }
 
   @Post('credential')
+  @Dpop('rs')
+  @UseGuards(DpopGuard)
+  async credential(
+    @Body() body: Record<string, unknown>,
+    @Req() req: { accessToken: Record<string, unknown> },
+    @Res() reply: FastifyReply,
+  ) {
+    // Response is JSON, or a compact JWE (`application/jwt`) when the request asked for encryption.
+    const { contentType, payload } = await this.vci.credential(body, req.accessToken);
+    void reply.header('Cache-Control', 'no-store').type(contentType).send(payload);
+  }
+
+  @Post('deferred_credential')
+  @Dpop('rs')
+  @UseGuards(DpopGuard)
+  async deferredCredential(
+    @Body() body: Record<string, unknown>,
+    @Req() req: { accessToken: Record<string, unknown> },
+    @Res() reply: FastifyReply,
+  ) {
+    const { contentType, payload } = await this.vci.deferredCredential(body, req.accessToken);
+    void reply.header('Cache-Control', 'no-store').type(contentType).send(payload);
+  }
+
+  @Post('notification')
+  @HttpCode(204)
   @Header('Cache-Control', 'no-store')
   @Dpop('rs')
   @UseGuards(DpopGuard)
-  credential(@Body() body: Record<string, unknown>, @Req() req: { accessToken: Record<string, unknown> }) {
-    return this.vci.credential(body, req.accessToken);
+  notification(@Body() body: Record<string, unknown>) {
+    return this.vci.notification(body);
   }
 }

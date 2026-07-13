@@ -29,7 +29,7 @@ export class IssuerJwtService {
 
   async sign(
     payload: JWTPayload,
-    opts: { typ?: string; expSec?: number; aud?: string; sub?: string; x5c?: boolean } = {},
+    opts: { typ?: string; expSec?: number; aud?: string; sub?: string; x5c?: boolean; iss?: string } = {},
   ): Promise<string> {
     const signer = this.keystore.getSigner('pid');
     const now = Math.floor(Date.now() / 1000);
@@ -40,7 +40,7 @@ export class IssuerJwtService {
         ...(opts.x5c ? { x5c: signer.x5c } : { kid: signer.kid }),
       })
       .setIssuedAt(now)
-      .setIssuer(this.issuer);
+      .setIssuer(opts.iss ?? this.issuer);
     if (opts.expSec) jwt = jwt.setExpirationTime(now + opts.expSec);
     if (opts.aud) jwt = jwt.setAudience(opts.aud);
     if (opts.sub) jwt = jwt.setSubject(opts.sub);

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'node:crypto';
-import { calculateJwkThumbprint, decodeProtectedHeader, importJWK, jwtVerify, type JWK } from 'jose';
+import { calculateJwkThumbprint, CompactEncrypt, decodeProtectedHeader, importJWK, jwtVerify, type JWK } from 'jose';
 import { SessionStore } from '../session/session.store';
 import { IssuerJwtService } from '../jwt/issuer-jwt.service';
 import { SdJwtService } from '../credentials/sd-jwt.service';
@@ -9,7 +9,8 @@ import { MdocService } from '../credentials/mdoc.service';
 import { StatusListService } from '../status-list/status-list.service';
 import { KeyAttestationService } from '../attestation/key-attestation.service';
 import type { AttestationResult } from '../attestation/wallet-attestation.guard';
-import { CREDENTIAL_CONFIGS, getConfig, getConfigByScope, type CredentialConfig } from './credential-configs';
+import { CREDENTIAL_CONFIGS, getConfig, getConfigByScope, type CredentialConfig, type Flow } from './credential-configs';
+import { allCredentialIssuerIds, credentialIssuerId, resolveProfile } from './issuer-profiles';
 import { OAuthError } from './oauth-error';
 
 const rand = (n = 32) => randomBytes(n).toString('base64url');
@@ -23,6 +24,20 @@ interface AuthRequest {
   code_challenge_method: string;
   state?: string;
   dpop_jkt?: string;
+  /** Demo: issuer defers issuance (returns a transaction_id) when the originating offer requested it. */
+  deferred?: boolean;
+  /** Profile policy carried from the offer: response-encryption required + max credentials per request. */
+  enc?: boolean;
+  batch?: 1 | 3;
+}
+
+/** Max credentials issued from one (batched) credential request — one per proven key. */
+const MAX_BATCH = 3;
+
+/** A credential/deferred response the controller emits as JSON or, when encrypted, as `application/jwt`. */
+interface IssuerResponse {
+  contentType: 'application/json' | 'application/jwt';
+  payload: unknown;
 }
 
 /**
@@ -64,6 +79,13 @@ export class VciService {
     const configIds = this.resolveAuthCodeConfigs(body.scope, body.authorization_details);
     if (!configIds.length) throw new OAuthError('invalid_scope', 'no authorization_code credential in scope');
 
+    // Demo: the originating offer's profile/policy lives on its offer-state; the wallet echoes `issuer_state`
+    // into the authorization request, so we pull it here and carry it through to the access token.
+    let policy: { deferred?: boolean; enc?: boolean; batch?: 1 | 3 } = {};
+    if (body.issuer_state) {
+      policy = (await this.store.get<typeof policy>(`offer-state:${body.issuer_state}`)) ?? {};
+    }
+
     const requestUri = `urn:ietf:params:oauth:request_uri:${rand()}`;
     const session: AuthRequest = {
       configIds,
@@ -73,6 +95,9 @@ export class VciService {
       code_challenge_method: 'S256',
       state: body.state,
       dpop_jkt: body.dpop_jkt,
+      deferred: policy.deferred === true,
+      enc: policy.enc === true,
+      batch: policy.batch === 3 ? 3 : 1,
     };
     await this.store.set(`par:${requestUri}`, session, 300);
     return { request_uri: requestUri, expires_in: 300 };
@@ -138,7 +163,7 @@ export class VciService {
     const code = rand();
     await this.store.set(
       `authz:${code}`,
-      { configIds: session.configIds, client_id: session.client_id, redirect_uri: session.redirect_uri, code_challenge: session.code_challenge, dpop_jkt: session.dpop_jkt },
+      { configIds: session.configIds, client_id: session.client_id, redirect_uri: session.redirect_uri, code_challenge: session.code_challenge, dpop_jkt: session.dpop_jkt, deferred: session.deferred, enc: session.enc, batch: session.batch },
       60,
     );
     url.searchParams.set('code', code);
@@ -147,22 +172,36 @@ export class VciService {
   }
 
   // ---- Credential Offer (issuer-initiated) — pre-authorized_code (mDL) or authorization_code (PID) -----
-  async createCredentialOffer(configId: string): Promise<{ credential_offer: unknown; credential_offer_uri: string; deep_link: string }> {
+  async createCredentialOffer(
+    configId: string,
+    opts: { flow?: Flow; deferred?: boolean; encrypted?: boolean; batchSize?: number } = {},
+  ): Promise<{ credential_offer: unknown; credential_offer_uri: string; deep_link: string }> {
     const c = getConfig(configId);
     if (!c) throw new OAuthError('invalid_request', 'unknown credential_configuration_id');
+    // The operator's options select a standard Credential Issuer profile: `flow`/`deferred` change issuer
+    // behavior; `encrypted`/`batch` map to a profile whose METADATA (encryption_required / batch_size) the
+    // wallet obeys. The offer points `credential_issuer` at that profile — no non-standard offer members.
+    const flow: Flow = opts.flow ?? c.flow;
+    const deferred = opts.deferred === true;
+    const profile = resolveProfile(opts.encrypted === true, opts.batchSize ?? 1);
+    const state = { configIds: [configId], deferred, enc: profile.enc, batch: profile.batch };
 
     let grants: Record<string, unknown>;
-    if (c.flow === 'pre-authorized_code') {
+    if (flow === 'pre-authorized_code') {
       const preAuthCode = rand();
-      await this.store.set(`pre-auth:${preAuthCode}`, { configIds: [configId] }, 600);
+      await this.store.set(`pre-auth:${preAuthCode}`, state, 600);
       grants = { 'urn:ietf:params:oauth:grant-type:pre-authorized_code': { 'pre-authorized_code': preAuthCode } };
     } else {
       const issuerState = rand();
-      await this.store.set(`offer-state:${issuerState}`, { configIds: [configId] }, 600);
+      await this.store.set(`offer-state:${issuerState}`, state, 600);
       grants = { authorization_code: { issuer_state: issuerState } };
     }
 
-    const offer = { credential_issuer: this.issuer, credential_configuration_ids: [configId], grants };
+    const offer = {
+      credential_issuer: credentialIssuerId(this.issuer, profile),
+      credential_configuration_ids: [configId],
+      grants,
+    };
     const offerId = rand(16);
     await this.store.set(`offer:${offerId}`, offer, 600);
     const credential_offer_uri = `${this.issuer}/credential-offer/${offerId}`;
@@ -180,6 +219,9 @@ export class VciService {
   async token(body: Record<string, string>, att: AttestationResult, dpopJkt: string) {
     const grant = body.grant_type;
     let configIds: string[];
+    let deferred = false;
+    let requireEncryption = false;
+    let maxBatch: 1 | 3 = 1;
 
     if (grant === 'authorization_code') {
       const session = await this.store.getdel<AuthRequest & { code_challenge: string }>(`authz:${body.code}`);
@@ -191,16 +233,28 @@ export class VciService {
       }
       if (session.dpop_jkt && session.dpop_jkt !== dpopJkt) throw new OAuthError('invalid_dpop_proof', 'dpop_jkt mismatch');
       configIds = session.configIds;
+      deferred = session.deferred === true;
+      requireEncryption = session.enc === true;
+      maxBatch = session.batch === 3 ? 3 : 1;
     } else if (grant === 'urn:ietf:params:oauth:grant-type:pre-authorized_code') {
-      const session = await this.store.getdel<{ configIds: string[] }>(`pre-auth:${body['pre-authorized_code']}`);
+      const session = await this.store.getdel<AuthRequest>(`pre-auth:${body['pre-authorized_code']}`);
       if (!session) throw new OAuthError('invalid_grant', 'invalid or used pre-authorized_code');
       configIds = session.configIds;
+      deferred = session.deferred === true;
+      requireEncryption = session.enc === true;
+      maxBatch = session.batch === 3 ? 3 : 1;
     } else {
       throw new OAuthError('unsupported_grant_type', `grant_type ${grant}`);
     }
 
     const access_token = await this.issuerJwt.sign(
-      { cnf: { jkt: dpopJkt }, authorized_configs: configIds },
+      {
+        cnf: { jkt: dpopJkt },
+        authorized_configs: configIds,
+        max_batch: maxBatch,
+        ...(deferred ? { deferred: true } : {}),
+        ...(requireEncryption ? { require_encryption: true } : {}),
+      },
       { typ: 'at+jwt', sub: att.sub, aud: this.issuer, expSec: 3600 },
     );
     return {
@@ -222,49 +276,135 @@ export class VciService {
   }
 
   // ---- Credential endpoint ----------------------------------------------------------------------------
-  async credential(body: Record<string, unknown>, accessToken: Record<string, unknown>): Promise<{ credentials: Array<{ credential: string }> }> {
+  /**
+   * Issues one credential per proven holder key (batch, OID4VCI `proofs` / ETSI 472-3 CRED-REQ-PROC-4.6.2.1).
+   * Supports: deferred issuance (returns a `transaction_id` when the flow was marked deferred), and Credential
+   * Response encryption as a compact JWE when the request carries `credential_response_encryption`.
+   * Returns a discriminated `{ contentType, payload }` so the controller can emit JSON or `application/jwt`.
+   */
+  async credential(body: Record<string, unknown>, accessToken: Record<string, unknown>): Promise<IssuerResponse> {
     const authorized = (accessToken.authorized_configs as string[] | undefined) ?? [];
     const configId = (body.credential_configuration_id as string | undefined) ?? (authorized.length === 1 ? authorized[0] : undefined);
     if (!configId || !authorized.includes(configId)) throw new OAuthError('invalid_credential_request', 'credential_configuration_id not authorized');
     const c = getConfig(configId)!;
 
-    const proof = (body.proof as { proof_type?: string; jwt?: string } | undefined) ?? undefined;
-    const proofs = body.proofs as { jwt?: string[] } | undefined;
-    const proofJwt = proof?.jwt ?? proofs?.jwt?.[0];
-    if (!proofJwt) throw new OAuthError('invalid_proof', 'jwt proof required');
+    // Enforce this profile's policy (from the access token): encryption_required + the batch_size cap.
+    this.enforceEncryption(accessToken, body);
+    const maxBatch = accessToken.max_batch === 3 ? 3 : 1;
+    const holderJwks = await this.verifyProofs(this.collectProofJwts(body), maxBatch);
 
-    const holderJwk = await this.verifyProof(proofJwt);
+    // Deferred issuance: store the verified keys and hand back a transaction_id to redeem later.
+    if (accessToken.deferred === true) {
+      const transaction_id = rand(16);
+      await this.store.set(`deferred:${transaction_id}`, { configId, holderJwks }, 600);
+      this.logger.log(`deferring ${holderJwks.length}×${configId} as ${transaction_id}`);
+      return this.maybeEncrypt({ transaction_id, interval: 5 }, body);
+    }
 
-    const cred = await this.issueCredential(c, holderJwk);
-    return { credentials: [{ credential: cred }] };
+    return this.maybeEncrypt(await this.issueBatch(c, holderJwks), body);
   }
 
-  private async verifyProof(proofJwt: string): Promise<JWK> {
+  // ---- Deferred endpoint ------------------------------------------------------------------------------
+  async deferredCredential(body: Record<string, unknown>, accessToken: Record<string, unknown>): Promise<IssuerResponse> {
+    this.enforceEncryption(accessToken, body);
+    const txId = body.transaction_id as string | undefined;
+    if (!txId) throw new OAuthError('invalid_transaction_id', 'transaction_id required');
+    const pending = await this.store.getdel<{ configId: string; holderJwks: JWK[] }>(`deferred:${txId}`);
+    if (!pending) throw new OAuthError('invalid_transaction_id', 'unknown or expired transaction_id');
+    return this.maybeEncrypt(await this.issueBatch(getConfig(pending.configId)!, pending.holderJwks), body);
+  }
+
+  /** On an `encryption_required` profile, the request MUST carry `credential_response_encryption` (OID4VCI §8.3). */
+  private enforceEncryption(accessToken: Record<string, unknown>, body: Record<string, unknown>): void {
+    if (accessToken.require_encryption === true && !body.credential_response_encryption) {
+      throw new OAuthError('invalid_encryption_parameters', 'this issuer requires an encrypted Credential Response (credential_response_encryption)');
+    }
+  }
+
+  // ---- Notification endpoint --------------------------------------------------------------------------
+  async notification(body: Record<string, unknown>): Promise<void> {
+    const id = body.notification_id as string | undefined;
+    const event = body.event as string | undefined;
+    if (!id || !event) throw new OAuthError('invalid_notification_request', 'notification_id and event required');
+    if (!(await this.store.get(`notif:${id}`))) throw new OAuthError('invalid_notification_id', 'unknown notification_id');
+    this.logger.log(`notification ${id}: ${event}`); // credential_accepted | credential_failure | credential_deleted
+  }
+
+  /** Collects the proof JWTs from either the single `proof` or the batch `proofs.jwt[]` request member. */
+  private collectProofJwts(body: Record<string, unknown>): string[] {
+    const single = (body.proof as { proof_type?: string; jwt?: string } | undefined)?.jwt;
+    if (single) return [single];
+    const many = (body.proofs as { jwt?: string[] } | undefined)?.jwt;
+    return Array.isArray(many) ? many.filter((j): j is string => typeof j === 'string') : [];
+  }
+
+  /**
+   * Verifies every proof in a (possibly batched) request and returns the proven holder keys. All proofs in one
+   * request share a single c_nonce: it is validated on each and consumed (single-use) exactly once. Each key's
+   * key attestation is checked independently.
+   */
+  private async verifyProofs(proofJwts: string[], maxBatch: number = MAX_BATCH): Promise<JWK[]> {
+    if (!proofJwts.length) throw new OAuthError('invalid_proof', 'jwt proof required');
+    if (proofJwts.length > maxBatch) throw new OAuthError('invalid_credential_request', `this issuer profile allows at most ${maxBatch} credential(s) per request`);
+
+    const verified = await Promise.all(proofJwts.map((jwt) => this.verifyProofSignature(jwt)));
+    if (new Set(verified.map((v) => v.nonce)).size !== 1) throw new OAuthError('invalid_proof', 'all proofs must share one c_nonce');
+    await this.consumeNonce(verified[0].nonce);
+    for (const v of verified) await this.keyAttestation.verify(v.header, v.holderJwk, v.nonce);
+    return verified.map((v) => v.holderJwk);
+  }
+
+  /** Verifies a single proof JWT's typ/jwk/signature and extracts the holder key, nonce, and header. */
+  private async verifyProofSignature(proofJwt: string): Promise<{ holderJwk: JWK; nonce: string; header: Record<string, unknown> }> {
     const header = decodeProtectedHeader(proofJwt);
     if (header.typ !== 'openid4vci-proof+jwt') throw new OAuthError('invalid_proof', 'bad proof typ');
     const holderJwk = header.jwk as JWK | undefined;
     if (!holderJwk) throw new OAuthError('invalid_proof', 'proof missing jwk');
-
     let payload;
     try {
-      const verified = await jwtVerify(proofJwt, await importJWK(holderJwk, header.alg ?? 'ES256'), { audience: this.issuer });
-      payload = verified.payload;
+      // The proof `aud` is the Credential Issuer Identifier — accept any of our profile identifiers.
+      ({ payload } = await jwtVerify(proofJwt, await importJWK(holderJwk, header.alg ?? 'ES256'), { audience: allCredentialIssuerIds(this.issuer) }));
     } catch {
       throw new OAuthError('invalid_proof', 'proof signature invalid');
     }
-
-    // nonce = the c_nonce we issued; single-use.
     const nonce = payload.nonce as string | undefined;
     if (!nonce) throw new OAuthError('invalid_proof', 'proof nonce required');
+    return { holderJwk, nonce, header: header as Record<string, unknown> };
+  }
+
+  /** Validates the c_nonce we issued and marks it used (single-use). Shared across a batch → call once. */
+  private async consumeNonce(nonce: string): Promise<void> {
     try {
       const np = await this.issuerJwt.verify(nonce, { typ: 'c_nonce+jwt', aud: this.issuer });
       if (!np.jti || !(await this.store.setOnce(`c_nonce:${np.jti}`, 300))) throw new Error('nonce replay');
     } catch {
       throw new OAuthError('invalid_nonce', 'invalid or used c_nonce');
     }
+  }
 
-    await this.keyAttestation.verify(header as Record<string, unknown>, holderJwk, nonce);
-    return holderJwk;
+  /** Issues one credential per holder key and records a `notification_id` for the batch. */
+  private async issueBatch(c: CredentialConfig, holderJwks: JWK[]): Promise<{ credentials: Array<{ credential: string }>; notification_id: string }> {
+    const credentials = await Promise.all(holderJwks.map((jwk) => this.issueCredential(c, jwk)));
+    const notification_id = rand(16);
+    await this.store.set(`notif:${notification_id}`, { configId: c.id, count: credentials.length }, 3600);
+    return { credentials: credentials.map((credential) => ({ credential })), notification_id };
+  }
+
+  /**
+   * Credential Response Encryption (OID4VCI §8.3 / ETSI TS 119 472-3 CRYPTO-5-01). When the request carries
+   * `credential_response_encryption` {jwk, alg, enc}, the JSON response is returned as a compact JWE (ECDH-ES to
+   * the wallet's key, A128GCM/A256GCM content encryption); otherwise it is returned as JSON.
+   */
+  private async maybeEncrypt(resp: unknown, body: Record<string, unknown>): Promise<IssuerResponse> {
+    const enc = body.credential_response_encryption as { jwk?: JWK; alg?: string; enc?: string } | undefined;
+    if (!enc) return { contentType: 'application/json', payload: resp };
+    if (!enc.jwk || enc.alg !== 'ECDH-ES' || !['A128GCM', 'A256GCM'].includes(enc.enc ?? '')) {
+      throw new OAuthError('invalid_encryption_parameters', 'credential_response_encryption requires jwk + alg=ECDH-ES + enc A128GCM/A256GCM');
+    }
+    const jwe = await new CompactEncrypt(new TextEncoder().encode(JSON.stringify(resp)))
+      .setProtectedHeader({ alg: 'ECDH-ES', enc: enc.enc!, ...(enc.jwk.kid ? { kid: enc.jwk.kid as string } : {}) })
+      .encrypt(await importJWK(enc.jwk, enc.alg));
+    return { contentType: 'application/jwt', payload: jwe };
   }
 
   private async issueCredential(c: CredentialConfig, holderJwk: JWK): Promise<string> {
@@ -284,10 +424,9 @@ export class VciService {
       };
       return this.sdJwt.issue(payload, { _sd: c.sdJwtDisclose ?? [] } as never, c.signer);
     }
-    // mso_mdoc — NOTE: the issuance is recorded in the status list (status.idx above) but the reference is NOT
-    // embedded in the credential: @lukas.j.han/mdoc 0.5.11 has no MSO `status` element (ISO/IEC 18013-5 2nd
-    // edition). So mdoc revocation via status list is deferred; mdoc currently relies on validityInfo (exp).
-    return this.mdoc.issue(c.doctype!, c.mdocNamespaces!, holderJwk, c.signer);
+    // mso_mdoc — embed the Token Status List reference in the MSO `status.status_list = { idx, uri }`
+    // (ISO/IEC 18013-5 2nd edition, @lukas.j.han/mdoc >= 0.6.0) so the credential is revocable like SD-JWT VC.
+    return this.mdoc.issue(c.doctype!, c.mdocNamespaces!, holderJwk, c.signer, { idx: status.idx, uri: status.uri });
   }
 
   listConfigs() {

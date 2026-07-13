@@ -24,6 +24,7 @@ export class MdocService {
     namespaces: MdocNamespace[],
     deviceKey: JWK,
     signerType: SignerType,
+    status?: { idx: number; uri: string },
   ): Promise<string> {
     const signer = this.keystore.getSigner(signerType);
     const issuer = new Issuer(doctype, mdocContext);
@@ -44,6 +45,9 @@ export class MdocService {
         validFrom: new Date(),
         validUntil: new Date('2035-12-31T23:59:59.999Z'),
       },
+      // ISO/IEC 18013-5 MSO `status.status_list = { idx, uri }` — the IETF Token Status List reference (the
+      // pointer only; the list token at `uri` is served separately as `statuslist+jwt`). @lukas.j.han/mdoc >= 0.6.0.
+      ...(status ? { status: { statusList: { idx: status.idx, uri: status.uri } } } : {}),
     });
 
     return issuerSigned.encodedForOid4Vci;

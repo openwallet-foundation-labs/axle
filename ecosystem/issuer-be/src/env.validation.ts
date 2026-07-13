@@ -43,6 +43,23 @@ class EnvironmentVariables {
   ISSUER_MDL_SIGNER?: string;
 
   /**
+   * The Provider's registrar_dataset for signed-metadata `issuer_info` (ETSI TS 119 472-3 ISS-MDATA-REG_CERT-4.2.3),
+   * as a JSON *string* {identifier, srvDescription, registryURI, providesAttestations?}. `providesAttestations` is
+   * auto-derived from the credential configs when omitted. Unset ⇒ a sandbox default dataset.
+   */
+  @IsOptional()
+  @IsJSON()
+  ISSUER_REGISTRAR_DATASET?: string;
+
+  /**
+   * Optional registrar-issued Provider registration certificate (compact JWS) added to `issuer_info` as a
+   * `registration_cert` element (ISS-MDATA-REG_CERT-4.2.3-04..06). Unset ⇒ only the registrar_dataset is sent.
+   */
+  @IsOptional()
+  @IsString()
+  ISSUER_REGISTRATION_CERT?: string;
+
+  /**
    * URL of the JAdES-signed Wallet Providers Trusted List used to verify Wallet Attestations (WUAs): the
    * WP CA is extracted from it and wallet attestation x5c chains are checked against it. Default = the
    * Hopae sandbox list.

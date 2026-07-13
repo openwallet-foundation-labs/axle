@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SignJWT, jwtVerify, importJWK, type JWTPayload } from 'jose';
-import { KeystoreService } from '../crypto/keystore.service';
+import { KeystoreService, type SignerType } from '../crypto/keystore.service';
 
 /**
  * Signs and verifies the Issuer's own ES256 JWTs — access tokens, c_nonces, and the Token Status List token —
@@ -29,9 +29,9 @@ export class IssuerJwtService {
 
   async sign(
     payload: JWTPayload,
-    opts: { typ?: string; expSec?: number; aud?: string; sub?: string; x5c?: boolean; iss?: string } = {},
+    opts: { typ?: string; expSec?: number; aud?: string; sub?: string; x5c?: boolean; iss?: string; signerType?: SignerType } = {},
   ): Promise<string> {
-    const signer = this.keystore.getSigner('pid');
+    const signer = this.keystore.getSigner(opts.signerType ?? 'pid');
     const now = Math.floor(Date.now() / 1000);
     let jwt = new SignJWT(payload)
       .setProtectedHeader({
@@ -44,7 +44,7 @@ export class IssuerJwtService {
     if (opts.expSec) jwt = jwt.setExpirationTime(now + opts.expSec);
     if (opts.aud) jwt = jwt.setAudience(opts.aud);
     if (opts.sub) jwt = jwt.setSubject(opts.sub);
-    return jwt.sign(await this.privateKey());
+    return jwt.sign(await importJWK(signer.privateJwk, 'ES256'));
   }
 
   async verify(jwt: string, opts: { typ?: string; aud?: string } = {}): Promise<JWTPayload> {

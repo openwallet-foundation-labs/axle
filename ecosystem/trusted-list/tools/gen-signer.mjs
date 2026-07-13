@@ -22,8 +22,8 @@ import {
 } from './cert-ext.mjs';
 
 const [caSlug, signerSlug, cnSuffix, profile] = process.argv.slice(2);
-if (!caSlug || !signerSlug || !cnSuffix || !['pid', 'mdl'].includes(profile)) {
-  console.error('usage: node tools/gen-signer.mjs <ca-slug> <signer-slug> "<CN suffix>" <pid|mdl>');
+if (!caSlug || !signerSlug || !cnSuffix || !['pid', 'mdl', 'access'].includes(profile)) {
+  console.error('usage: node tools/gen-signer.mjs <ca-slug> <signer-slug> "<CN suffix>" <pid|mdl|access>');
   process.exit(1);
 }
 
@@ -47,13 +47,20 @@ const caKey = await webcrypto.subtle.importKey(
 const now = new Date();
 const notAfter = new Date(now);
 if (profile === 'mdl') notAfter.setUTCDate(notAfter.getUTCDate() + 457); // ISO 18013-5 Annex B: max notBefore+457d
-else notAfter.setUTCFullYear(notAfter.getUTCFullYear() + 3); // PID (412-6): 3y
+else notAfter.setUTCFullYear(notAfter.getUTCFullYear() + 3); // PID (412-6) / access: 3y
 
 // Family-specific extensions.
+//   pid    — id-etsi-qct-pid QcType (PID DSC)
+//   mdl    — id-mdl-kp-mdlDS EKU, no QcType (§6 EAA)
+//   access — the PID/EAA Provider's ACCESS certificate that signs the (signed) Issuer Metadata JWS
+//            (ETSI TS 119 472-3 ISS-MDATA-4.2.1-02). It is NOT a Document Signer, so it carries no
+//            credential-signing QcType/EKU — just the base leaf extensions below.
 const familyExts =
   profile === 'mdl'
     ? [new x509.ExtendedKeyUsageExtension([OID.mdlDS], true)] // §6 EAA defers to EN 319 412-2/-3 — NO QcType
-    : [qcStatementsExtension(OID.qctPid)];
+    : profile === 'access'
+      ? []
+      : [qcStatementsExtension(OID.qctPid)];
 
 const keys = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
 const cert = await x509.X509CertificateGenerator.create({

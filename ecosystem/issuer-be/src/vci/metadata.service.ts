@@ -44,8 +44,9 @@ export class MetadataService {
     const issuer_info = this.issuerInfo();
     const signed_metadata = await this.issuerJwt.sign(
       { ...metadata, issuer_info },
-      // iss = sub = this profile's Credential Issuer Identifier (OID4VCI §12.2.3).
-      { typ: 'openidvci-issuer-metadata+jwt', x5c: true, iss: metadata.credential_issuer, sub: metadata.credential_issuer },
+      // Signed with the Provider's ACCESS certificate in x5c (ETSI TS 119 472-3 ISS-MDATA-4.2.1-02/ACC_CERT-4.2.2),
+      // NOT a Document Signer; iss = sub = this profile's Credential Issuer Identifier (OID4VCI §12.2.3).
+      { typ: 'openidvci-issuer-metadata+jwt', x5c: true, signerType: 'access', iss: metadata.credential_issuer, sub: metadata.credential_issuer },
     );
     return { ...metadata, issuer_info, signed_metadata };
   }

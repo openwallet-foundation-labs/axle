@@ -4,7 +4,7 @@ import { Crypto } from '@peculiar/webcrypto';
 import * as x509 from '@peculiar/x509';
 import { importPKCS8, exportJWK, calculateJwkThumbprint, type JWK } from 'jose';
 
-export type SignerType = 'pid' | 'mdl';
+export type SignerType = 'pid' | 'mdl' | 'access';
 
 export interface Signer {
   /** Private key as a JWK (with `d`) — consumed by @sd-jwt (ES256 signer) and @lukas.j.han/mdoc (CoseKey). */
@@ -48,12 +48,25 @@ export class KeystoreService implements OnModuleInit {
   async onModuleInit() {
     this.signers.set('pid', await this.load('pid', 'ISSUER_PID_SIGNER', 'PID Document Signer'));
     this.signers.set('mdl', await this.load('mdl', 'ISSUER_MDL_SIGNER', 'mDL Document Signer'));
+    // The Provider's ACCESS certificate that signs the (signed) Issuer Metadata JWS — distinct from the
+    // credential Document Signers (ETSI TS 119 472-3 ISS-MDATA-4.2.1-02). Unset ⇒ metadata falls back to the
+    // PID DSC (see getSigner). We do NOT synthesize an ephemeral self-signed one for it.
+    const accessRaw = this.config.get<string>('ISSUER_ACCESS_CERT');
+    if (accessRaw) {
+      const ks = JSON.parse(accessRaw) as RawKeystore;
+      this.signers.set('access', await this.fromPem(ks.privateKeyPem, ks.certPem, ks.caCertPem));
+      this.logger.log(`access signer loaded from ISSUER_ACCESS_CERT: ${new x509.X509Certificate(ks.certPem).subject}`);
+    } else {
+      this.logger.warn('ISSUER_ACCESS_CERT unset — signed metadata falls back to the PID Document Signer');
+    }
   }
 
   getSigner(type: SignerType): Signer {
     const s = this.signers.get(type);
-    if (!s) throw new Error(`signer not initialized: ${type}`);
-    return s;
+    if (s) return s;
+    // Metadata signing falls back to the PID DSC when no dedicated access cert is configured.
+    if (type === 'access') return this.getSigner('pid');
+    throw new Error(`signer not initialized: ${type}`);
   }
 
   private async load(type: SignerType, envKey: string, dev: string): Promise<Signer> {

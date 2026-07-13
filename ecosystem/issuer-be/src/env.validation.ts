@@ -43,6 +43,15 @@ class EnvironmentVariables {
   ISSUER_MDL_SIGNER?: string;
 
   /**
+   * The Provider's ACCESS certificate keystore (JSON: { privateKeyPem, certPem, caCertPem }) that signs the
+   * (signed) Issuer Metadata JWS — ETSI TS 119 472-3 ISS-MDATA-4.2.1-02. A leaf chaining to a trusted Issuer CA,
+   * distinct from the Document Signers. Unset ⇒ metadata is signed with the PID DSC (non-conformant fallback).
+   */
+  @IsOptional()
+  @IsJSON()
+  ISSUER_ACCESS_CERT?: string;
+
+  /**
    * The Provider's registrar_dataset for signed-metadata `issuer_info` (ETSI TS 119 472-3 ISS-MDATA-REG_CERT-4.2.3),
    * as a JSON *string* {identifier, srvDescription, registryURI, providesAttestations?}. `providesAttestations` is
    * auto-derived from the credential configs when omitted. Unset ⇒ a sandbox default dataset.

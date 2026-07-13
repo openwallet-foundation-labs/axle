@@ -48,7 +48,8 @@ public struct Wallet {
         let vci = Openid4VciClient(http: ports.http, rng: ports.rng, clock: clockSeconds,
                                    clientId: config.issuance.clientId, clientAuth: clientAuth)
         let issuance = IssuanceService(vci: vci, store: store, storage: ports.storage, secureArea: ports.defaultSecureArea,
-                                       rng: ports.rng, clock: ports.clock, redirectUri: config.issuance.redirectUri, txlog: txlog)
+                                       rng: ports.rng, clock: ports.clock, redirectUri: config.issuance.redirectUri, txlog: txlog,
+                                       walletAttestation: ports.walletAttestation)
 
         // Reader trust: one validator over the configured reader anchors, shared by remote (signed OpenID4VP
         // request objects) and proximity (mdoc reader authentication). No anchors → readers stay untrusted.

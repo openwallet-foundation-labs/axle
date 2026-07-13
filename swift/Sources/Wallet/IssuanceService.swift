@@ -17,8 +17,20 @@ public struct IssuanceService {
     let clock: any WalletClock
     let redirectUri: String
     let txlog: TransactionLog
+    /// Wallet Provider backend for Key Attestations over the proof keys; nil when none is configured.
+    let walletAttestation: (any WalletAttestationProvider)?
 
     private struct BuiltKeys { let keys: IssuanceKeys; let proofKeys: [KeyInfo]; let dpopKey: KeyInfo }
+
+    /// A Key Attestation over exactly these `proofKeys`, resolved at request time with the fresh c_nonce, so
+    /// the Wallet Provider signs a WUA per credential request (attested_keys = proofKeys, nonce = c_nonce).
+    private struct ProviderKeyAttestation: KeyAttestationSource {
+        let provider: any WalletAttestationProvider
+        let proofKeys: [KeyInfo]
+        func attestation(cNonce: String?) async throws -> String {
+            try await provider.keyAttestation(keys: proofKeys, nonce: cNonce)
+        }
+    }
 
     /// Step 1 of the 2-phase flow: resolve an offer deep link / QR / raw JSON.
     public func resolveOffer(_ offerUri: String) async throws -> CredentialOffer {
@@ -150,10 +162,14 @@ public struct IssuanceService {
             dpop = try await secureArea.createKey(spec: spec)
         }
         func signer(_ k: KeyInfo) -> SecureAreaJwsSigner { SecureAreaJwsSigner(area: secureArea, key: k.handle, algorithm: k.algorithm) }
+        // When a Wallet Provider is configured, attach a Key Attestation over exactly these proof keys (resolved
+        // lazily with the c_nonce at request time). The VCI client uses it only when the issuer requires one.
+        let attestation = walletAttestation.map { ProviderKeyAttestation(provider: $0, proofKeys: proofKeys) }
         let keys = IssuanceKeys(
             proofSigner: signer(proofKeys[0]), proofPublicKey: proofKeys[0].publicKey,
             dpopSigner: signer(dpop), dpopPublicKey: dpop.publicKey,
-            additionalProofKeys: proofKeys.dropFirst().map { ProofKey(signer: signer($0), publicKey: $0.publicKey) })
+            additionalProofKeys: proofKeys.dropFirst().map { ProofKey(signer: signer($0), publicKey: $0.publicKey) },
+            keyAttestation: attestation)
         return BuiltKeys(keys: keys, proofKeys: proofKeys, dpopKey: dpop)
     }
 

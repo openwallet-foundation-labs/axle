@@ -41,19 +41,25 @@ public struct IssuanceKeys {
     public let dpopPublicKey: EcPublicKey
     /// Additional proof keys for batch issuance — one credential is issued per proof key.
     public let additionalProofKeys: [ProofKey]
+    /// Per-issuance Key Attestation source over exactly these `proofKeys` (bound to the c_nonce). Set by the
+    /// wallet when the issuer requires a key attestation; its `attested_keys` MUST be `proofKeys` in order, so
+    /// `attested_keys[0]` is `proofSigner`'s key (which signs the single jwt proof in the WUA-in-jwt shape).
+    public let keyAttestation: (any KeyAttestationSource)?
 
     public init(
         proofSigner: any JwsSigner,
         proofPublicKey: EcPublicKey,
         dpopSigner: any JwsSigner,
         dpopPublicKey: EcPublicKey,
-        additionalProofKeys: [ProofKey] = []
+        additionalProofKeys: [ProofKey] = [],
+        keyAttestation: (any KeyAttestationSource)? = nil
     ) {
         self.proofSigner = proofSigner
         self.proofPublicKey = proofPublicKey
         self.dpopSigner = dpopSigner
         self.dpopPublicKey = dpopPublicKey
         self.additionalProofKeys = additionalProofKeys
+        self.keyAttestation = keyAttestation
     }
 
     /// All proof keys — the primary key first, then any batch keys.
@@ -416,23 +422,45 @@ public struct Openid4VciClient {
                          refreshToken: token.refreshToken, configurationId: configurationId)
     }
 
-    /// The `proofs` object (§8.2.1). Uses the `attestation` proof type — a single Key Attestation JWT, no
-    /// per-key proof of possession (Appendix F.3) — when `preferAttestationProof` is set, a `keyAttestation`
-    /// source exists, and the issuer's config supports it; otherwise a `jwt` proof per proof key (Appendix F.1,
-    /// batch issuance), each carrying the Key Attestation in its header when configured.
+    /// The `proofs` object (§8.2.1 / ETSI TS 119 472-3 §4.6). Three shapes, decided by whether the issuer's
+    /// config requires a Key Attestation and by `preferAttestationProof`:
+    ///
+    ///  1. **bare `jwt`** — no attestation required: one `jwt` proof per proof key (Appendix F.1, batch), each
+    ///     its own proof of possession. Distinct keys, up to the issuer's `batch_size`.
+    ///  2. **`jwt` + Key Attestation** (default when attestation IS required): **exactly one** `jwt` proof —
+    ///     proof of possession by the *first* proof key — carrying the Key Attestation (whose `attested_keys`
+    ///     cover the whole batch) in its `key_attestation` header. NOT one-jwt-per-key (that N×N shape is
+    ///     rejected — ETSI CRED-REQ-4.6.1.2-01). Preferred because it still does a real PoP.
+    ///  3. **`attestation` proof** — only when `preferAttestationProof` and the issuer advertises the
+    ///     `attestation` proof type: a single Key Attestation JWT on its own, no PoP (Appendix F.3).
     private func proofs(_ issuerMeta: CredentialIssuerMetadata, _ config: CredentialConfiguration?,
                         _ cNonce: String?, _ keys: IssuanceKeys) async throws -> JsonValue {
-        if preferAttestationProof, let attestationSource = keyAttestation,
-           config?.proofTypesSupported.contains("attestation") == true {
-            // Appendix F.3: exactly one Key Attestation JWT, its attested_keys are what the Credentials bind to.
-            return .obj([("attestation", .arr([.str(try await attestationSource.attestation(cNonce: cNonce))]))])
+        let source = keys.keyAttestation ?? keyAttestation
+        let attestationRequired = config?.keyAttestationRequired == true
+        let wantAttestation = attestationRequired || (preferAttestationProof && source != nil)
+
+        if wantAttestation {
+            guard let s = source else {
+                throw VciError.unsupported("issuer requires a key attestation for this credential but no attestation source is configured")
+            }
+            if preferAttestationProof, config?.proofTypesSupported.contains("attestation") == true {
+                // Shape 3 (Appendix F.3): a single Key Attestation JWT, its attested_keys bind the Credential(s).
+                return .obj([("attestation", .arr([.str(try await s.attestation(cNonce: cNonce))]))])
+            }
+            // Shape 2: exactly one jwt proof — PoP by the first proof key — with the batch attestation in-header.
+            let wua = try await s.attestation(cNonce: cNonce)
+            let proofSigner = KeyProofSigner(signer: keys.proofSigner, publicKey: keys.proofPublicKey, now: clock)
+            let jwt = try await proofSigner.proofJwt(
+                credentialIssuer: issuerMeta.credentialIssuer, cNonce: cNonce, clientId: clientId, keyAttestation: wua)
+            return .obj([("jwt", .arr([.str(jwt)]))])
         }
-        let keyAttestationJwt = try await keyAttestation?.attestation(cNonce: cNonce)
+
+        // Shape 1: bare jwt proof per proof key (batch), each its own PoP, no attestation.
         var proofJwts: [JsonValue] = []
         for pk in keys.proofKeys {
             let proofSigner = KeyProofSigner(signer: pk.signer, publicKey: pk.publicKey, now: clock)
             proofJwts.append(.str(try await proofSigner.proofJwt(
-                credentialIssuer: issuerMeta.credentialIssuer, cNonce: cNonce, clientId: clientId, keyAttestation: keyAttestationJwt)))
+                credentialIssuer: issuerMeta.credentialIssuer, cNonce: cNonce, clientId: clientId, keyAttestation: nil)))
         }
         return .obj([("jwt", .arr(proofJwts))])
     }

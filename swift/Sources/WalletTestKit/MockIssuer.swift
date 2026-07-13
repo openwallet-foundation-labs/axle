@@ -39,6 +39,8 @@ public actor MockIssuer: HttpTransport {
     /// When true, the config advertises the `attestation` proof type (§8.2.1 Appendix F.3) in its metadata.
     private var supportsAttestationProof = false
     public func setSupportsAttestationProof(_ enabled: Bool) { supportsAttestationProof = enabled }
+    private var requiresKeyAttestation = false
+    public func setRequiresKeyAttestation(_ enabled: Bool) { requiresKeyAttestation = enabled }
     /// The `attestation`-proof Key Attestation JWT the last Credential Request carried (§8.2.1.3), if any.
     public private(set) var seenAttestationProof: String?
 
@@ -394,7 +396,8 @@ public actor MockIssuer: HttpTransport {
 
     private func issuerMetadata() -> String {
         let encryption = encryptionSupported ? requestEncryptionJson() + responseEncryptionJson() : ""
-        let attestation = supportsAttestationProof ? #","attestation":{"proof_signing_alg_values_supported":["ES256"]}"# : ""
+        let keyAttReq = requiresKeyAttestation ? #","key_attestations_required":{"key_storage":["iso_18045_high"]}"# : ""
+        let attestation = supportsAttestationProof ? #","attestation":{"proof_signing_alg_values_supported":["ES256"]\#(keyAttReq)}"# : ""
         return """
         {"credential_issuer":"\(issuer)",
          \(encryption)"credential_endpoint":"\(issuer)/credential",
@@ -406,7 +409,7 @@ public actor MockIssuer: HttpTransport {
          "credential_configurations_supported":{
            "eu.europa.ec.eudi.pid.1":{"format":"dc+sd-jwt","vct":"eu.europa.ec.eudi.pid.1",
              "display":[{"name":"Personal ID","logo":{"uri":"https://logo.example/pid.png"},"background_color":"#123456"}],
-             "proof_types_supported":{"jwt":{"proof_signing_alg_values_supported":["ES256"]}\(attestation)}}}}
+             "proof_types_supported":{"jwt":{"proof_signing_alg_values_supported":["ES256"]\(keyAttReq)}\(attestation)}}}}
         """
     }
 

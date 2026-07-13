@@ -194,6 +194,10 @@ public struct CredentialConfiguration {
     public let proofSigningAlgs: [String]
     /// The `proof_types_supported` keys the issuer advertises for this config (e.g. `jwt`, `attestation`).
     public let proofTypesSupported: Set<String>
+    /// True when the issuer requires a key attestation for this config — i.e. `proof_types_supported.jwt`
+    /// (or `.attestation`) advertises `key_attestations_required` (HAIP §4.5.1). The wallet must then carry a
+    /// Key Attestation in its proof; a bare `jwt` proof is rejected.
+    public let keyAttestationRequired: Bool
     public let scope: String?
     /// From the first `display` entry — for wallet UI.
     public let displayName: String?
@@ -201,10 +205,11 @@ public struct CredentialConfiguration {
     public let backgroundColor: String?
 
     public init(format: String, vct: String?, docType: String?, proofSigningAlgs: [String],
-                proofTypesSupported: Set<String> = [], scope: String?,
+                proofTypesSupported: Set<String> = [], keyAttestationRequired: Bool = false, scope: String?,
                 displayName: String? = nil, logoUri: String? = nil, backgroundColor: String? = nil) {
         self.format = format; self.vct = vct; self.docType = docType
-        self.proofSigningAlgs = proofSigningAlgs; self.proofTypesSupported = proofTypesSupported; self.scope = scope
+        self.proofSigningAlgs = proofSigningAlgs; self.proofTypesSupported = proofTypesSupported
+        self.keyAttestationRequired = keyAttestationRequired; self.scope = scope
         self.displayName = displayName; self.logoUri = logoUri; self.backgroundColor = backgroundColor
     }
 
@@ -217,6 +222,8 @@ public struct CredentialConfiguration {
         if case let .obj(entries)? = o["proof_types_supported"] {
             proofTypes = Set(entries.map { $0.0 })
         }
+        // `key_attestations_required` may sit under the `jwt` or the `attestation` proof type.
+        let keyAttReq = ["jwt", "attestation"].contains { o["proof_types_supported"]?[$0]?["key_attestations_required"] != nil }
         var format = ""
         if case let .str(f)? = o["format"] { format = f }
         var vct: String?
@@ -232,7 +239,7 @@ public struct CredentialConfiguration {
             if case let .str(c)? = first["background_color"] { backgroundColor = c }
         }
         return CredentialConfiguration(format: format, vct: vct, docType: docType, proofSigningAlgs: proofAlgs,
-                                       proofTypesSupported: proofTypes, scope: scope,
+                                       proofTypesSupported: proofTypes, keyAttestationRequired: keyAttReq, scope: scope,
                                        displayName: displayName, logoUri: logoUri, backgroundColor: backgroundColor)
     }
 }

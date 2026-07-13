@@ -45,6 +45,15 @@ export interface CredentialConfig {
   mdocNamespaces?: MdocNamespaceClaims[];
   /** Fields shown on the issuance consent screen. */
   displayFields: DisplayField[];
+  /**
+   * Whether a valid Key Attestation (the WUA) is MANDATORY in the credential-request jwt proof. ETSI TS 119
+   * 472-3 CRED-REQ-4.6.1.2-03 makes the `key_attestation` parameter mandatory for PID/EAA, and the Provider
+   * must verify it chains to the Wallet Provider Trusted List (CRED-REQ-PROC-4.6.2.1-01). Omitted ⇒ true
+   * (secure default): the config advertises `key_attestations_required` and rejects a proof without a valid
+   * attestation. Set false to also accept a bare jwt proof (PoP only, no WSCD binding) — for low-assurance
+   * demo credentials only; NEVER for PID or an eIDAS LoA-High EAA.
+   */
+  keyAttestationRequired?: boolean;
 }
 
 const PID_ISSUING_AUTHORITY = "Centre des technologies de l'information de l'État (CTIE)";
@@ -54,6 +63,7 @@ export const CREDENTIAL_CONFIGS: CredentialConfig[] = [
   // 1) PID as SD-JWT VC — authorization_code flow.
   {
     id: 'eu.europa.ec.eudi.pid.sd_jwt_vc',
+    keyAttestationRequired: true, // PID — WSCD-bound, LoA High (ETSI TS 119 472-3)
     format: 'dc+sd-jwt',
     scope: 'eu.europa.ec.eudi.pid.sd_jwt_vc',
     signer: 'pid',
@@ -99,6 +109,7 @@ export const CREDENTIAL_CONFIGS: CredentialConfig[] = [
   // 2) PID as mdoc — authorization_code flow.
   {
     id: 'eu.europa.ec.eudi.pid.mdoc',
+    keyAttestationRequired: true, // PID — WSCD-bound, LoA High (ETSI TS 119 472-3)
     format: 'mso_mdoc',
     scope: 'eu.europa.ec.eudi.pid.mdoc',
     signer: 'pid',
@@ -139,6 +150,10 @@ export const CREDENTIAL_CONFIGS: CredentialConfig[] = [
   // 3) mDL as mdoc — pre-authorized_code flow.
   {
     id: 'org.iso.18013.5.1.mDL',
+    // mDL is an EAA, not PID: ISO/IEC 18013-5 requires device-key binding (proven by the jwt proof's PoP) but
+    // not a WUA. We treat this sandbox mDL as lower-assurance and accept a bare jwt proof. Flip to true to
+    // enforce the WUA (strict ETSI TS 119 472-3 for a device-bound EAA).
+    keyAttestationRequired: false,
     format: 'mso_mdoc',
     scope: 'org.iso.18013.5.1.mDL',
     signer: 'mdl',

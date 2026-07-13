@@ -9,7 +9,9 @@ import { verifyX5cToAnchors } from './x5c-chain.util';
  * Verifies the Key Attestation carried in the credential-request proof's JOSE header (`key_attestation`,
  * HAIP §4.5.1 / OID4VCI Appendix D). Confirms the attestation chains to a trusted Wallet Provider CA, is
  * fresh, lists the holder's key in `attested_keys` (PoP↔attestation binding), and — when a nonce is expected
- * — echoes it. Bypassed by `DEV_ATTESTATION_BYPASS=true`.
+ * — echoes it. When `required` is false (a low-assurance credential config, e.g. a demo mDL) a proof carrying
+ * NO attestation is accepted; an attestation that IS present is always validated fully. Globally bypassed by
+ * `DEV_ATTESTATION_BYPASS=true`.
  */
 @Injectable()
 export class KeyAttestationService {
@@ -20,11 +22,14 @@ export class KeyAttestationService {
     private readonly config: ConfigService,
   ) {}
 
-  async verify(proofHeader: Record<string, unknown>, holderJwk: JWK, expectedNonce?: string): Promise<void> {
+  async verify(proofHeader: Record<string, unknown>, holderJwk: JWK, expectedNonce?: string, required = true): Promise<void> {
     if (this.config.get<string>('DEV_ATTESTATION_BYPASS') === 'true') return;
 
     const keyAtt = proofHeader['key_attestation'] as string | undefined;
-    if (!keyAtt) throw new OAuthError('invalid_proof', 'key attestation required');
+    if (!keyAtt) {
+      if (!required) return; // this credential config accepts a bare jwt proof (PoP only, no WSCD binding)
+      throw new OAuthError('invalid_proof', 'key attestation required');
+    }
 
     try {
       const kah = decodeProtectedHeader(keyAtt);

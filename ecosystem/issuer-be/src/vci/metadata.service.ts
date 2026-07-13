@@ -5,13 +5,11 @@ import { IssuerJwtService } from '../jwt/issuer-jwt.service';
 import { RequestEncryptionService } from '../crypto/request-encryption.service';
 import { ISSUER_PROFILES, credentialIssuerId, type IssuerProfile } from './issuer-profiles';
 
-// HAIP §4.5.1 requires key attestations for high-assurance credentials.
-const PROOF_TYPES_SUPPORTED = {
-  jwt: {
-    proof_signing_alg_values_supported: ['ES256'],
-    key_attestations_required: { key_storage: ['iso_18045_moderate', 'iso_18045_high'] },
-  },
-};
+// The `jwt` proof type. `key_attestations_required` (HAIP §4.5.1 / ETSI TS 119 472-3 CRED-REQ-4.6.1.2-03)
+// is advertised PER credential config — only for those that mandate a Key Attestation (the WUA). See
+// `CredentialConfig.keyAttestationRequired` (default true).
+const JWT_PROOF_SIGNING = { proof_signing_alg_values_supported: ['ES256'] };
+const KEY_ATTESTATIONS_REQUIRED = { key_storage: ['iso_18045_moderate', 'iso_18045_high'] };
 
 /**
  * Builds the OpenID4VCI 1.0 Credential Issuer metadata and the RFC 8414 Authorization Server metadata from
@@ -140,11 +138,16 @@ export class MetadataService {
   }
 
   private configMetadata(c: CredentialConfig) {
+    // Advertise key_attestations_required only when this config mandates a WUA (default: true).
+    const jwt =
+      c.keyAttestationRequired === false
+        ? JWT_PROOF_SIGNING
+        : { ...JWT_PROOF_SIGNING, key_attestations_required: KEY_ATTESTATIONS_REQUIRED };
     const common = {
       scope: c.scope,
       cryptographic_binding_methods_supported: c.format === 'mso_mdoc' ? ['cose_key'] : ['jwk'],
       credential_signing_alg_values_supported: ['ES256'],
-      proof_types_supported: PROOF_TYPES_SUPPORTED,
+      proof_types_supported: { jwt },
       display: [
         {
           name: c.display.name,

@@ -312,7 +312,7 @@ export class VciService {
     // Enforce this profile's policy (from the access token): request/response encryption + the batch_size cap.
     this.enforceEncryption(accessToken, req, wasEncrypted);
     const maxBatch = accessToken.max_batch === 3 ? 3 : 1;
-    const holderJwks = await this.verifyProofs(this.collectProofJwts(req), maxBatch);
+    const holderJwks = await this.verifyProofs(this.collectProofJwts(req), maxBatch, c.keyAttestationRequired !== false);
 
     // Deferred issuance: store the verified keys and hand back a transaction_id to redeem later.
     if (accessToken.deferred === true) {
@@ -375,17 +375,18 @@ export class VciService {
 
   /**
    * Verifies every proof in a (possibly batched) request and returns the proven holder keys. All proofs in one
-   * request share a single c_nonce: it is validated on each and consumed (single-use) exactly once. Each key's
-   * key attestation is checked independently.
+   * request share a single c_nonce: it is validated on each and consumed (single-use) exactly once. When the
+   * requested credential config mandates it (`requireKeyAttestation`, default true), each key's Key Attestation
+   * (the WUA) is checked independently; otherwise a bare jwt proof (PoP only, no WSCD binding) is accepted.
    */
-  private async verifyProofs(proofJwts: string[], maxBatch: number = MAX_BATCH): Promise<JWK[]> {
+  private async verifyProofs(proofJwts: string[], maxBatch: number = MAX_BATCH, requireKeyAttestation = true): Promise<JWK[]> {
     if (!proofJwts.length) throw new OAuthError('invalid_proof', 'jwt proof required');
     if (proofJwts.length > maxBatch) throw new OAuthError('invalid_credential_request', `this issuer profile allows at most ${maxBatch} credential(s) per request`);
 
     const verified = await Promise.all(proofJwts.map((jwt) => this.verifyProofSignature(jwt)));
     if (new Set(verified.map((v) => v.nonce)).size !== 1) throw new OAuthError('invalid_proof', 'all proofs must share one c_nonce');
     await this.consumeNonce(verified[0].nonce);
-    for (const v of verified) await this.keyAttestation.verify(v.header, v.holderJwk, v.nonce);
+    for (const v of verified) await this.keyAttestation.verify(v.header, v.holderJwk, v.nonce, requireKeyAttestation);
     return verified.map((v) => v.holderJwk);
   }
 

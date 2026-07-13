@@ -377,6 +377,11 @@ private fun CredentialCard(c: Credential, onClick: () -> Unit) {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text("Issued ${issuedDate(c)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Whether the issuer signature chained to a trusted anchor at issuance (null = not checked).
+                c.issuer?.trusted?.let {
+                    Spacer(Modifier.height(6.dp))
+                    IssuerTrustBadge(it)
+                }
             }
             FormatChip(c.format)
         }
@@ -481,6 +486,20 @@ internal fun TrustBadge(trusted: Boolean) {
             color = Color.White,
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/** Per-credential issuer-trust badge: whether the issuer signature chained to a trusted issuer anchor. */
+@Composable
+internal fun IssuerTrustBadge(trusted: Boolean) {
+    val bg = if (trusted) Color(0xFF2E7D32) else Color(0xFFC62828)
+    Surface(color = bg, shape = MaterialTheme.shapes.small) {
+        Text(
+            if (trusted) "✓ Trusted issuer" else "⚠ Untrusted issuer",
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
         )
     }
 }

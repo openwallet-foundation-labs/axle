@@ -46,4 +46,10 @@ class CredentialMetadata(
     val displayName: String?,
     val logoUri: String?,
     val backgroundColor: String?,
+    /**
+     * Whether the credential's issuer signature (mdoc `issuerAuth` / SD-JWT VC JWS) was verified to chain to a
+     * trusted issuer anchor at issuance: true = trusted, false = untrusted (verification failed), null = not
+     * checked (no issuer anchors configured). Informational — an untrusted credential is still stored.
+     */
+    val issuerTrusted: Boolean? = null,
 )

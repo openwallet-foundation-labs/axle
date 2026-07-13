@@ -19,8 +19,12 @@ class Credential(
     val createdAt: Instant,
 )
 
-/** Where the credential came from (captured from issuer metadata at issuance). */
-data class IssuerInfo(val url: String, val displayName: String? = null)
+/**
+ * Where the credential came from (captured from issuer metadata at issuance).
+ * [trusted]: whether the credential's issuer signature chained to a trusted issuer anchor when it was issued —
+ * true = trusted, false = not verified, null = not checked (no issuer anchors configured).
+ */
+data class IssuerInfo(val url: String, val displayName: String? = null, val trusted: Boolean? = null)
 
 /** Display metadata for a credential type (issuer-metadata derived). */
 data class CredentialDisplay(val name: String? = null, val logoUri: String? = null, val backgroundColor: String? = null)

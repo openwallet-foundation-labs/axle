@@ -72,7 +72,23 @@ class Wallet private constructor(
                 AttestationClientAuth(config.issuance.clientId, it, ports.defaultSecureArea, ports.storage, ports.rng, clockSeconds)
             }
             val vci = Openid4VciClient(ports.http, ports.rng, clockSeconds, config.issuance.clientId, clientAuth = clientAuth)
-            val issuance = IssuanceService(vci, store, ports.storage, ports.defaultSecureArea, scope, ports.rng, ports.clock, config.issuance.redirectUri, txlog, ports.walletAttestation)
+            // Verify an issued credential's issuer signature (mdoc issuerAuth x5c / SD-JWT VC JWS x5c) chains to a
+            // trusted issuer anchor — checked before storing so the wallet can label the credential trusted or not.
+            val credentialTrust = if (config.trust.issuerAnchorsDer.isNotEmpty()) {
+                val mdocVerifier = com.hopae.eudi.wallet.mdoc.MdocVerifier(com.hopae.eudi.wallet.trust.X5cMdocIssuerTrust(issuerValidator), now = { ports.clock.now() })
+                val sdJwtVerifier = com.hopae.eudi.wallet.sdjwt.SdJwtVcVerifier(X5cIssuerKeyResolver(issuerValidator), JwtTimeValidator(now = { ports.clock.now() }))
+                IssuerCredentialTrust { format, credential ->
+                    if (format == "mso_mdoc") {
+                        mdocVerifier.verify(com.hopae.eudi.wallet.mdoc.IssuerSigned.decode(Base64Url.decode(credential)))
+                    } else {
+                        sdJwtVerifier.verify(com.hopae.eudi.wallet.sdjwt.SdJwt.parse(credential))
+                    }
+                    true // verify() throws on any failure; reaching here means the issuer chain is trusted
+                }
+            } else {
+                null
+            }
+            val issuance = IssuanceService(vci, store, ports.storage, ports.defaultSecureArea, scope, ports.rng, ports.clock, config.issuance.redirectUri, txlog, ports.walletAttestation, credentialTrust)
 
             // Reader trust: one validator over the configured reader anchors, shared by remote (signed OpenID4VP
             // request objects) and proximity (mdoc reader authentication). No anchors → readers stay untrusted.

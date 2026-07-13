@@ -38,6 +38,16 @@ import com.hopae.eudi.wallet.vci.VciException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 
+/**
+ * Whether an issued credential's issuer signature chains to a trusted issuer anchor — the mdoc `issuerAuth`
+ * x5chain or the SD-JWT VC JWS `x5c`, validated against the configured issuer trust anchors. Checked before
+ * the credential is stored so the wallet can label it (trusted / not); a failure never blocks issuance.
+ */
+fun interface IssuerCredentialTrust {
+    /** @param format the OpenID4VCI credential format (`mso_mdoc` / `dc+sd-jwt`). */
+    suspend fun isTrusted(format: String, credential: String): Boolean
+}
+
 /** OpenID4VCI issuance. Owns key creation, issuance, persistence, and follow-ups. */
 class IssuanceService internal constructor(
     private val vci: Openid4VciClient,
@@ -51,6 +61,8 @@ class IssuanceService internal constructor(
     private val txlog: TransactionLog,
     /** Wallet Provider backend for Key Attestations over the proof keys; null when none is configured. */
     private val walletAttestation: WalletAttestationProvider? = null,
+    /** Verifies the issued credential's issuer signature against issuer anchors; null when none configured. */
+    private val credentialTrust: IssuerCredentialTrust? = null,
 ) {
     private class BuiltKeys(val keys: IssuanceKeys, val proofKeys: List<KeyInfo>, val dpopKey: KeyInfo)
 
@@ -194,9 +206,13 @@ class IssuanceService internal constructor(
         if (response.credentials.isEmpty()) throw WalletError.Issuance.CredentialRequestFailed("issuer returned no credentials")
         response.credentials.forEach { rejectIssuerBoundKb(it) }
         val format = decode(response.credentials.first()).first
+        // Check the issuer signature chains to a trusted issuer anchor BEFORE storing (best-effort — an
+        // untrusted credential is still stored, labelled; a batch shares one issuer, so check the first).
+        val first = response.credentials.first()
+        val issuerTrusted = credentialTrust?.let { runCatching { it.isTrusted(first.format, first.credential) }.getOrDefault(false) }
         val instances = response.credentials.mapIndexed { i, credential -> CredentialInstance(proofKeys[i], decode(credential).second) }
         val id = existingId ?: newId()
-        store.save(CredentialEnvelope(id, format, clock.now(), EnvelopeLifecycle.Issued(policy, instances), captureMetadata(response)))
+        store.save(CredentialEnvelope(id, format, clock.now(), EnvelopeLifecycle.Issued(policy, instances), captureMetadata(response, issuerTrusted)))
         // ARF/GDPR audit trail: record the issuance (covers immediate, deferred-completed, and reissued).
         txlog.recordIssuance(response.credentialIssuer ?: "", listOf(loggedDocument(format)), TransactionStatus.SUCCESS)
         // Persist reissue context and best-effort notify the issuer of acceptance.
@@ -228,7 +244,7 @@ class IssuanceService internal constructor(
         storage.get("followup", id.value)?.let { FollowUpContext.decode(it) }
 
     /** Captures issuer/display metadata at issuance so the app renders cards without re-fetching. Best-effort. */
-    private suspend fun captureMetadata(response: CredentialResponse): CredentialMetadata? {
+    private suspend fun captureMetadata(response: CredentialResponse, issuerTrusted: Boolean? = null): CredentialMetadata? {
         val issuer = response.credentialIssuer ?: return null
         val configId = response.configurationId ?: return null
         return runCatching {
@@ -241,6 +257,7 @@ class IssuanceService internal constructor(
                 displayName = config?.displayName,
                 logoUri = config?.logoUri,
                 backgroundColor = config?.backgroundColor,
+                issuerTrusted = issuerTrusted,
             )
         }.getOrNull()
     }

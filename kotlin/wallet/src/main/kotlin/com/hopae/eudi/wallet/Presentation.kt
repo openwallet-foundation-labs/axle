@@ -23,6 +23,35 @@ class VerifierInfo(
     val clientIdScheme: String,
     val commonName: String?,
     val trusted: Boolean,
+    /**
+     * The relying party's registrar-issued registration (WRPRC), when one accompanied the request and
+     * validated. Surfaces the declared purpose / entitlements / intermediary for the consent screen.
+     */
+    val registration: VerifierRegistration? = null,
+)
+
+/** A localized string (BCP-47 `lang` + `value`) from a WRPRC `purpose`. */
+data class PurposeText(val lang: String, val value: String)
+
+/** The relying party's registration (ETSI TS 119 475 WRPRC), validated and bound to the request's WRPAC. */
+class VerifierRegistration(
+    /**
+     * `sub` — the registered semantic identifier (bound to the WRPAC organizationIdentifier). For an
+     * intermediated request this is the **final** relying party, never the intermediary.
+     */
+    val subject: String,
+    /** EU-level entitlements/roles asserted for the relying party (>=1). */
+    val entitlements: List<String>,
+    /** The declared intended-use, for display on the consent screen. */
+    val purpose: List<PurposeText>,
+    /** When the RP operates through an intermediary: its identifier and user-facing name. */
+    val intermediarySub: String?,
+    val intermediaryName: String?,
+    /**
+     * Token Status List result: true = valid, false = revoked/suspended, null = not checked. A revoked WRPRC
+     * is refused before the consent screen, so a surfaced registration is always valid or unchecked.
+     */
+    val statusValid: Boolean?,
 )
 
 /** One DCQL query with the stored credentials that can answer it. */

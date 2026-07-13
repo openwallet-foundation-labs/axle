@@ -5,11 +5,13 @@ import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.trust.TrustAnchorSource
 import com.hopae.eudi.wallet.trust.TrustAnchors
 import com.hopae.eudi.wallet.trust.X509ChainValidator
+import com.hopae.eudi.wallet.trust.WRPRCVerifier
 import com.hopae.eudi.wallet.trust.X509RequestVerifier
 import com.hopae.eudi.wallet.trust.X5cIssuerKeyResolver
 import com.hopae.eudi.wallet.trust.X5cMdocIssuerTrust
 import com.hopae.eudi.wallet.trust.X5cMdocReaderTrust
 import com.hopae.eudi.wallet.sdjwt.Base64Url
+import com.hopae.eudi.wallet.sdjwt.JwtTimeValidator
 import com.hopae.eudi.wallet.txlog.TransactionLog
 import com.hopae.eudi.wallet.vci.Openid4VciClient
 import com.hopae.eudi.wallet.vp.Openid4VpClient
@@ -76,9 +78,19 @@ class Wallet private constructor(
             val readerValidator = config.trust.readerAnchorsDer.takeIf { it.isNotEmpty() }?.let { anchors ->
                 X509ChainValidator(TrustAnchorSource { TrustAnchors.ofDer(anchors) }, at = { java.util.Date.from(ports.clock.now()) })
             }
-            val vp = Openid4VpClient(ports.http, clockSeconds, readerValidator?.let { X509RequestVerifier(it) }, ports.rng)
+
+            // Registrar trust: the RP registration cert (WRPRC) and its status list chain to the registrar CA.
+            // When configured, the request verifier validates a WRPRC carried in `verifier_info` and binds it to
+            // the reader's WRPAC; the registrar-scoped status client lets the wallet refuse a revoked WRPRC.
+            val registrarValidator = config.trust.registrarAnchorsDer.takeIf { it.isNotEmpty() }?.let { anchors ->
+                X509ChainValidator(TrustAnchorSource { TrustAnchors.ofDer(anchors) }, at = { java.util.Date.from(ports.clock.now()) })
+            }
+            val wrprcVerifier = registrarValidator?.let { WRPRCVerifier(it, JwtTimeValidator(now = { ports.clock.now() })) }
+            val registrarStatusClient = registrarValidator?.let { StatusListClient(ports.http, X5cIssuerKeyResolver(it), clockSeconds) }
+
+            val vp = Openid4VpClient(ports.http, clockSeconds, readerValidator?.let { X509RequestVerifier(it, wrprcVerifier) }, ports.rng)
             val recordFailures = config.transactionLog.recordFailures
-            val presentation = PresentationService(vp, store, txlog, ports.secureAreas, scope, recordFailures, config.presentation.mdocDeviceAuth, config.presentation.mdocTransactionDataBinder)
+            val presentation = PresentationService(vp, store, txlog, ports.secureAreas, scope, registrarStatusClient, recordFailures, config.presentation.mdocDeviceAuth, config.presentation.mdocTransactionDataBinder)
             val proximity = ProximityService(store, txlog, ports.secureAreas, scope, readerValidator?.let { X5cMdocReaderTrust(it) }, recordFailures, config.presentation.mdocDeviceAuth, config.presentation.proximitySessionCurve)
             // Reader side: verify presented mdocs against the same issuer anchors used for status/issuance.
             val reader = ProximityReaderService(X5cMdocIssuerTrust(issuerValidator))

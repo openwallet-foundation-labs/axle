@@ -60,4 +60,9 @@ class PresentationConfig(
 class TrustConfig(
     val issuerAnchorsDer: List<ByteArray> = emptyList(),
     val readerAnchorsDer: List<ByteArray> = emptyList(),
+    /**
+     * Registrar CA anchors: the WRPRC (RP registration cert, `rc-wrp+jwt`) and its status list chain to these.
+     * When set, a WRPRC carried in a request's `verifier_info` is validated and its revocation status checked.
+     */
+    val registrarAnchorsDer: List<ByteArray> = emptyList(),
 )

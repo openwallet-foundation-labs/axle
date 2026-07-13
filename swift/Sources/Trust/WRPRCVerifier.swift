@@ -48,7 +48,11 @@ public struct VerifiedWRPRC: Sendable {
 /// the WRPRC to the already-validated WRPAC (its `sub` must equal the WRPAC `organizationIdentifier`,
 /// GEN-5.1.1-02), and extracts the entitlements / intended-use for the consent screen. The caller is
 /// responsible for the Token Status List check using the returned `status` claim.
-public struct WRPRCVerifier {
+// `@unchecked Sendable`: WRPRCVerifier is an immutable value — a chain validator (Sendable) plus a pure
+// time function — so it is safe to share across concurrency domains. The `@unchecked` is only needed because
+// `JwtTimeValidator`'s clock closure is not itself marked `@Sendable`. It rides on the Sendable
+// `X509RequestVerifier`, so without this the request verifier would warn (an error under Swift 6).
+public struct WRPRCVerifier: @unchecked Sendable {
     public static let typ = "rc-wrp+jwt"
     /// JAdES B-B protected-header extensions this verifier understands (RFC 7515 §4.1.11).
     private static let understoodCrit: Set<String> = ["sigT", "b64"]

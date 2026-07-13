@@ -2,6 +2,44 @@ import Foundation
 import SdJwt
 import WalletAPI
 
+/// A localized string (BCP-47 `lang` + `value`) from a WRPRC `purpose` / `srv_description`.
+public struct RegistrationLocalizedText: Equatable {
+    public let lang: String
+    public let value: String
+    public init(lang: String, value: String) {
+        self.lang = lang
+        self.value = value
+    }
+}
+
+/// The relying party's registration, as asserted by a registrar-issued WRPRC (ETSI TS 119 475) carried in
+/// the request's `verifier_info` `registration_cert` element (ETSI TS 119 472-2 §6.3). Populated only when
+/// the wallet is configured with registrar anchors and the request carries a WRPRC that validates + binds to
+/// the WRPAC. The wallet layer additionally runs the Token Status List check over `status`.
+public struct RegistrationInfo {
+    /// `sub` — the registered semantic identifier, bound to the WRPAC organizationIdentifier (GEN-5.1.1-02).
+    public let subject: String
+    /// EU-level entitlements/roles asserted for the relying party (≥1).
+    public let entitlements: [String]
+    /// The declared intended-use, localized, for the consent screen.
+    public let purpose: [RegistrationLocalizedText]
+    /// When the RP operates through an intermediary: its identifier (`intermediary.sub`) and name (`sname`).
+    public let intermediarySub: String?
+    public let intermediaryName: String?
+    /// The raw WRPRC `status` claim (`{ status_list: { idx, uri } }`), for the wallet-layer status check.
+    public let status: JsonValue?
+
+    public init(subject: String, entitlements: [String], purpose: [RegistrationLocalizedText],
+                intermediarySub: String?, intermediaryName: String?, status: JsonValue?) {
+        self.subject = subject
+        self.entitlements = entitlements
+        self.purpose = purpose
+        self.intermediarySub = intermediarySub
+        self.intermediaryName = intermediaryName
+        self.status = status
+    }
+}
+
 /// What the wallet shows on the consent screen about the verifier and its trust status.
 public struct VerifierInfo {
     public let clientId: String
@@ -11,13 +49,17 @@ public struct VerifierInfo {
     public let commonName: String?
     /// True only when the trust verifier confirmed signature + scheme + chain to a trust anchor.
     public let trusted: Bool
+    /// The RP's registrar-issued registration (WRPRC), when one accompanied the request and validated.
+    public let registration: RegistrationInfo?
 
-    public init(clientId: String, clientIdScheme: String, certificateChainDer: [[UInt8]]?, commonName: String?, trusted: Bool) {
+    public init(clientId: String, clientIdScheme: String, certificateChainDer: [[UInt8]]?, commonName: String?,
+                trusted: Bool, registration: RegistrationInfo? = nil) {
         self.clientId = clientId
         self.clientIdScheme = clientIdScheme
         self.certificateChainDer = certificateChainDer
         self.commonName = commonName
         self.trusted = trusted
+        self.registration = registration
     }
 }
 

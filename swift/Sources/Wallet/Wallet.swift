@@ -54,10 +54,22 @@ public struct Wallet {
         // request objects) and proximity (mdoc reader authentication). No anchors → readers stay untrusted.
         let readerValidator: X509ChainValidator? = config.trust.readerAnchorsDer.isEmpty ? nil :
             X509ChainValidator(anchorSource: LazyIssuerAnchorSource(ders: config.trust.readerAnchorsDer), validationTime: ports.clock.now())
-        let vpTrust: (any RequestTrustVerifier)? = readerValidator.map { X509RequestVerifier(validator: $0) }
+
+        // Registrar trust: the RP registration cert (WRPRC) and its status list chain to the registrar CA.
+        // When configured, the request verifier validates a WRPRC carried in `verifier_info` and binds it to
+        // the reader's WRPAC; the registrar-scoped status client lets the wallet refuse a revoked WRPRC.
+        let registrarValidator: X509ChainValidator? = config.trust.registrarAnchorsDer.isEmpty ? nil :
+            X509ChainValidator(anchorSource: LazyIssuerAnchorSource(ders: config.trust.registrarAnchorsDer), validationTime: ports.clock.now())
+        let wrprcVerifier = registrarValidator.map { WRPRCVerifier(validator: $0, time: JwtTimeValidator(now: { ports.clock.now() })) }
+        let registrarStatusClient = registrarValidator.map {
+            StatusListClient(http: ports.http, keyResolver: X5cIssuerKeyResolver(validator: $0), clock: clockSeconds)
+        }
+
+        let vpTrust: (any RequestTrustVerifier)? = readerValidator.map { X509RequestVerifier(validator: $0, wrprcVerifier: wrprcVerifier) }
         let vp = Openid4VpClient(http: ports.http, clock: clockSeconds, trust: vpTrust, rng: ports.rng)
         let recordFailures = config.transactionLog.recordFailures
         let presentation = PresentationService(vp: vp, store: store, txlog: txlog, secureAreas: ports.secureAreas,
+                                               registrarStatusClient: registrarStatusClient,
                                                recordFailures: recordFailures,
                                                deviceAuthMode: config.presentation.mdocDeviceAuth,
                                                transactionDataBinder: config.presentation.mdocTransactionDataBinder)

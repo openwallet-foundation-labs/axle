@@ -4,6 +4,7 @@ import Foundation
 import MDoc
 import OpenID4VP
 import SdJwt
+import StatusList
 import TransactionLog
 import Trust
 import WalletAPI
@@ -14,6 +15,9 @@ public struct PresentationService {
     let store: DefaultCredentialStore
     let txlog: TransactionLog
     let secureAreas: [any SecureArea]
+    /// Registrar-scoped Token Status List client for RP registration certs (WRPRC); nil when no registrar
+    /// anchors are configured. Used to refuse a revoked WRPRC before the consent screen.
+    var registrarStatusClient: StatusListClient?
     /// When true, a failed final submission is recorded with `.error` status (opt-in via config).
     var recordFailures: Bool = false
     /// ISO 18013-5 §9.1.3.5 device-auth preference for mdoc presentations (deviceMac when the verifier requests it).
@@ -53,6 +57,9 @@ public struct PresentationService {
         let session = PresentationSession { s in
             s.emit(.resolvingRequest)
             let resolved = try await resolve()
+            // Refuse a revoked RP registration cert (WRPRC) before doing any matching / consent. Only runs
+            // when the request actually carried a WRPRC (registration != nil); absent → nothing to check.
+            try await catchingVp { try await checkRegistrationStatus(resolved) }
 
             let envelopes = try await store.list().filter { if case .issued = $0.lifecycle { return true }; return false }
             var held: [any PresentableCredential] = []
@@ -105,10 +112,34 @@ public struct PresentationService {
                 multiple: candidates.first?.query.multiple ?? false)
         }
         let v = resolved.verifier
+        let registration = v.registration.map { r in
+            VerifierRegistration(
+                subject: r.subject, entitlements: r.entitlements,
+                purpose: r.purpose.map { PurposeText(lang: $0.lang, value: $0.value) },
+                intermediarySub: r.intermediarySub, intermediaryName: r.intermediaryName,
+                // Reaching here means any revoked WRPRC was already refused; validated iff a status client ran.
+                statusValid: (r.status != nil && registrarStatusClient != nil) ? true : nil)
+        }
         return PresentationRequest(
-            verifier: VerifierInfo(clientId: v.clientId, clientIdScheme: v.clientIdScheme, commonName: v.commonName, trusted: v.trusted),
+            verifier: VerifierInfo(clientId: v.clientId, clientIdScheme: v.clientIdScheme, commonName: v.commonName,
+                                   trusted: v.trusted, registration: registration),
             queries: queries, transactionData: resolved.transactionData, satisfiable: matches.isSatisfiable(),
             resolved: resolved, matches: matches)
+    }
+
+    /// Refuses a revoked/suspended RP registration cert (WRPRC) via the Token Status List, when the request
+    /// carried a WRPRC (`resolved.verifier.registration`) and a registrar status client is configured. A
+    /// missing WRPRC or missing status client is a no-op — interop with verifiers that don't send one yet.
+    private func checkRegistrationStatus(_ resolved: ResolvedRequest) async throws {
+        guard let status = resolved.verifier.registration?.status, let client = registrarStatusClient else { return }
+        do {
+            let result = try await client.check(claims: .obj([("status", status)]))
+            guard result == .valid else {
+                throw VpError.verifierNotTrusted("WRPRC status is \(result) (revoked or suspended)")
+            }
+        } catch let e as StatusListError {
+            throw VpError.verifierNotTrusted("WRPRC status list check failed: \(e.description)")
+        }
     }
 
     /// Consumes one instance per chosen credential (usage counting) and builds a signer-backed presentable.

@@ -70,8 +70,13 @@ public struct PresentationConfig {
 public struct TrustConfig {
     public let issuerAnchorsDer: [[UInt8]]
     public let readerAnchorsDer: [[UInt8]]
-    public init(issuerAnchorsDer: [[UInt8]] = [], readerAnchorsDer: [[UInt8]] = []) {
+    /// Registrar CA anchors: the WRPRC (RP registration cert, `rc-wrp+jwt`) and its status list chain to these.
+    /// When set, a WRPRC carried in a request's `verifier_info` is validated and its revocation status checked.
+    public let registrarAnchorsDer: [[UInt8]]
+    public init(issuerAnchorsDer: [[UInt8]] = [], readerAnchorsDer: [[UInt8]] = [],
+                registrarAnchorsDer: [[UInt8]] = []) {
         self.issuerAnchorsDer = issuerAnchorsDer
         self.readerAnchorsDer = readerAnchorsDer
+        self.registrarAnchorsDer = registrarAnchorsDer
     }
 }

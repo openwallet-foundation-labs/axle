@@ -8,9 +8,13 @@ import SdJwt
 /// (base64url(SHA-256(leaf DER)) == client_id value). The live EUDI verifier uses `x509_hash`.
 public struct X509RequestVerifier: RequestTrustVerifier {
     private let validator: X509ChainValidator
+    /// Optional WRPRC verifier (built over the registrar CA). When set, a `registration_cert` carried in the
+    /// request's `verifier_info` is validated and bound to the WRPAC leaf; the result rides on `VerifierInfo`.
+    private let wrprcVerifier: WRPRCVerifier?
 
-    public init(validator: X509ChainValidator) {
+    public init(validator: X509ChainValidator, wrprcVerifier: WRPRCVerifier? = nil) {
         self.validator = validator
+        self.wrprcVerifier = wrprcVerifier
     }
 
     public func verifyRequestObject(_ jws: Jws, clientId: String, scheme: String) async throws -> VerifierInfo {
@@ -40,10 +44,46 @@ public struct X509RequestVerifier: RequestTrustVerifier {
             throw VpError.unsupported("client_id scheme '\(scheme)' for x509 verification")
         }
 
+        let chainDer = try chain.map { try X509Support.der($0) }
+
+        // ETSI TS 119 475 / TS 119 472-2: verify the RP registration cert (WRPRC), when configured and present.
+        // A present-but-invalid registration_cert rejects the request; an absent one leaves registration nil
+        // (interop with verifiers that don't yet carry a WRPRC).
+        var registration: RegistrationInfo?
+        if let wrprcVerifier, let wrprc = Self.extractRegistrationCert(jws) {
+            let verified = try await wrprcVerifier.verify(wrprc, wrpacLeafDer: chainDer[0])
+            registration = RegistrationInfo(
+                subject: verified.subject,
+                entitlements: verified.entitlements,
+                purpose: verified.purpose.map { RegistrationLocalizedText(lang: $0.lang, value: $0.value) },
+                intermediarySub: verified.intermediary?.sub,
+                intermediaryName: verified.intermediary?.name,
+                status: verified.status
+            )
+        }
+
         return VerifierInfo(
             clientId: clientId, clientIdScheme: scheme,
-            certificateChainDer: try chain.map { try X509Support.der($0) },
-            commonName: X509Support.commonName(leaf), trusted: true
+            certificateChainDer: chainDer,
+            commonName: X509Support.commonName(leaf), trusted: true,
+            registration: registration
         )
+    }
+
+    /// Pulls the WRPRC (a `rc-wrp+jwt` compact JWS) out of the request object's `verifier_info` array: the
+    /// element whose `format` is `"registration_cert"` carries it as `base64url(serialized WRPRC)`
+    /// (ETSI TS 119 472-2 §6.3, REQ-RO-13/15). Returns nil when no such element is present or decodable.
+    static func extractRegistrationCert(_ jws: Jws) -> String? {
+        guard let text = String(bytes: jws.payloadBytes, encoding: .utf8),
+              let claims = try? JsonValue.parse(text),
+              case let .arr(infos)? = claims["verifier_info"] else { return nil }
+        for info in infos {
+            guard case let .str(format)? = info["format"], format == "registration_cert",
+                  case let .str(data)? = info["data"] else { continue }
+            guard let bytes = try? Base64Url.decode(data),
+                  let wrprc = String(bytes: bytes, encoding: .utf8) else { return nil }
+            return wrprc
+        }
+        return nil
     }
 }

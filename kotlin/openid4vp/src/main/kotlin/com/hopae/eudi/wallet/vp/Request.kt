@@ -10,6 +10,29 @@ import com.hopae.eudi.wallet.spi.Rng
 import java.net.URLDecoder
 import java.net.URLEncoder
 
+/** A localized string (BCP-47 `lang` + `value`) from a WRPRC `purpose` / `srv_description`. */
+data class RegistrationLocalizedText(val lang: String, val value: String)
+
+/**
+ * The relying party's registration, as asserted by a registrar-issued WRPRC (ETSI TS 119 475) carried in
+ * the request's `verifier_info` `registration_cert` element (ETSI TS 119 472-2 §6.3). Populated only when
+ * the wallet is configured with registrar anchors and the request carries a WRPRC that validates + binds to
+ * the WRPAC. The wallet layer additionally runs the Token Status List check over [status].
+ */
+class RegistrationInfo(
+    /** `sub` — the registered semantic identifier, bound to the WRPAC organizationIdentifier (GEN-5.1.1-02). */
+    val subject: String,
+    /** EU-level entitlements/roles asserted for the relying party (>=1). */
+    val entitlements: List<String>,
+    /** The declared intended-use, localized, for the consent screen. */
+    val purpose: List<RegistrationLocalizedText>,
+    /** When the RP operates through an intermediary: its identifier (`intermediary.sub`) and name (`sname`). */
+    val intermediarySub: String?,
+    val intermediaryName: String?,
+    /** The raw WRPRC `status` claim (`{ status_list: { idx, uri } }`), for the wallet-layer status check. */
+    val status: JsonValue?,
+)
+
 /** What the wallet shows on the consent screen about the verifier and its trust status. */
 class VerifierInfo(
     val clientId: String,
@@ -19,6 +42,8 @@ class VerifierInfo(
     val commonName: String?,
     /** True only when the trust verifier confirmed signature + scheme + chain to a trust anchor. */
     val trusted: Boolean,
+    /** The RP's registrar-issued registration (WRPRC), when one accompanied the request and validated. */
+    val registration: RegistrationInfo? = null,
 )
 
 /**

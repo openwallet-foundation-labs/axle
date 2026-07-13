@@ -4,6 +4,7 @@ import com.hopae.eudi.wallet.mdoc.IssuerSigned
 import com.hopae.eudi.wallet.mdoc.MdocDeviceAuthMode
 import com.hopae.eudi.wallet.mdoc.MdocKeyAgreement
 import com.hopae.eudi.wallet.sdjwt.Base64Url
+import com.hopae.eudi.wallet.sdjwt.JsonValue
 import com.hopae.eudi.wallet.sdjwt.SdJwt
 import com.hopae.eudi.wallet.sdjwt.SecureAreaJwsSigner
 import com.hopae.eudi.wallet.spi.CredentialFormat
@@ -11,6 +12,9 @@ import com.hopae.eudi.wallet.spi.CredentialId
 import com.hopae.eudi.wallet.spi.SecureArea
 import com.hopae.eudi.wallet.spi.SecureAreaCoseSigner
 import com.hopae.eudi.wallet.spi.SigningAlgorithm
+import com.hopae.eudi.wallet.status.CredentialStatus as StatusListStatus
+import com.hopae.eudi.wallet.status.StatusListClient
+import com.hopae.eudi.wallet.status.StatusListException
 import com.hopae.eudi.wallet.store.CredentialEnvelope
 import com.hopae.eudi.wallet.store.CredentialInstance
 import com.hopae.eudi.wallet.store.CredentialStore
@@ -39,6 +43,11 @@ class PresentationService internal constructor(
     private val txlog: TransactionLog,
     private val secureAreas: List<SecureArea>,
     private val scope: CoroutineScope,
+    /**
+     * Registrar-scoped Token Status List client for RP registration certs (WRPRC); null when no registrar
+     * anchors are configured. Used to refuse a revoked WRPRC before the consent screen.
+     */
+    private val registrarStatusClient: StatusListClient? = null,
     /** When true, a failed final submission is recorded with ERROR status (opt-in via config). */
     private val recordFailures: Boolean = false,
     /** ISO 18013-5 §9.1.3.5 device-auth preference for mdoc presentations (deviceMac when the verifier requests it). */
@@ -76,6 +85,9 @@ class PresentationService internal constructor(
         val session = PresentationSession(scope) {
             emit(PresentationState.ResolvingRequest)
             val resolved = resolve()
+            // Refuse a revoked RP registration cert (WRPRC) before any matching / consent. Only runs when
+            // the request actually carried a WRPRC (registration != null); absent → nothing to check.
+            catchingVp { checkRegistrationStatus(resolved) }
 
             val envelopes = store.list().filter { it.lifecycle is EnvelopeLifecycle.Issued }
             val held = envelopes.mapNotNull { presentableFor(it, it.firstInstance()) }
@@ -126,14 +138,43 @@ class PresentationService internal constructor(
             )
         }
         val v = resolved.verifier
+        val registration = v.registration?.let { r ->
+            VerifierRegistration(
+                subject = r.subject,
+                entitlements = r.entitlements,
+                purpose = r.purpose.map { PurposeText(it.lang, it.value) },
+                intermediarySub = r.intermediarySub,
+                intermediaryName = r.intermediaryName,
+                // Reaching here means any revoked WRPRC was already refused; validated iff a status client ran.
+                statusValid = if (r.status != null && registrarStatusClient != null) true else null,
+            )
+        }
         return PresentationRequest(
-            verifier = VerifierInfo(v.clientId, v.clientIdScheme, v.commonName, v.trusted),
+            verifier = VerifierInfo(v.clientId, v.clientIdScheme, v.commonName, v.trusted, registration),
             queries = queries,
             transactionData = resolved.transactionData,
             satisfiable = matches.isSatisfiable(),
             resolved = resolved,
             matches = matches,
         )
+    }
+
+    /**
+     * Refuses a revoked/suspended RP registration cert (WRPRC) via the Token Status List, when the request
+     * carried a WRPRC ([ResolvedRequest.verifier].registration) and a registrar status client is configured.
+     * A missing WRPRC or missing status client is a no-op — interop with verifiers that don't send one yet.
+     */
+    private suspend fun checkRegistrationStatus(resolved: ResolvedRequest) {
+        val status = resolved.verifier.registration?.status ?: return
+        val client = registrarStatusClient ?: return
+        val result = try {
+            client.check(JsonValue.Obj(listOf("status" to status)))
+        } catch (e: StatusListException) {
+            throw VpException.VerifierNotTrusted("WRPRC status list check failed: ${e.message}")
+        }
+        if (result != StatusListStatus.VALID) {
+            throw VpException.VerifierNotTrusted("WRPRC status is $result (revoked or suspended)")
+        }
     }
 
     /** Consumes one instance per chosen credential (usage counting) and builds a signer-backed presentable. */

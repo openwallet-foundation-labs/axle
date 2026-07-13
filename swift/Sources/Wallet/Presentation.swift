@@ -19,6 +19,46 @@ public struct VerifierInfo {
     public let clientIdScheme: String
     public let commonName: String?
     public let trusted: Bool
+    /// The relying party's registrar-issued registration (WRPRC), when one accompanied the request and
+    /// validated. Surfaces the declared purpose / entitlements / intermediary for the consent screen.
+    public let registration: VerifierRegistration?
+}
+
+/// A localized string (BCP-47 `lang` + `value`) from a WRPRC `purpose`.
+public struct PurposeText: Equatable {
+    public let lang: String
+    public let value: String
+    public init(lang: String, value: String) {
+        self.lang = lang
+        self.value = value
+    }
+}
+
+/// The relying party's registration (ETSI TS 119 475 WRPRC), validated and bound to the request's WRPAC.
+public struct VerifierRegistration {
+    /// `sub` — the registered semantic identifier (bound to the WRPAC organizationIdentifier). For an
+    /// intermediated request this is the **final** relying party, never the intermediary.
+    public let subject: String
+    /// EU-level entitlements/roles asserted for the relying party (≥1).
+    public let entitlements: [String]
+    /// The declared intended-use, for display on the consent screen.
+    public let purpose: [PurposeText]
+    /// When the RP operates through an intermediary: its identifier and user-facing name.
+    public let intermediarySub: String?
+    public let intermediaryName: String?
+    /// Token Status List result: true = valid, false = revoked/suspended, nil = not checked. A revoked WRPRC
+    /// is refused before the consent screen, so a surfaced registration is always valid or unchecked.
+    public let statusValid: Bool?
+
+    public init(subject: String, entitlements: [String], purpose: [PurposeText],
+                intermediarySub: String?, intermediaryName: String?, statusValid: Bool?) {
+        self.subject = subject
+        self.entitlements = entitlements
+        self.purpose = purpose
+        self.intermediarySub = intermediarySub
+        self.intermediaryName = intermediaryName
+        self.statusValid = statusValid
+    }
 }
 
 /// One DCQL query with the stored credentials that can answer it.

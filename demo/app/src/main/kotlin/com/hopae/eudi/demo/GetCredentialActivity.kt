@@ -27,7 +27,6 @@ import kotlinx.coroutines.launch
 class GetCredentialActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val wallet = DemoWallet.get(this)
         val resultData = Intent()
 
         val request = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
@@ -37,35 +36,38 @@ class GetCredentialActivity : ComponentActivity() {
         val origin = DcApiRequest.originOf(request, allowlist())
         LogStore.log("DC API request · origin=$origin · protocols=${DcApiRequest.protocolsOffered(option.requestJson)}")
 
-        // org-iso-mdoc (ISO 18013-7): raw mdoc DeviceRequest → HPKE-encrypted DeviceResponse.
-        val mdoc = DcApiRequest.matchProtocol(option.requestJson, listOf("org-iso-mdoc", "org.iso.mdoc"))
-        if (mdoc != null) {
-            val (proto, data) = mdoc
-            val items = runCatching {
-                DeviceRequest.decode(Base64.decode(data.getString("deviceRequest"), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)).docRequests.map { dr ->
-                    ConsentItem(dr.docType, dr.requested.flatMap { (_, els) -> els.map { it.identifier } })
-                }
-            }.getOrDefault(emptyList())
-            showConsent(origin, trusted = false, items,
-                onApprove = {
-                    lifecycleScope.launch {
-                        runCatching {
-                            val response = wallet.proximity.respondDcApiMdoc(data.getString("deviceRequest"), data.getString("encryptionInfo"), origin)
-                            DcApiResult.setResponse(resultData, DcApiResult.mdocResponseJson(proto, response))
-                            LogStore.log("✅ DC API (mdoc) response returned to caller")
-                            setResult(RESULT_OK, resultData)
-                        }.onFailure { finishExceptionData(resultData, it.message) }
-                        finish()
-                    }
-                },
-                onDecline = { finishError(resultData, "declined by user") })
-            return
-        }
-
-        val openid4vp = DcApiRequest.extractOpenId4Vp(option.requestJson)
-        if (openid4vp == null) { finishError(resultData, "no openid4vp request"); return }
-
+        // The wallet assembles asynchronously (trust anchors from the trusted lists on first launch).
         lifecycleScope.launch {
+            val wallet = DemoWallet.get(this@GetCredentialActivity)
+
+            // org-iso-mdoc (ISO 18013-7): raw mdoc DeviceRequest → HPKE-encrypted DeviceResponse.
+            val mdoc = DcApiRequest.matchProtocol(option.requestJson, listOf("org-iso-mdoc", "org.iso.mdoc"))
+            if (mdoc != null) {
+                val (proto, data) = mdoc
+                val items = runCatching {
+                    DeviceRequest.decode(Base64.decode(data.getString("deviceRequest"), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)).docRequests.map { dr ->
+                        ConsentItem(dr.docType, dr.requested.flatMap { (_, els) -> els.map { it.identifier } })
+                    }
+                }.getOrDefault(emptyList())
+                showConsent(origin, trusted = false, items,
+                    onApprove = {
+                        lifecycleScope.launch {
+                            runCatching {
+                                val response = wallet.proximity.respondDcApiMdoc(data.getString("deviceRequest"), data.getString("encryptionInfo"), origin)
+                                DcApiResult.setResponse(resultData, DcApiResult.mdocResponseJson(proto, response))
+                                LogStore.log("✅ DC API (mdoc) response returned to caller")
+                                setResult(RESULT_OK, resultData)
+                            }.onFailure { finishExceptionData(resultData, it.message) }
+                            finish()
+                        }
+                    },
+                    onDecline = { finishError(resultData, "declined by user") })
+                return@launch
+            }
+
+            val openid4vp = DcApiRequest.extractOpenId4Vp(option.requestJson)
+            if (openid4vp == null) { finishError(resultData, "no openid4vp request"); return@launch }
+
             runCatching {
                 val session = wallet.presentation.startDcApi(openid4vp, origin)
                 val resolved = session.state.first { it is PresentationState.RequestResolved || it is PresentationState.Failed }

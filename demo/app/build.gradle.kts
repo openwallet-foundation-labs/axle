@@ -55,6 +55,8 @@ dependencies {
     // EUDI Wallet SDK (via composite build ../kotlin)
     implementation("com.hopae.eudi:wallet:0.0.1-SNAPSHOT")
     implementation("com.hopae.eudi:wallet-api:0.0.1-SNAPSHOT")
+    // Trusted-list client: pulls the issuer + registrar CA anchors from the JAdES trusted lists into TrustConfig.
+    implementation("com.hopae.eudi:trustlist:0.0.1-SNAPSHOT")
     // Android platform adapters — via composite build ../android (distinct group to avoid clashing with the SDK)
     implementation("com.hopae.eudi.android:core:0.0.1-SNAPSHOT")
     implementation("com.hopae.eudi.android:proximity:0.0.1-SNAPSHOT")

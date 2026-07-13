@@ -21,10 +21,15 @@ class Credential(
 
 /**
  * Where the credential came from (captured from issuer metadata at issuance).
- * [trusted]: whether the credential's issuer signature chained to a trusted issuer anchor when it was issued —
- * true = trusted, false = not verified, null = not checked (no issuer anchors configured).
+ * [trusted]: the credential's issuer signature (DSC) chained to a trusted issuer anchor — true/false/null(unchecked).
+ * [registered]: the issuer's `.well-known` signed metadata chained to a trusted issuer anchor (a registered issuer).
  */
-data class IssuerInfo(val url: String, val displayName: String? = null, val trusted: Boolean? = null)
+data class IssuerInfo(
+    val url: String,
+    val displayName: String? = null,
+    val trusted: Boolean? = null,
+    val registered: Boolean? = null,
+)
 
 /** Display metadata for a credential type (issuer-metadata derived). */
 data class CredentialDisplay(val name: String? = null, val logoUri: String? = null, val backgroundColor: String? = null)

@@ -52,4 +52,10 @@ class CredentialMetadata(
      * checked (no issuer anchors configured). Informational — an untrusted credential is still stored.
      */
     val issuerTrusted: Boolean? = null,
+    /**
+     * Whether the issuer is a *registered* issuer: its `.well-known` signed metadata (OpenID4VCI §12.2.3) was
+     * verified to chain to a trusted issuer anchor at issuance. true = registered, false = signed metadata
+     * absent/unverifiable, null = not checked.
+     */
+    val issuerRegistered: Boolean? = null,
 )

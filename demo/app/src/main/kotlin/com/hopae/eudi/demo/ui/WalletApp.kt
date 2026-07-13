@@ -398,6 +398,10 @@ private fun CredentialDetailDialog(c: Credential, onCopy: () -> Unit, onDelete: 
                 DetailRow("Type", formatLabel(c.format))
                 c.issuer?.displayName?.let { DetailRow("Issuer", it) }
                 c.issuer?.url?.let { DetailRow("Issuer URL", it) }
+                // Two issuer-trust signals (both chain to the trusted-list issuer anchors): the credential's own
+                // signature (DSC), and the issuer's signed .well-known metadata (a registered issuer).
+                c.issuer?.trusted?.let { DetailRow("Credential signature", if (it) "✓ trusted issuer" else "⚠ not verified") }
+                c.issuer?.registered?.let { DetailRow("Issuer registration", if (it) "✓ signed metadata verified" else "⚠ not verified") }
                 DetailRow("Issued", issuedDate(c))
                 (c.lifecycle as? Lifecycle.Issued)?.let { lc ->
                     lc.validity?.validUntil?.let { DetailRow("Expires", instantDate(it)) }

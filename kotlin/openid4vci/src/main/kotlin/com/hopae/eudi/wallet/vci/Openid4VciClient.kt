@@ -137,15 +137,17 @@ class Openid4VciClient(
         val url = wellKnown(credentialIssuer, "openid-credential-issuer")
         val response = http.execute(HttpRequest(HttpMethod.GET, url, listOf("Accept" to metadataPolicy.acceptHeader())))
         checkStatus(response, url)
-        return CredentialIssuerMetadata.fromObj(metadataBody(response, url, credentialIssuer))
+        val (claims, verified) = metadataBody(response, url, credentialIssuer)
+        return CredentialIssuerMetadata.fromObj(claims, signedMetadataVerified = verified)
     }
 
     /**
      * Picks the unsigned/signed branch by response media type (OpenID4VCI §12.2.2): `application/json`
      * carries the metadata as-is, `application/jwt` carries it as the payload of a signed JWT. Issuers
-     * MUST label the body; when the header is absent we fall back to sniffing a JSON object.
+     * MUST label the body; when the header is absent we fall back to sniffing a JSON object. Returns the
+     * metadata claims plus whether signed metadata was cryptographically verified to a trusted signer.
      */
-    private suspend fun metadataBody(response: HttpResponse, url: String, credentialIssuer: String): JsonValue.Obj {
+    private suspend fun metadataBody(response: HttpResponse, url: String, credentialIssuer: String): Pair<JsonValue.Obj, Boolean> {
         val mediaType = header(response, "Content-Type")?.substringBefore(';')?.trim()?.lowercase()
         val text = response.body.decodeToString().trim()
         val signed = when (mediaType) {
@@ -157,45 +159,44 @@ class Openid4VciClient(
             if (metadataPolicy is IssuerMetadataPolicy.RequireSigned) {
                 throw VciException.MetadataError("policy requires signed metadata but the issuer returned unsigned metadata")
             }
-            return parseObj(response, url)
+            return parseObj(response, url) to false
         }
         return verifySignedMetadata(text, credentialIssuer)
     }
 
     /**
-     * Enforces the §12.2.3 shape — `typ`, an asymmetric `alg`, `sub` matching the Credential Issuer
-     * Identifier, a present `iat` and an unexpired `exp`. [SignedMetadataVerifier] proves the signature
-     * and the signer's trust; the verified payload *is* the metadata (all parameters are top-level claims).
+     * The signed metadata's claims (its JWS payload) plus whether trust was established: `true` when the
+     * §12.2.3 shape holds (`typ`, an asymmetric `alg`, `sub` matching the issuer, `iat`, unexpired `exp`) AND
+     * [SignedMetadataVerifier] proves the signature + chains the signer to a trusted anchor. Under
+     * `PreferSigned` a verification failure is **not** fatal — the metadata (from the payload) is still used,
+     * just marked unverified (issuer not established as registered); `RequireSigned` fails instead.
      */
-    private suspend fun verifySignedMetadata(jws: String, credentialIssuer: String): JsonValue.Obj {
+    private suspend fun verifySignedMetadata(jws: String, credentialIssuer: String): Pair<JsonValue.Obj, Boolean> {
         val verifier = metadataPolicy.verifierOrNull
             ?: throw VciException.MetadataError("issuer returned signed metadata but no SignedMetadataVerifier is configured")
-
         val parsed = runCatching { Jws.parse(jws) }.getOrElse {
             throw VciException.MetadataError("signed metadata is not a compact JWS")
         }
-        val typ = (parsed.header["typ"] as? JsonValue.Str)?.value
-        if (typ != SIGNED_METADATA_TYP) {
-            throw VciException.MetadataError("signed metadata typ must be '$SIGNED_METADATA_TYP', got '${typ ?: "<missing>"}'")
-        }
-        val alg = (parsed.header["alg"] as? JsonValue.Str)?.value
-            ?: throw VciException.MetadataError("signed metadata has no alg")
-        if (alg.equals("none", ignoreCase = true) || alg.startsWith("HS")) {
-            throw VciException.MetadataError("signed metadata alg must be an asymmetric signature, got '$alg'")
-        }
+        // The metadata IS the JWS payload — usable whether or not trust is established.
+        val payload = JsonValue.parse(parsed.payloadBytes.decodeToString()) as? JsonValue.Obj
+            ?: throw VciException.MetadataError("signed metadata payload is not a JSON object")
 
-        val claims = verifier.verify(jws)
-
-        val sub = (claims["sub"] as? JsonValue.Str)?.value
-            ?: throw VciException.MetadataError("signed metadata has no sub")
-        if (sub.trimEnd('/') != credentialIssuer.trimEnd('/')) {
-            throw VciException.MetadataError("signed metadata sub '$sub' does not match the Credential Issuer Identifier '$credentialIssuer'")
+        val verified = runCatching {
+            val typ = (parsed.header["typ"] as? JsonValue.Str)?.value
+            if (typ != SIGNED_METADATA_TYP) throw VciException.MetadataError("signed metadata typ must be '$SIGNED_METADATA_TYP', got '${typ ?: "<missing>"}'")
+            val alg = (parsed.header["alg"] as? JsonValue.Str)?.value ?: throw VciException.MetadataError("signed metadata has no alg")
+            if (alg.equals("none", ignoreCase = true) || alg.startsWith("HS")) throw VciException.MetadataError("signed metadata alg must be asymmetric, got '$alg'")
+            val claims = verifier.verify(jws) // proves signature + chains the signer to a trusted anchor
+            val sub = (claims["sub"] as? JsonValue.Str)?.value ?: throw VciException.MetadataError("signed metadata has no sub")
+            if (sub.trimEnd('/') != credentialIssuer.trimEnd('/')) throw VciException.MetadataError("signed metadata sub '$sub' != issuer '$credentialIssuer'")
+            if (claims["iat"] !is JsonValue.NumInt) throw VciException.MetadataError("signed metadata has no iat")
+            (claims["exp"] as? JsonValue.NumInt)?.let { if (it.value <= clock()) throw VciException.MetadataError("signed metadata expired") }
+            true
+        }.getOrElse { e ->
+            if (metadataPolicy is IssuerMetadataPolicy.RequireSigned) throw e // strict: a bad signature fails
+            false // PreferSigned: use the unverified metadata, mark the issuer not-established-as-registered
         }
-        if (claims["iat"] !is JsonValue.NumInt) throw VciException.MetadataError("signed metadata has no iat")
-        (claims["exp"] as? JsonValue.NumInt)?.let {
-            if (it.value <= clock()) throw VciException.MetadataError("signed metadata expired at ${it.value}")
-        }
-        return claims
+        return payload to verified
     }
 
     suspend fun loadAuthorizationServerMetadata(issuer: String): AuthorizationServerMetadata {

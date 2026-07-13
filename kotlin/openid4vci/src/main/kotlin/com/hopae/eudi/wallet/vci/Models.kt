@@ -133,9 +133,15 @@ class CredentialIssuerMetadata(
     val issuerDisplayName: String? = null,
     val credentialResponseEncryption: ResponseEncryptionMetadata? = null,
     val credentialRequestEncryption: RequestEncryptionMetadata? = null,
+    /**
+     * Whether this metadata arrived as `signed_metadata` (OpenID4VCI §12.2.3) AND its signer chained to a
+     * trusted issuer anchor — i.e. the issuer is a *registered* issuer. False for unsigned metadata or when
+     * the signature/chain could not be verified (under `PreferSigned`; `RequireSigned` fails instead).
+     */
+    val signedMetadataVerified: Boolean = false,
 ) {
     companion object {
-        fun fromObj(o: JsonValue.Obj): CredentialIssuerMetadata {
+        fun fromObj(o: JsonValue.Obj, signedMetadataVerified: Boolean = false): CredentialIssuerMetadata {
             val issuer = o.requireStr("credential_issuer", "issuer metadata")
             val issuerDisplay = (o["display"] as? JsonValue.Arr)?.items?.firstOrNull() as? JsonValue.Obj
             val configs = (o["credential_configurations_supported"] as? JsonValue.Obj)?.entries
@@ -157,6 +163,7 @@ class CredentialIssuerMetadata(
                     ?.let { ResponseEncryptionMetadata.fromObj(it) },
                 credentialRequestEncryption = (o["credential_request_encryption"] as? JsonValue.Obj)
                     ?.let { RequestEncryptionMetadata.fromObj(it) },
+                signedMetadataVerified = signedMetadataVerified,
             )
         }
     }

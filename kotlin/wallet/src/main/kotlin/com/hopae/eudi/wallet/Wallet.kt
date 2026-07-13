@@ -71,7 +71,15 @@ class Wallet private constructor(
             val clientAuth = ports.walletAttestation?.let {
                 AttestationClientAuth(config.issuance.clientId, it, ports.defaultSecureArea, ports.storage, ports.rng, clockSeconds)
             }
-            val vci = Openid4VciClient(ports.http, ports.rng, clockSeconds, config.issuance.clientId, clientAuth = clientAuth)
+            // Prefer signed Credential Issuer Metadata (§12.2.3) and verify its signer chains to a trusted issuer
+            // anchor — so the wallet can tell a *registered* issuer from an unverified one. Lenient: unsigned or
+            // unverifiable metadata is still used (marked not-registered), never a hard fail.
+            val metadataPolicy = if (config.trust.issuerAnchorsDer.isNotEmpty()) {
+                com.hopae.eudi.wallet.vci.IssuerMetadataPolicy.PreferSigned(com.hopae.eudi.wallet.trust.X5cSignedMetadataVerifier(issuerValidator))
+            } else {
+                com.hopae.eudi.wallet.vci.IssuerMetadataPolicy.IgnoreSigned
+            }
+            val vci = Openid4VciClient(ports.http, ports.rng, clockSeconds, config.issuance.clientId, clientAuth = clientAuth, metadataPolicy = metadataPolicy)
             // Verify an issued credential's issuer signature (mdoc issuerAuth x5c / SD-JWT VC JWS x5c) chains to a
             // trusted issuer anchor — checked before storing so the wallet can label the credential trusted or not.
             val credentialTrust = if (config.trust.issuerAnchorsDer.isNotEmpty()) {

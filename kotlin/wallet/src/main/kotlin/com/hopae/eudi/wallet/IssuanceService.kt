@@ -258,6 +258,8 @@ class IssuanceService internal constructor(
                 logoUri = config?.logoUri,
                 backgroundColor = config?.backgroundColor,
                 issuerTrusted = issuerTrusted,
+                // The .well-known signed metadata was verified to a trusted issuer anchor ⇒ a registered issuer.
+                issuerRegistered = metadata.signedMetadataVerified,
             )
         }.getOrNull()
     }

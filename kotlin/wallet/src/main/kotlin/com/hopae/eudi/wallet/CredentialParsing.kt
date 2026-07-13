@@ -47,7 +47,7 @@ internal fun CredentialEnvelope.toCredential(): Credential = Credential(
     id = id,
     format = format,
     createdAt = createdAt,
-    issuer = metadata?.let { IssuerInfo(it.issuerUrl, it.issuerDisplayName, it.issuerTrusted) },
+    issuer = metadata?.let { IssuerInfo(it.issuerUrl, it.issuerDisplayName, it.issuerTrusted, it.issuerRegistered) },
     display = metadata?.let { CredentialDisplay(it.displayName, it.logoUri, it.backgroundColor) },
     configurationId = metadata?.configurationId,
     lifecycle = when (val lc = lifecycle) {

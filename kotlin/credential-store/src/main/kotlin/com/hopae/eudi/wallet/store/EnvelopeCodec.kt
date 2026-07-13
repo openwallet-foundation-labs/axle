@@ -89,6 +89,7 @@ object EnvelopeCodec {
                     m.logoUri?.let { put(4L, Cbor.Text(it)) }
                     m.backgroundColor?.let { put(5L, Cbor.Text(it)) }
                     m.issuerTrusted?.let { put(6L, Cbor.Bool(it)) }
+                    m.issuerRegistered?.let { put(7L, Cbor.Bool(it)) }
                 })
             }
         }
@@ -144,6 +145,7 @@ object EnvelopeCodec {
                 logoUri = (m.get(4L) as? Cbor.Text)?.value,
                 backgroundColor = (m.get(5L) as? Cbor.Text)?.value,
                 issuerTrusted = (m.get(6L) as? Cbor.Bool)?.value,
+                issuerRegistered = (m.get(7L) as? Cbor.Bool)?.value,
             )
         }
         return CredentialEnvelope(

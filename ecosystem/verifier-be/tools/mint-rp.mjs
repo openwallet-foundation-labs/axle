@@ -159,8 +159,9 @@ async function createRelyingParty(token) {
   const dto = {
     legalName: 'Hopae Demo Verifier',
     tradeName: 'Hopae Demo Verifier',
-    // organizationIdentifier of the WRPAC and the WRPRC `sub` are both taken from identifier[0].value.
-    identifier: [{ type: 'LEI', value: 'HOPAE-DEMO-VERIFIER-LU-01' }],
+    // organizationIdentifier of the WRPAC and the WRPRC `sub` are both taken from identifier[0].
+    // ETSI TS 119 475 B.2.5: the Identifier object member is `identifier` (not `value`).
+    identifier: [{ type: 'LEI', identifier: 'HOPAE-DEMO-VERIFIER-LU-01' }],
     infoURI: [INFO_URI],
     email: EMAIL,
     phone: '+352208000000',
@@ -182,7 +183,7 @@ async function createRelyingParty(token) {
     intendedUse: [
       {
         purpose: [{ lang: 'en', content: 'Age verification' }],
-        privacyPolicy: [{ type: 'http://data.europa.eu/eudi/policy/privacy-policy', uri: PRIVACY_URI }],
+        privacyPolicy: [{ type: 'http://data.europa.eu/eudi/policy/privacy-policy', policyURI: PRIVACY_URI }],
         credential: [
           {
             format: 'mso_mdoc',
@@ -212,16 +213,16 @@ async function createRelyingParty(token) {
  */
 function buildRegistrarDataset(rp) {
   const iu = rp.intendedUse?.[0] ?? {};
-  // Map the registrar identifier {type,value} to the ETSI dataset shape {type:URI, identifier}.
+  // Map the registrar identifier {type,identifier} to the ETSI dataset shape {type:URI, identifier}.
   const idTypeUri = { LEI: 'http://data.europa.eu/eudi/id/LEI', VAT: 'http://data.europa.eu/eudi/id/VATIN', NTR: 'http://data.europa.eu/eudi/id/EUID' };
   return {
-    identifier: (rp.identifier ?? []).map((i) => ({ type: idTypeUri[i.type] ?? i.type, identifier: i.value })),
+    identifier: (rp.identifier ?? []).map((i) => ({ type: idTypeUri[i.type] ?? i.type, identifier: i.identifier })),
     srvDescription: rp.srvDescription,
     registryURI: rp.registryURI,
     intendedUseIdentifier: iu.intendedUseIdentifier,
     purpose: iu.purpose,
     // 472-2 §5.3.2 CDDL: `policyURI` is a bare URI string (tstr), not an object array.
-    policyURI: iu.privacyPolicy?.[0]?.uri,
+    policyURI: iu.privacyPolicy?.[0]?.policyURI,
     credential: iu.credential,
   };
 }

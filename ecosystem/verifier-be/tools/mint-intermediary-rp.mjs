@@ -180,7 +180,7 @@ async function createIntermediary(token) {
     legalName: 'Hopae Demo Intermediary',
     tradeName: 'Hopae Demo Intermediary',
     // identifier[0].value -> WRPRC intermediary.sub / act.sub on the mediated RP's registration cert.
-    identifier: [{ type: 'LEI', value: INTERMEDIARY_IDENTIFIER }],
+    identifier: [{ type: 'LEI', identifier: INTERMEDIARY_IDENTIFIER }],
     infoURI: [INTERMEDIARY_ORIGIN],
     email: EMAIL,
     phone: '+352208000001',
@@ -216,7 +216,7 @@ async function createMediatedRP(token, intermediaryId) {
     tradeName: 'Hopae Demo Mediated RP',
     // identifier[0].value -> the mediated RP's WRPAC organizationIdentifier AND its WRPRC `sub`
     // (both come from getUniqueIdentifier(rp)); this is the binding the wallet's WRPRCVerifier checks.
-    identifier: [{ type: 'LEI', value: MEDIATED_IDENTIFIER }],
+    identifier: [{ type: 'LEI', identifier: MEDIATED_IDENTIFIER }],
     infoURI: [INFO_URI],
     email: EMAIL,
     phone: '+352208000000',
@@ -237,7 +237,7 @@ async function createMediatedRP(token, intermediaryId) {
     intendedUse: [
       {
         purpose: [{ lang: 'en', content: 'Age verification' }],
-        privacyPolicy: [{ type: 'url', uri: PRIVACY_URI }],
+        privacyPolicy: [{ type: 'url', policyURI: PRIVACY_URI }],
         credential: [],
       },
     ],

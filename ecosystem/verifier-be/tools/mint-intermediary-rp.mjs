@@ -15,10 +15,10 @@
  *
  * IDENTIFIER BINDING (verified against the registrar source — registration_cert.service.ts /
  * access_cert.service.ts / relying_party.service.getUniqueIdentifier):
- *   • The mediated RP's WRPAC `organizationIdentifier` == the mediated RP's identifier[0].value.
- *   • The mediated RP's WRPRC `sub`                     == the mediated RP's identifier[0].value.
+ *   • The mediated RP's WRPAC `organizationIdentifier` == the mediated RP's identifier[0].identifier.
+ *   • The mediated RP's WRPRC `sub`                     == the mediated RP's identifier[0].identifier.
  *     → these two are equal, which is exactly the binding the wallet's WRPRCVerifier checks.
- *   • The WRPRC `intermediary.sub` and `act.sub`        == the INTERMEDIARY's identifier[0].value.
+ *   • The WRPRC `intermediary.sub` and `act.sub`        == the INTERMEDIARY's identifier[0].identifier.
  *   The intermediary itself is NEVER issued a WRPRC (Table 7 NOTE 4 — the registrar rejects it); it
  *   only lends its identity to the mediated RP's WRPRC.
  *
@@ -172,14 +172,14 @@ async function authenticate() {
 
 /**
  * Register the demo intermediary WRP. The controller forces `isIntermediary = true`. The intermediary
- * is never issued a WRPRC; it only contributes its identifier[0].value + tradeName to the mediated RP's
+ * is never issued a WRPRC; it only contributes its identifier[0].identifier + tradeName to the mediated RP's
  * WRPRC (as intermediary.sub / act.sub / intermediary.sname). Returns the full WalletRelyingParty.
  */
 async function createIntermediary(token) {
   const dto = {
     legalName: 'Hopae Demo Intermediary',
     tradeName: 'Hopae Demo Intermediary',
-    // identifier[0].value -> WRPRC intermediary.sub / act.sub on the mediated RP's registration cert.
+    // identifier[0].identifier -> WRPRC intermediary.sub / act.sub on the mediated RP's registration cert.
     identifier: [{ type: 'LEI', identifier: INTERMEDIARY_IDENTIFIER }],
     infoURI: [INTERMEDIARY_ORIGIN],
     email: EMAIL,
@@ -214,7 +214,7 @@ async function createMediatedRP(token, intermediaryId) {
   const dto = {
     legalName: 'Hopae Demo Mediated RP',
     tradeName: 'Hopae Demo Mediated RP',
-    // identifier[0].value -> the mediated RP's WRPAC organizationIdentifier AND its WRPRC `sub`
+    // identifier[0].identifier -> the mediated RP's WRPAC organizationIdentifier AND its WRPRC `sub`
     // (both come from getUniqueIdentifier(rp)); this is the binding the wallet's WRPRCVerifier checks.
     identifier: [{ type: 'LEI', identifier: MEDIATED_IDENTIFIER }],
     infoURI: [INFO_URI],
@@ -257,7 +257,7 @@ async function createMediatedRP(token, intermediaryId) {
  * Generate the EC P-256 keypair locally, hand the *public* key to the registrar, and get back the signed
  * WRPAC leaf certificate for the MEDIATED RP. The private key stays here. There is no mediated-RP access
  * -cert route on the intermediary controllers, so we use the ordinary `POST /portal/wrp/:rpId/access-certs`
- * with the mediated RP's id — its subject.organizationIdentifier is the mediated RP's identifier[0].value.
+ * with the mediated RP's id — its subject.organizationIdentifier is the mediated RP's identifier[0].identifier.
  * `dns` only adds a SAN dNSName for OpenID4VP `x509_san_dns`; HAIP `x509_hash` needs no SAN.
  */
 async function issueWrpac(token, rpId) {
@@ -282,7 +282,7 @@ async function issueWrpac(token, rpId) {
  * Mint the mediated RP's WRPRC (`rc-wrp+jwt` compact JWS) through the INTERMEDIARY route. Because we go
  * via `/portal/intermediary/:id/mediated-rps/:rpId/registration-certs`, the service sets
  * `dto.intermediary = <intermediaryId>` server-side, which makes the payload carry
- * `intermediary: {sub, sname}` and `act: {sub}` derived from the intermediary's identifier[0].value.
+ * `intermediary: {sub, sname}` and `act: {sub}` derived from the intermediary's identifier[0].identifier.
  * Response is { id, jwt, intendedUse }; the compact JWS string we want is `.jwt`.
  */
 async function issueWrprc(token, intermediaryId, rpId) {

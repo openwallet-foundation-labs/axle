@@ -40,12 +40,13 @@ export class RequestBuilderService {
     this.registrarDataset = raw
       ? (JSON.parse(raw) as Record<string, unknown>)
       : {
-          // Minimal dataset (ETSI TS 119 472-2 REQ-RO-04..12) — override via VERIFIER_REGISTRAR_DATASET.
-          identifier: [{ type: 'VAT', value: 'LU' }],
+          // ETSI TS 119 475 Annex B shape (REQ-RO-04..12) — override via VERIFIER_REGISTRAR_DATASET.
+          identifier: [{ type: 'http://data.europa.eu/eudi/id/VATIN', identifier: 'VATLU-HOPAE-DEMO-VERIFIER' }],
           srvDescription: [{ lang: 'en', content: 'Hopae Demo Verifier' }],
           registryURI: `${this.baseUrl}`,
+          intendedUseIdentifier: 'age-verification',
           purpose: [{ lang: 'en', content: 'Age verification' }],
-          policyURI: [{ type: 'privacy', uri: `${this.baseUrl}/privacy` }],
+          policyURI: [{ type: 'http://data.europa.eu/eudi/policy/privacy-policy', policyURI: `${this.baseUrl}/privacy` }],
         };
   }
 
@@ -102,6 +103,10 @@ export class RequestBuilderService {
       client_id: this.keystore.clientId(rp),
       response_type: 'vp_token',
       nonce,
+      iat: Math.floor(Date.now() / 1000),
+      // OpenID4VP 1.0 request-object `aud` (ETSI TS 119 472-2 OIDFVP-HAIP-COMMON-REQ-RO-22): with static
+      // wallet discovery (our cross-device case) it MUST be the symbolic string "https://self-issued.me/v2".
+      aud: 'https://self-issued.me/v2',
       dcql_query: buildDcqlQuery(keys),
       verifier_info: this.verifierInfo(rp),
     };

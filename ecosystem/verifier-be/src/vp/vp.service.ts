@@ -200,11 +200,21 @@ export class VpService {
    * private key. A plaintext `vp_token` (unencrypted) is accepted as a fallback.
    */
   private async decryptVpToken(session: PresentationSession, body: Record<string, unknown>): Promise<VpToken> {
-    if (typeof body.response === 'string' && session.encPrivateJwk) {
-      const dec = await decryptResponse(body.response, session.encPrivateJwk as JWK);
-      return this.parseVpToken(dec.vp_token);
+    // HAIP mandates encrypted responses — no plaintext `vp_token` fallback.
+    if (typeof body.response !== 'string' || !session.encPrivateJwk) {
+      throw new Error('an encrypted JWE response is required (HAIP direct_post.jwt / dc_api.jwt)');
     }
-    return this.parseVpToken(body.vp_token);
+    const dec = await decryptResponse(body.response, session.encPrivateJwk as JWK);
+    // Bind the JWE `apv` to the request nonce, and the response `state` to the transaction (direct_post.jwt
+    // carries state; dc_api.jwt omits it).
+    const expectedApv = Buffer.from(session.nonce, 'utf8').toString('base64url');
+    if (dec.apv !== undefined && dec.apv !== expectedApv) {
+      throw new Error('JWE apv does not match the request nonce');
+    }
+    if (dec.state !== undefined && dec.state !== session.id) {
+      throw new Error(`response state '${String(dec.state)}' does not match the transaction`);
+    }
+    return this.parseVpToken(dec.vp_token);
   }
 
   /** The enc key's RFC 7638 thumbprint bytes, for the mdoc OpenID4VP SessionTranscript (encrypted responses). */

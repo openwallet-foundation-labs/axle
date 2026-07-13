@@ -32,9 +32,17 @@ export async function encJwkThumbprintBytes(publicJwk: JWK): Promise<Uint8Array>
   return new Uint8Array(Buffer.from(b64, 'base64url'));
 }
 
-/** Decrypts a compact ECDH-ES JWE response with the session's private JWK → the Authorization Response JSON. */
-export async function decryptResponse(jwe: string, privateJwk: JWK): Promise<{ vp_token?: unknown; state?: unknown }> {
+/**
+ * Decrypts a compact ECDH-ES JWE response with the session's private JWK → the Authorization Response JSON.
+ * Returns the JWE `apv` header too so the caller can bind it to the request nonce (defense-in-depth beyond
+ * the ECDH-ES Concat-KDF, which already mixes `apv` into the CEK).
+ */
+export async function decryptResponse(
+  jwe: string,
+  privateJwk: JWK,
+): Promise<{ vp_token?: unknown; state?: unknown; apv?: string }> {
   const key = await importJWK(privateJwk, 'ECDH-ES');
-  const { plaintext } = await compactDecrypt(jwe, key);
-  return JSON.parse(Buffer.from(plaintext).toString('utf8')) as { vp_token?: unknown; state?: unknown };
+  const { plaintext, protectedHeader } = await compactDecrypt(jwe, key);
+  const payload = JSON.parse(Buffer.from(plaintext).toString('utf8')) as { vp_token?: unknown; state?: unknown };
+  return { ...payload, apv: typeof protectedHeader.apv === 'string' ? protectedHeader.apv : undefined };
 }

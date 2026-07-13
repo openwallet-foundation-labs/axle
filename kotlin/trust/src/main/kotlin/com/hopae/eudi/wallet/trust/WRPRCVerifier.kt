@@ -6,6 +6,7 @@ import com.hopae.eudi.wallet.sdjwt.Jws
 import com.hopae.eudi.wallet.sdjwt.JwtTimeValidator
 import com.hopae.eudi.wallet.spi.SigningAlgorithm
 import com.hopae.eudi.wallet.spi.coseAlgorithm
+import com.hopae.eudi.wallet.vp.RegisteredCredential
 
 /** A localized string (BCP-47 `lang` + `value`) as used in WRPRC `purpose` / `srv_description`. */
 data class LocalizedText(val lang: String, val value: String)
@@ -31,6 +32,12 @@ data class VerifiedWRPRC(
     val purpose: List<LocalizedText>,
     /** The intermediary the RP operates through, when the request is intermediated (else null). */
     val intermediary: Intermediary?,
+    /**
+     * The `credentials` the RP is registered to request (ETSI TS 119 475 §5.2.4) — each with its format,
+     * type meta and claim paths. Registrar-attested, so it is the authoritative input to the attribute-scope
+     * check (RPRC_21). Empty when the WRPRC declares no `credentials`.
+     */
+    val registeredCredentials: List<RegisteredCredential>,
     /** The full decoded payload, for any claim not surfaced above. */
     val claims: JsonValue.Obj,
     /** The raw `status` claim (`{ status_list: { idx, uri } }`) to feed a Token Status List check. */
@@ -137,7 +144,10 @@ class WRPRCVerifier(
             LocalizedText(lang, value)
         } ?: emptyList()
 
-        return VerifiedWRPRC(subject, entitlements, purpose, intermediary, payload, payload["status"])
+        // `credentials` (§5.2.4) — the attestation types + claim paths the RP is registered to request.
+        val registeredCredentials = RegisteredCredential.listFromJson(payload["credentials"] as? JsonValue.Arr)
+
+        return VerifiedWRPRC(subject, entitlements, purpose, intermediary, registeredCredentials, payload, payload["status"])
     }
 
     companion object {

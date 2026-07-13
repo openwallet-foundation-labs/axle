@@ -31,6 +31,18 @@ class RegistrationInfo(
     val intermediaryName: String?,
     /** The raw WRPRC `status` claim (`{ status_list: { idx, uri } }`), for the wallet-layer status check. */
     val status: JsonValue?,
+    /**
+     * True iff a registrar-issued WRPRC validated + bound to the WRPAC (authoritative, registrar-sealed).
+     * False when only the self-declared `registrar_dataset` backs this registration (no WRPRC present).
+     */
+    val attested: Boolean = false,
+    /** The self-declared `registrar_dataset` (REQ-RO-02), when the request carried one. */
+    val dataset: RegistrarDataset? = null,
+    /**
+     * The credentials/claims the RP is registered to request — from the WRPRC when [attested], else the
+     * self-declared dataset — used for the attribute-scope check (RPRC_21).
+     */
+    val registeredCredentials: List<RegisteredCredential> = emptyList(),
 )
 
 /** What the wallet shows on the consent screen about the verifier and its trust status. */

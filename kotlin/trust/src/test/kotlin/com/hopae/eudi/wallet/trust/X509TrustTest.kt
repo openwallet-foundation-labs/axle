@@ -5,6 +5,7 @@ import com.hopae.eudi.wallet.sdjwt.Base64Url
 import com.hopae.eudi.wallet.sdjwt.JsonValue
 import com.hopae.eudi.wallet.sdjwt.Jws
 import com.hopae.eudi.wallet.sdjwt.JwsSigner
+import com.hopae.eudi.wallet.sdjwt.JwtTimeValidator
 import com.hopae.eudi.wallet.spi.SigningAlgorithm
 import com.hopae.eudi.wallet.vp.VpException
 import kotlinx.coroutines.runBlocking
@@ -140,6 +141,63 @@ class X509TrustTest {
         assertFailsWith<VpException.VerifierNotTrusted> {
             X509RequestVerifier(validator).verifyRequestObject(tampered, "x509_san_dns:verifier.example.com", "x509_san_dns")
         }
+    }
+
+    // ---- verifier_info: registrar_dataset (ETSI TS 119 472-2 §6.3) ----
+
+    private fun registrarVerifier() =
+        WRPRCVerifier(X509ChainValidator(TrustAnchors(listOf(TestCerts.makeCa("Registrar CA").certificate)), at = validAt),
+            JwtTimeValidator(now = { validAt().toInstant() }))
+
+    /** A `registrar_dataset` (self-declared, no WRPRC) is parsed and surfaced, attested = false. */
+    @Test
+    fun verifierInfoDatasetParsed() = runBlocking {
+        val ca = TestCerts.makeCa()
+        val leaf = TestCerts.makeLeaf(ca, "Verifier", dnsName = "verifier.example.com")
+        val validator = X509ChainValidator(TrustAnchors(listOf(ca.certificate)), at = validAt)
+        val payload = """{"nonce":"n","verifier_info":[{"format":"registrar_dataset","data":{""" +
+            """"identifier":[{"type":"LEI","identifier":"HOPAE-TEST-RP"}],""" +
+            """"registryURI":"https://registrar.example/registrar","policyURI":"https://rp.example/privacy",""" +
+            """"intendedUseIdentifier":"use-1","srvDescription":[{"lang":"en","content":"Test RP"}],""" +
+            """"purpose":[{"lang":"en","content":"Age check"}],""" +
+            """"credential":[{"format":"mso_mdoc","meta":{"doctype_value":"org.iso.18013.5.1.mDL"},"claim":[{"path":["org.iso.18013.5.1","given_name"]}]}]}}]}"""
+        val jws = signedRequest(leaf, payload)
+        val info = X509RequestVerifier(validator, registrarVerifier())
+            .verifyRequestObject(jws, "x509_san_dns:verifier.example.com", "x509_san_dns")
+        val reg = info.registration!!
+        assertEquals(false, reg.attested, "a dataset-only registration is not registrar-attested")
+        assertEquals("HOPAE-TEST-RP", reg.dataset?.identifier)
+        assertEquals("https://registrar.example/registrar", reg.dataset?.registryURI)
+        assertEquals("https://rp.example/privacy", reg.dataset?.policyURI)
+        assertEquals(1, reg.registeredCredentials.size)
+        assertEquals(listOf(listOf("org.iso.18013.5.1", "given_name")), reg.registeredCredentials.first().claims)
+    }
+
+    /** Presence matrix (§2): a `registration_cert` without the mandatory `registrar_dataset` is malformed. */
+    @Test
+    fun registrationCertWithoutDatasetRejected(): Unit = runBlocking {
+        val ca = TestCerts.makeCa()
+        val leaf = TestCerts.makeLeaf(ca, "Verifier", dnsName = "verifier.example.com")
+        val validator = X509ChainValidator(TrustAnchors(listOf(ca.certificate)), at = validAt)
+        val fakeCert = Base64Url.encode("not-a-real-wrprc".encodeToByteArray())
+        val payload = """{"nonce":"n","verifier_info":[{"format":"registration_cert","data":"$fakeCert"}]}"""
+        val jws = signedRequest(leaf, payload)
+        assertFailsWith<VpException.InvalidRequest> {
+            X509RequestVerifier(validator, registrarVerifier())
+                .verifyRequestObject(jws, "x509_san_dns:verifier.example.com", "x509_san_dns")
+        }
+    }
+
+    /** No `verifier_info` at all → registration stays null even with registrar trust configured (interop). */
+    @Test
+    fun verifierInfoAbsentRegistrationNull() = runBlocking {
+        val ca = TestCerts.makeCa()
+        val leaf = TestCerts.makeLeaf(ca, "Verifier", dnsName = "verifier.example.com")
+        val validator = X509ChainValidator(TrustAnchors(listOf(ca.certificate)), at = validAt)
+        val jws = signedRequest(leaf, """{"nonce":"n"}""")
+        val info = X509RequestVerifier(validator, registrarVerifier())
+            .verifyRequestObject(jws, "x509_san_dns:verifier.example.com", "x509_san_dns")
+        assertEquals(null, info.registration)
     }
 
     // ---- issuer key resolution ----

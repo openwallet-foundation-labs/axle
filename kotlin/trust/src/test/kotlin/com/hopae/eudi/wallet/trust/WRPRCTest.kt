@@ -39,6 +39,8 @@ class WRPRCTest {
         assertEquals("Age verification", result.purpose.first().value)
         assertNotNull(result.status, "WRPRC should carry a status-list reference")
         assertNull(result.intermediary, "a direct (non-intermediated) WRPRC has no intermediary")
+        assertEquals(1, result.registeredCredentials.size, "the WRPRC declares its registered credentials")
+        assertEquals("dc+sd-jwt", result.registeredCredentials.first().format)
     }
 
     /**

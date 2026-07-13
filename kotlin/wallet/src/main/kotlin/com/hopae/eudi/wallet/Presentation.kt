@@ -52,6 +52,22 @@ class VerifierRegistration(
      * is refused before the consent screen, so a surfaced registration is always valid or unchecked.
      */
     val statusValid: Boolean?,
+    /**
+     * True iff a registrar-issued WRPRC attested this registration (authoritative, registrar-sealed). False
+     * when only the RP's self-declared `registrar_dataset` backs it (no WRPRC) — treat those fields as
+     * unverified unless a registrar TS5 lookup confirmed them.
+     */
+    val attested: Boolean = false,
+    /** The RP's registry base URI (`registrar_dataset.registryURI`), for the transaction log / TS5 lookup. */
+    val registryURI: String? = null,
+    /** The RP's privacy-policy URL (`registrar_dataset.policyURI`), for the consent screen. */
+    val policyURI: String? = null,
+    /**
+     * Attribute-scope check (ETSI TS 119 475 RPRC_21): the requested claim paths the RP is **not** registered
+     * to request. Empty = every requested attribute is within the registration; surfaced to the User so an
+     * over-asking verifier is visible at approval. Each entry is the claim path as string segments.
+     */
+    val unregisteredClaims: List<List<String>> = emptyList(),
 )
 
 /** One DCQL query with the stored credentials that can answer it. */

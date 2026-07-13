@@ -28,15 +28,28 @@ public struct RegistrationInfo {
     public let intermediaryName: String?
     /// The raw WRPRC `status` claim (`{ status_list: { idx, uri } }`), for the wallet-layer status check.
     public let status: JsonValue?
+    /// True iff a registrar-issued WRPRC validated + bound to the WRPAC (authoritative, registrar-sealed).
+    /// False when only the self-declared `registrar_dataset` backs this registration (no WRPRC present).
+    public let attested: Bool
+    /// The self-declared `registrar_dataset` (REQ-RO-02), when the request carried one.
+    public let dataset: RegistrarDataset?
+    /// The credentials/claims the RP is registered to request — from the WRPRC when `attested`, else the
+    /// self-declared dataset — used for the attribute-scope check (RPRC_21).
+    public let registeredCredentials: [RegisteredCredential]
 
     public init(subject: String, entitlements: [String], purpose: [RegistrationLocalizedText],
-                intermediarySub: String?, intermediaryName: String?, status: JsonValue?) {
+                intermediarySub: String?, intermediaryName: String?, status: JsonValue?,
+                attested: Bool = false, dataset: RegistrarDataset? = nil,
+                registeredCredentials: [RegisteredCredential] = []) {
         self.subject = subject
         self.entitlements = entitlements
         self.purpose = purpose
         self.intermediarySub = intermediarySub
         self.intermediaryName = intermediaryName
         self.status = status
+        self.attested = attested
+        self.dataset = dataset
+        self.registeredCredentials = registeredCredentials
     }
 }
 

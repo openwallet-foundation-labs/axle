@@ -49,15 +49,33 @@ public struct VerifierRegistration {
     /// Token Status List result: true = valid, false = revoked/suspended, nil = not checked. A revoked WRPRC
     /// is refused before the consent screen, so a surfaced registration is always valid or unchecked.
     public let statusValid: Bool?
+    /// True iff a registrar-issued WRPRC attested this registration (authoritative, registrar-sealed). False
+    /// when only the RP's self-declared `registrar_dataset` backs it (no WRPRC) — treat those fields as
+    /// unverified unless a registrar TS5 lookup confirmed them.
+    public let attested: Bool
+    /// The RP's registry base URI (`registrar_dataset.registryURI`), for the transaction log / TS5 lookup.
+    public let registryURI: String?
+    /// The RP's privacy-policy URL (`registrar_dataset.policyURI`), for the consent screen.
+    public let policyURI: String?
+    /// Attribute-scope check (ETSI TS 119 475 RPRC_21): the requested claim paths the RP is **not** registered
+    /// to request. Empty = every requested attribute is within the registration; surfaced to the User so an
+    /// over-asking verifier is visible at approval. Each entry is the claim path as string segments.
+    public let unregisteredClaims: [[String]]
 
     public init(subject: String, entitlements: [String], purpose: [PurposeText],
-                intermediarySub: String?, intermediaryName: String?, statusValid: Bool?) {
+                intermediarySub: String?, intermediaryName: String?, statusValid: Bool?,
+                attested: Bool = false, registryURI: String? = nil, policyURI: String? = nil,
+                unregisteredClaims: [[String]] = []) {
         self.subject = subject
         self.entitlements = entitlements
         self.purpose = purpose
         self.intermediarySub = intermediarySub
         self.intermediaryName = intermediaryName
         self.statusValid = statusValid
+        self.attested = attested
+        self.registryURI = registryURI
+        self.policyURI = policyURI
+        self.unregisteredClaims = unregisteredClaims
     }
 }
 

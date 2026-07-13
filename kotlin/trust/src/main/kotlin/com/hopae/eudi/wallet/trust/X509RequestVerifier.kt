@@ -4,6 +4,7 @@ import com.hopae.eudi.wallet.sdjwt.Base64Url
 import com.hopae.eudi.wallet.sdjwt.Jws
 import com.hopae.eudi.wallet.sdjwt.JsonValue
 import com.hopae.eudi.wallet.sdjwt.signingAlgorithmFromJwsName
+import com.hopae.eudi.wallet.vp.RegistrarDataset
 import com.hopae.eudi.wallet.vp.RegistrationInfo
 import com.hopae.eudi.wallet.vp.RegistrationLocalizedText
 import com.hopae.eudi.wallet.vp.RequestTrustVerifier
@@ -51,39 +52,71 @@ class X509RequestVerifier(
             else -> throw VpException.Unsupported("client_id scheme '$scheme' for x509 verification")
         }
 
-        // ETSI TS 119 475 / TS 119 472-2: verify the RP registration cert (WRPRC), when configured and
-        // present. A present-but-invalid registration_cert rejects the request; an absent one leaves
-        // registration null (interop with verifiers that don't yet carry a WRPRC).
-        val wrprc = extractRegistrationCert(jws)
-        val registration = if (wrprcVerifier != null && wrprc != null) {
-            val verified = wrprcVerifier.verify(wrprc, x5c.first())
-            RegistrationInfo(
-                subject = verified.subject,
-                entitlements = verified.entitlements,
-                purpose = verified.purpose.map { RegistrationLocalizedText(it.lang, it.value) },
-                intermediarySub = verified.intermediary?.sub,
-                intermediaryName = verified.intermediary?.name,
-                status = verified.status,
+        // ETSI TS 119 472-2 §6.3: the RP puts its Registrar data in the request's `verifier_info` array —
+        // a `registrar_dataset` (self-declared, mandatory REQ-RO-02) and, if it holds one, a `registration_cert`
+        // (the registrar-sealed WRPRC). We build a registration only when registrar trust is configured
+        // (`wrprcVerifier != null`); an entirely absent `verifier_info` leaves registration null (interop with
+        // verifiers that carry no Registrar data).
+        val (dataset, wrprc) = extractVerifierInfo(jws)
+        val registration = when {
+            wrprcVerifier == null -> null
+            // Presence matrix (§2): a WRPRC without the mandatory dataset is malformed.
+            wrprc != null && dataset == null ->
+                throw VpException.InvalidRequest("verifier_info carries a registration_cert but no registrar_dataset (REQ-RO-02)")
+            wrprc != null -> {
+                // Both present → the WRPRC wins (registrar-attested, offline-verifiable); dataset is for display/log.
+                val verified = wrprcVerifier.verify(wrprc, x5c.first())
+                RegistrationInfo(
+                    subject = verified.subject,
+                    entitlements = verified.entitlements,
+                    purpose = verified.purpose.map { RegistrationLocalizedText(it.lang, it.value) },
+                    intermediarySub = verified.intermediary?.sub,
+                    intermediaryName = verified.intermediary?.name,
+                    status = verified.status,
+                    attested = true,
+                    dataset = dataset,
+                    registeredCredentials = verified.registeredCredentials,
+                )
+            }
+            // Dataset only → self-declared registration (not registrar-attested). The wallet layer may upgrade
+            // it via the registrar's TS5 API when the User opts in (RPRC_16/18); until then `attested = false`.
+            dataset != null -> RegistrationInfo(
+                subject = dataset.identifier ?: "",
+                entitlements = emptyList(),
+                purpose = dataset.purpose.map { RegistrationLocalizedText(it.lang, it.value) },
+                intermediarySub = null,
+                intermediaryName = null,
+                status = null,
+                attested = false,
+                dataset = dataset,
+                registeredCredentials = dataset.credentials,
             )
-        } else null
+            else -> null
+        }
 
         return VerifierInfo(clientId, scheme, x5c, X509Support.commonName(leaf), trusted = true, registration = registration)
     }
 
     /**
-     * Pulls the WRPRC (a `rc-wrp+jwt` compact JWS) out of the request object's `verifier_info` array: the
-     * element whose `format` is `"registration_cert"` carries it as `base64url(serialized WRPRC)`
-     * (ETSI TS 119 472-2 §6.3, REQ-RO-13/15). Returns null when no such element is present or decodable.
+     * Reads the request object's `verifier_info` array (ETSI TS 119 472-2 §6.3): the self-declared
+     * `registrar_dataset` element and the optional `registration_cert` (the WRPRC as `base64url(serialized
+     * WRPRC)`, REQ-RO-13/15). Returns (dataset, wrprcCompactJws); either is null when its element is absent
+     * or undecodable, and both are null when there is no `verifier_info` at all.
      */
-    private fun extractRegistrationCert(jws: Jws): String? {
-        val claims = JsonValue.parse(jws.payloadBytes.decodeToString()) as? JsonValue.Obj ?: return null
-        val infos = (claims["verifier_info"] as? JsonValue.Arr)?.items ?: return null
+    private fun extractVerifierInfo(jws: Jws): Pair<RegistrarDataset?, String?> {
+        val claims = JsonValue.parse(jws.payloadBytes.decodeToString()) as? JsonValue.Obj ?: return null to null
+        val infos = (claims["verifier_info"] as? JsonValue.Arr)?.items ?: return null to null
+        var dataset: RegistrarDataset? = null
+        var wrprc: String? = null
         for (info in infos) {
             val obj = info as? JsonValue.Obj ?: continue
-            if ((obj["format"] as? JsonValue.Str)?.value != "registration_cert") continue
-            val data = (obj["data"] as? JsonValue.Str)?.value ?: continue
-            return runCatching { Base64Url.decode(data).decodeToString() }.getOrNull()
+            when ((obj["format"] as? JsonValue.Str)?.value) {
+                "registrar_dataset" -> (obj["data"] as? JsonValue.Obj)?.let { dataset = RegistrarDataset.fromData(it) }
+                "registration_cert" -> (obj["data"] as? JsonValue.Str)?.value?.let {
+                    wrprc = runCatching { Base64Url.decode(it).decodeToString() }.getOrNull()
+                }
+            }
         }
-        return null
+        return dataset to wrprc
     }
 }

@@ -112,13 +112,19 @@ public struct PresentationService {
                 multiple: candidates.first?.query.multiple ?? false)
         }
         let v = resolved.verifier
-        let registration = v.registration.map { r in
-            VerifierRegistration(
+        let registration = v.registration.map { r -> VerifierRegistration in
+            // RPRC_21 attribute-scope check: which requested attributes fall outside what the RP registered.
+            let unregistered = RegistrationScope.unregistered(resolved.dcqlQuery, registered: r.registeredCredentials)
+            return VerifierRegistration(
                 subject: r.subject, entitlements: r.entitlements,
                 purpose: r.purpose.map { PurposeText(lang: $0.lang, value: $0.value) },
                 intermediarySub: r.intermediarySub, intermediaryName: r.intermediaryName,
                 // Reaching here means any revoked WRPRC was already refused; validated iff a status client ran.
-                statusValid: (r.status != nil && registrarStatusClient != nil) ? true : nil)
+                statusValid: (r.status != nil && registrarStatusClient != nil) ? true : nil,
+                attested: r.attested,
+                registryURI: r.dataset?.registryURI,
+                policyURI: r.dataset?.policyURI,
+                unregisteredClaims: unregistered.map { $0.path })
         }
         return PresentationRequest(
             verifier: VerifierInfo(clientId: v.clientId, clientIdScheme: v.clientIdScheme, commonName: v.commonName,

@@ -43,6 +43,8 @@ final class WRPRCTests: XCTestCase {
         XCTAssertEqual(result.purpose.first?.value, "Age verification")
         XCTAssertNotNil(result.status, "WRPRC should carry a status-list reference")
         XCTAssertNil(result.intermediary, "a direct (non-intermediated) WRPRC has no intermediary")
+        XCTAssertEqual(1, result.registeredCredentials.count, "the WRPRC declares its registered credentials")
+        XCTAssertEqual("dc+sd-jwt", result.registeredCredentials.first?.format)
     }
 
     /// An intermediated WRPRC: the request is signed by the **intermediary's** WRPAC

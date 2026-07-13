@@ -30,6 +30,7 @@ import com.hopae.eudi.wallet.vp.HeldMdoc
 import com.hopae.eudi.wallet.vp.HeldSdJwtVc
 import com.hopae.eudi.wallet.vp.Openid4VpClient
 import com.hopae.eudi.wallet.vp.PresentableCredential
+import com.hopae.eudi.wallet.vp.RegistrationScope
 import com.hopae.eudi.wallet.vp.ResolvedRequest
 import com.hopae.eudi.wallet.vp.VpErrorCode
 import com.hopae.eudi.wallet.vp.VpException
@@ -139,6 +140,8 @@ class PresentationService internal constructor(
         }
         val v = resolved.verifier
         val registration = v.registration?.let { r ->
+            // RPRC_21 attribute-scope check: which requested attributes fall outside what the RP registered.
+            val unregistered = RegistrationScope.unregistered(resolved.dcqlQuery, r.registeredCredentials)
             VerifierRegistration(
                 subject = r.subject,
                 entitlements = r.entitlements,
@@ -147,6 +150,10 @@ class PresentationService internal constructor(
                 intermediaryName = r.intermediaryName,
                 // Reaching here means any revoked WRPRC was already refused; validated iff a status client ran.
                 statusValid = if (r.status != null && registrarStatusClient != null) true else null,
+                attested = r.attested,
+                registryURI = r.dataset?.registryURI,
+                policyURI = r.dataset?.policyURI,
+                unregisteredClaims = unregistered.map { it.path },
             )
         }
         return PresentationRequest(

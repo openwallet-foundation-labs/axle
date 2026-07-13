@@ -168,6 +168,58 @@ final class TrustTests: XCTestCase {
         } catch {}
     }
 
+    // ---- verifier_info: registrar_dataset (ETSI TS 119 472-2 §6.3) ----
+
+    private func registrarVerifier() throws -> WRPRCVerifier {
+        let ca = try makeCa("Registrar CA")
+        return WRPRCVerifier(validator: X509ChainValidator(anchors: TrustAnchors(roots: [ca.certificate]), validationTime: validAt),
+                             time: JwtTimeValidator(now: { self.validAt }))
+    }
+
+    /// A `registrar_dataset` (self-declared, no WRPRC) is parsed and surfaced, attested = false.
+    func testVerifierInfoDatasetParsed() async throws {
+        let ca = try makeCa()
+        let leaf = try makeLeaf(ca, cn: "Verifier", dns: "verifier.example.com")
+        let validator = X509ChainValidator(anchors: TrustAnchors(roots: [ca.certificate]), validationTime: validAt)
+        let payload = #"{"nonce":"n","verifier_info":[{"format":"registrar_dataset","data":{"identifier":[{"type":"LEI","identifier":"HOPAE-TEST-RP"}],"registryURI":"https://registrar.example/registrar","policyURI":"https://rp.example/privacy","intendedUseIdentifier":"use-1","srvDescription":[{"lang":"en","content":"Test RP"}],"purpose":[{"lang":"en","content":"Age check"}],"credential":[{"format":"mso_mdoc","meta":{"doctype_value":"org.iso.18013.5.1.mDL"},"claim":[{"path":["org.iso.18013.5.1","given_name"]}]}]}}]}"#
+        let jws = try await signedRequest(leaf, payload)
+        let info = try await X509RequestVerifier(validator: validator, wrprcVerifier: try registrarVerifier())
+            .verifyRequestObject(jws, clientId: "x509_san_dns:verifier.example.com", scheme: "x509_san_dns")
+        let reg = try XCTUnwrap(info.registration)
+        XCTAssertFalse(reg.attested, "a dataset-only registration is not registrar-attested")
+        XCTAssertEqual("HOPAE-TEST-RP", reg.dataset?.identifier)
+        XCTAssertEqual("https://registrar.example/registrar", reg.dataset?.registryURI)
+        XCTAssertEqual("https://rp.example/privacy", reg.dataset?.policyURI)
+        XCTAssertEqual(1, reg.registeredCredentials.count)
+        XCTAssertEqual([["org.iso.18013.5.1", "given_name"]], reg.registeredCredentials.first?.claims)
+    }
+
+    /// Presence matrix (§2): a `registration_cert` without the mandatory `registrar_dataset` is malformed.
+    func testRegistrationCertWithoutDatasetRejected() async throws {
+        let ca = try makeCa()
+        let leaf = try makeLeaf(ca, cn: "Verifier", dns: "verifier.example.com")
+        let validator = X509ChainValidator(anchors: TrustAnchors(roots: [ca.certificate]), validationTime: validAt)
+        let fakeCert = Base64Url.encode([UInt8]("not-a-real-wrprc".utf8))
+        let payload = #"{"nonce":"n","verifier_info":[{"format":"registration_cert","data":"\#(fakeCert)"}]}"#
+        let jws = try await signedRequest(leaf, payload)
+        do {
+            _ = try await X509RequestVerifier(validator: validator, wrprcVerifier: try registrarVerifier())
+                .verifyRequestObject(jws, clientId: "x509_san_dns:verifier.example.com", scheme: "x509_san_dns")
+            XCTFail("a registration_cert without a registrar_dataset must be rejected")
+        } catch { /* VpError.invalidRequest */ }
+    }
+
+    /// No `verifier_info` at all → registration stays nil even with registrar trust configured (interop).
+    func testVerifierInfoAbsentRegistrationNil() async throws {
+        let ca = try makeCa()
+        let leaf = try makeLeaf(ca, cn: "Verifier", dns: "verifier.example.com")
+        let validator = X509ChainValidator(anchors: TrustAnchors(roots: [ca.certificate]), validationTime: validAt)
+        let jws = try await signedRequest(leaf, #"{"nonce":"n"}"#)
+        let info = try await X509RequestVerifier(validator: validator, wrprcVerifier: try registrarVerifier())
+            .verifyRequestObject(jws, clientId: "x509_san_dns:verifier.example.com", scheme: "x509_san_dns")
+        XCTAssertNil(info.registration)
+    }
+
     // ---- issuer key resolution ----
 
     func testX5cIssuerKeyResolves() async throws {

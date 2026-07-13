@@ -46,20 +46,45 @@ public struct X509RequestVerifier: RequestTrustVerifier {
 
         let chainDer = try chain.map { try X509Support.der($0) }
 
-        // ETSI TS 119 475 / TS 119 472-2: verify the RP registration cert (WRPRC), when configured and present.
-        // A present-but-invalid registration_cert rejects the request; an absent one leaves registration nil
-        // (interop with verifiers that don't yet carry a WRPRC).
+        // ETSI TS 119 472-2 §6.3: the RP puts its Registrar data in the request's `verifier_info` array —
+        // a `registrar_dataset` (self-declared, mandatory REQ-RO-02) and, if it holds one, a `registration_cert`
+        // (the registrar-sealed WRPRC). We build a registration only when registrar trust is configured; an
+        // entirely absent `verifier_info` leaves registration nil (interop with verifiers carrying no data).
         var registration: RegistrationInfo?
-        if let wrprcVerifier, let wrprc = Self.extractRegistrationCert(jws) {
-            let verified = try await wrprcVerifier.verify(wrprc, wrpacLeafDer: chainDer[0])
-            registration = RegistrationInfo(
-                subject: verified.subject,
-                entitlements: verified.entitlements,
-                purpose: verified.purpose.map { RegistrationLocalizedText(lang: $0.lang, value: $0.value) },
-                intermediarySub: verified.intermediary?.sub,
-                intermediaryName: verified.intermediary?.name,
-                status: verified.status
-            )
+        if let wrprcVerifier {
+            let (dataset, wrprc) = Self.extractVerifierInfo(jws)
+            if let wrprc, dataset == nil {
+                // Presence matrix (§2): a WRPRC without the mandatory dataset is malformed.
+                throw VpError.invalidRequest("verifier_info carries a registration_cert but no registrar_dataset (REQ-RO-02)")
+            } else if let wrprc {
+                // Both present → the WRPRC wins (registrar-attested, offline-verifiable); dataset is for display/log.
+                let verified = try await wrprcVerifier.verify(wrprc, wrpacLeafDer: chainDer[0])
+                registration = RegistrationInfo(
+                    subject: verified.subject,
+                    entitlements: verified.entitlements,
+                    purpose: verified.purpose.map { RegistrationLocalizedText(lang: $0.lang, value: $0.value) },
+                    intermediarySub: verified.intermediary?.sub,
+                    intermediaryName: verified.intermediary?.name,
+                    status: verified.status,
+                    attested: true,
+                    dataset: dataset,
+                    registeredCredentials: verified.registeredCredentials
+                )
+            } else if let dataset {
+                // Dataset only → self-declared registration (not registrar-attested). The wallet layer may upgrade
+                // it via the registrar's TS5 API when the User opts in (RPRC_16/18); until then `attested = false`.
+                registration = RegistrationInfo(
+                    subject: dataset.identifier ?? "",
+                    entitlements: [],
+                    purpose: dataset.purpose.map { RegistrationLocalizedText(lang: $0.lang, value: $0.value) },
+                    intermediarySub: nil,
+                    intermediaryName: nil,
+                    status: nil,
+                    attested: false,
+                    dataset: dataset,
+                    registeredCredentials: dataset.credentials
+                )
+            }
         }
 
         return VerifierInfo(
@@ -70,20 +95,29 @@ public struct X509RequestVerifier: RequestTrustVerifier {
         )
     }
 
-    /// Pulls the WRPRC (a `rc-wrp+jwt` compact JWS) out of the request object's `verifier_info` array: the
-    /// element whose `format` is `"registration_cert"` carries it as `base64url(serialized WRPRC)`
-    /// (ETSI TS 119 472-2 §6.3, REQ-RO-13/15). Returns nil when no such element is present or decodable.
-    static func extractRegistrationCert(_ jws: Jws) -> String? {
+    /// Reads the request object's `verifier_info` array (ETSI TS 119 472-2 §6.3): the self-declared
+    /// `registrar_dataset` element and the optional `registration_cert` (the WRPRC as `base64url(serialized
+    /// WRPRC)`, REQ-RO-13/15). Returns (dataset, wrprcCompactJws); either is nil when its element is absent
+    /// or undecodable, and both are nil when there is no `verifier_info` at all.
+    static func extractVerifierInfo(_ jws: Jws) -> (RegistrarDataset?, String?) {
         guard let text = String(bytes: jws.payloadBytes, encoding: .utf8),
               let claims = try? JsonValue.parse(text),
-              case let .arr(infos)? = claims["verifier_info"] else { return nil }
+              case let .arr(infos)? = claims["verifier_info"] else { return (nil, nil) }
+        var dataset: RegistrarDataset?
+        var wrprc: String?
         for info in infos {
-            guard case let .str(format)? = info["format"], format == "registration_cert",
-                  case let .str(data)? = info["data"] else { continue }
-            guard let bytes = try? Base64Url.decode(data),
-                  let wrprc = String(bytes: bytes, encoding: .utf8) else { return nil }
-            return wrprc
+            guard case let .str(format)? = info["format"] else { continue }
+            switch format {
+            case "registrar_dataset":
+                if let data = info["data"] { dataset = RegistrarDataset.fromData(data) }
+            case "registration_cert":
+                if case let .str(data)? = info["data"], let bytes = try? Base64Url.decode(data) {
+                    wrprc = String(bytes: bytes, encoding: .utf8)
+                }
+            default:
+                continue
+            }
         }
-        return nil
+        return (dataset, wrprc)
     }
 }

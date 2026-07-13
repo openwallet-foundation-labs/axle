@@ -1,5 +1,6 @@
 import CborCose
 import Foundation
+import OpenID4VP
 import SdJwt
 import WalletAPI
 import X509
@@ -37,6 +38,10 @@ public struct VerifiedWRPRC: Sendable {
     public let purpose: [LocalizedText]
     /// The intermediary the RP operates through, when the request is intermediated (else nil).
     public let intermediary: Intermediary?
+    /// The `credentials` the RP is registered to request (ETSI TS 119 475 §5.2.4) — each with its format,
+    /// type meta and claim paths. Registrar-attested, so it is the authoritative input to the attribute-scope
+    /// check (RPRC_21). Empty when the WRPRC declares no `credentials`.
+    public let registeredCredentials: [RegisteredCredential]
     /// The full decoded payload, for any claim not surfaced above.
     public let claims: JsonValue
     /// The raw `status` claim (`{ status_list: { idx, uri } }`) to feed a Token Status List check.
@@ -168,11 +173,15 @@ public struct WRPRCVerifier: @unchecked Sendable {
             }
         }
 
+        // `credentials` (§5.2.4) — the attestation types + claim paths the RP is registered to request.
+        let registeredCredentials = RegisteredCredential.listFromJson(payload["credentials"])
+
         return VerifiedWRPRC(
             subject: subject,
             entitlements: entitlements,
             purpose: purpose,
             intermediary: intermediary,
+            registeredCredentials: registeredCredentials,
             claims: payload,
             status: payload["status"]
         )

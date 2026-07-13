@@ -28,11 +28,20 @@ class EnvironmentVariables {
    * The Wallet-Relying Party Access Certificate (WRPAC) keystore as a JSON *string*:
    * { privateKeyPem, certPem, caCertPem }. The reader access cert (chains to the Registrar CA) whose key
    * signs the OpenID4VP request object; `client_id` = `x509_hash:base64url(SHA-256(certDer))` (HAIP).
-   * Unset ⇒ an ephemeral self-signed dev key (won't chain to the Registrar CA, so real wallets reject it).
+   * Required (HAIP forbids a self-signed request-signing cert). Unset ⇒ boot fails unless
+   * `DEV_ALLOW_EPHEMERAL_WRPAC=true`, which permits an ephemeral self-signed dev key (local dev only).
    */
   @IsOptional()
   @IsJSON()
   VERIFIER_WRPAC?: string;
+
+  /**
+   * Local-dev escape hatch: set to `true` to allow booting WITHOUT `VERIFIER_WRPAC` using an ephemeral
+   * self-signed WRPAC. Never set in a deployed env — a self-signed request-signing cert violates HAIP.
+   */
+  @IsOptional()
+  @IsString()
+  DEV_ALLOW_EPHEMERAL_WRPAC?: string;
 
   /**
    * The Wallet-Relying Party Registration Certificate (WRPRC) — a registrar-issued `rc-wrp+jwt` compact JWS,

@@ -68,6 +68,15 @@ class EnvironmentVariables {
   @IsString()
   TRUSTED_LIST_URL?: string;
 
+  /**
+   * Pinned Scheme Operator signing certificate (PEM) for the Wallet Providers Trusted List JAdES signature.
+   * Unset ⇒ the published `scheme-operator.pem` is fetched and pinned on first use (better than trusting the
+   * list's own embedded x5c[0]). Set to the real SO cert for out-of-band pinning.
+   */
+  @IsOptional()
+  @IsString()
+  ISSUER_SCHEME_OPERATOR_CERT?: string;
+
   /** Redis URL for shared session/nonce/code state (required for multi-replica). Unset ⇒ in-memory (single-replica dev). */
   @IsOptional()
   @IsString()

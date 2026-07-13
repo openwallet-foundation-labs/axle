@@ -48,6 +48,15 @@ export class KeystoreService implements OnModuleInit {
 
   async onModuleInit() {
     const raw = this.config.get<string>('VERIFIER_WRPAC');
+    // HAIP forbids a self-signed request-signing certificate (the WRPAC must chain to the RP Registrar CA).
+    // Fail-closed: without VERIFIER_WRPAC we would fall back to a self-signed ephemeral cert, so refuse to boot
+    // unless `DEV_ALLOW_EPHEMERAL_WRPAC=true` explicitly opts in (local dev only — never set in a deployed env).
+    if (!raw && this.config.get<string>('DEV_ALLOW_EPHEMERAL_WRPAC') !== 'true') {
+      throw new Error(
+        'VERIFIER_WRPAC is required: a self-signed request-signing cert is forbidden by HAIP. ' +
+          'Set VERIFIER_WRPAC to a registrar-issued WRPAC keystore, or DEV_ALLOW_EPHEMERAL_WRPAC=true for local dev only.',
+      );
+    }
     const plain = raw ? await this.loadFromPem(JSON.parse(raw) as RawKeystore) : await this.ephemeral();
     plain.wrprc = this.config.get<string>('VERIFIER_WRPRC')?.trim() || undefined;
     this.profiles.set('plain', plain);

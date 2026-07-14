@@ -57,6 +57,41 @@ class CredentialStoreTest {
     }
 
     @Test
+    fun consumeInstancePreservesMetadata() = runBlocking {
+        val store = CredentialStore(InMemoryStorageDriver())
+        val meta = CredentialMetadata(
+            issuerUrl = "https://issuer.example",
+            issuerDisplayName = "Example Issuer",
+            configurationId = "pid",
+            displayName = "Personal ID",
+            logoUri = null,
+            backgroundColor = null,
+            issuerTrusted = true,
+            issuerRegistered = true,
+        )
+        val id = CredentialId("m")
+        store.save(
+            CredentialEnvelope(
+                id = id,
+                format = CredentialFormat.SdJwtVc("urn:eudi:pid:1"),
+                createdAt = Instant.ofEpochMilli(1_700_000_000_000),
+                lifecycle = EnvelopeLifecycle.Issued(
+                    policy = CredentialPolicy(batchSize = 2, use = KeyUse.Rotate),
+                    instances = (1..2).map { CredentialInstance(KeyHandle(SecureAreaId("software"), "key-$it"), byteArrayOf(it.toByte())) },
+                ),
+                metadata = meta,
+            ),
+        )
+
+        // Presenting (consuming an instance) must not wipe the issuer/trust metadata on the persisted envelope.
+        store.consumeInstance(id)
+        val reloaded = store.get(id)
+        assertEquals("Example Issuer", reloaded?.metadata?.issuerDisplayName)
+        assertEquals(true, reloaded?.metadata?.issuerTrusted)
+        assertEquals(true, reloaded?.metadata?.issuerRegistered)
+    }
+
+    @Test
     fun rotatePolicyCyclesLeastUsedInstance() = runBlocking {
         val store = CredentialStore(InMemoryStorageDriver())
         store.save(issued("r", KeyUse.Rotate, 2))

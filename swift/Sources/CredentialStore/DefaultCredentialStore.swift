@@ -94,7 +94,8 @@ public actor DefaultCredentialStore {
             id: envelope.id,
             format: envelope.format,
             createdAt: envelope.createdAt,
-            lifecycle: .issued(policy: policy, instances: updated)
+            lifecycle: .issued(policy: policy, instances: updated),
+            metadata: envelope.metadata // preserve issuer/display + trust flags across a presentation
         )
         try await driver.put(
             collection: Self.collection,

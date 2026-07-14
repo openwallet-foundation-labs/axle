@@ -85,6 +85,7 @@ class CredentialStore(private val driver: StorageDriver) {
             format = envelope.format,
             createdAt = envelope.createdAt,
             lifecycle = EnvelopeLifecycle.Issued(issued.policy, updatedInstances),
+            metadata = envelope.metadata, // preserve issuer/display + trust flags across a presentation
         )
         driver.put(COLLECTION, updated.id.value, EnvelopeCodec.encode(updated))
         _changes.tryEmit(CredentialStoreChange.Updated(updated.id))

@@ -16,10 +16,11 @@ const KEY_ATTESTATIONS_REQUIRED = { key_storage: ['iso_18045_moderate', 'iso_180
  * the credential configs. The AS is the Issuer itself. Everything is derived from `ISSUER_BASE_URL` (the
  * credential issuer identifier, which already includes the /eudi-issuer path segment).
  *
- * Per ETSI TS 119 472-3 the Credential Issuer metadata is served as **signed metadata** (OpenID4VCI §12.2.3):
- * a JWS whose x5c carries the Issuer's access certificate (ISS-MDATA-4.2.1/ACC_CERT-4.2.2) and whose payload
- * carries `issuer_info` = the Provider's registrar_dataset (+ optional registration_cert) so the wallet can see
- * and verify who the issuer is and what it is registered to issue (ISS-MDATA-REG_CERT-4.2.3).
+ * The metadata is served in both forms OpenID4VCI 1.0 §12.2.2 defines and content-negotiated by Accept:
+ * unsigned `application/json`, or a signed `application/jwt` — the whole response a JWS whose x5c carries the
+ * Issuer's access certificate (ETSI TS 119 472-3 ISS-MDATA-4.2.1/ACC_CERT-4.2.2) and whose payload carries every
+ * parameter incl. `issuer_info` (the registrar_dataset + optional registration_cert) as top-level claims, so the
+ * wallet can verify who the issuer is and what it is registered to issue (ISS-MDATA-REG_CERT-4.2.3).
  */
 @Injectable()
 export class MetadataService {
@@ -34,21 +35,25 @@ export class MetadataService {
   }
 
   /**
-   * The signed Credential Issuer metadata (ETSI TS 119 472-3 ISS-MDATA-4.2.1-01, OpenID4VCI §12.2.3). Returns
-   * the plain metadata object PLUS a `signed_metadata` compact JWS (ES256, `x5c` = access cert, `iss`/`sub` =
-   * credential_issuer, `iat`) whose payload additionally carries the top-level `issuer_info` array. We also echo
-   * `issuer_info` unsigned for the benefit of clients that don't parse `signed_metadata`.
+   * Unsigned Credential Issuer Metadata (`application/json`, OpenID4VCI §12.2.2) — the metadata parameters plus
+   * the top-level `issuer_info` (ETSI TS 119 472-3 ISS-MDATA-REG_CERT-4.2.3). The Issuer MUST support this form.
    */
-  async signedCredentialIssuerMetadata(profile: IssuerProfile = ISSUER_PROFILES[0]) {
+  credentialIssuerMetadataJson(profile: IssuerProfile = ISSUER_PROFILES[0]) {
+    return { ...this.credentialIssuerMetadata(profile), issuer_info: this.issuerInfo() };
+  }
+
+  /**
+   * Signed Credential Issuer Metadata as a compact JWS (`application/jwt`, OpenID4VCI §12.2.2/§12.2.3): the whole
+   * response is the JWS, carrying every metadata parameter (incl. `issuer_info`) as a top-level claim in its
+   * payload. Signed with the Provider's ACCESS certificate in `x5c` (ETSI TS 119 472-3 ISS-MDATA-4.2.1-02/
+   * ACC_CERT-4.2.2), `iss` = `sub` = this profile's Credential Issuer Identifier. `typ` per §12.2.3.
+   */
+  async credentialIssuerMetadataJwt(profile: IssuerProfile = ISSUER_PROFILES[0]): Promise<string> {
     const metadata = this.credentialIssuerMetadata(profile);
-    const issuer_info = this.issuerInfo();
-    const signed_metadata = await this.issuerJwt.sign(
-      { ...metadata, issuer_info },
-      // Signed with the Provider's ACCESS certificate in x5c (ETSI TS 119 472-3 ISS-MDATA-4.2.1-02/ACC_CERT-4.2.2),
-      // NOT a Document Signer; iss = sub = this profile's Credential Issuer Identifier (OID4VCI §12.2.3).
+    return this.issuerJwt.sign(
+      { ...metadata, issuer_info: this.issuerInfo() },
       { typ: 'openidvci-issuer-metadata+jwt', x5c: true, signerType: 'access', iss: metadata.credential_issuer, sub: metadata.credential_issuer },
     );
-    return { ...metadata, issuer_info, signed_metadata };
   }
 
   /**

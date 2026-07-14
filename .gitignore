@@ -14,3 +14,6 @@ tools/headless-interop/package-lock.json
 wallet-provider/dist/
 wallet-provider/*.db
 wallet-provider/*.db-*
+
+# Demo reader-auth identity (private key) — provisioned per machine, never committed
+demo/app/src/main/assets/reader_wrpac.json

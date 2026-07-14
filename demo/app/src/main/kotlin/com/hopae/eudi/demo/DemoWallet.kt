@@ -16,15 +16,27 @@ import com.hopae.eudi.wallet.TrustConfig
 import com.hopae.eudi.wallet.Wallet
 import com.hopae.eudi.wallet.WalletConfig
 import com.hopae.eudi.wallet.WalletPorts
+import com.hopae.eudi.wallet.cbor.cose.CoseAlgorithm
+import com.hopae.eudi.wallet.cbor.cose.CoseSigner
+import com.hopae.eudi.wallet.cbor.cose.Der
+import com.hopae.eudi.wallet.mdoc.ReaderAuthSigner
 import com.hopae.eudi.wallet.spi.HttpMethod
 import com.hopae.eudi.wallet.spi.HttpRequest
 import com.hopae.eudi.wallet.spi.HttpTransport
+import com.hopae.eudi.wallet.spi.SigningAlgorithm
+import com.hopae.eudi.wallet.spi.coseAlgorithm
+import com.hopae.eudi.wallet.spi.curve
 import com.hopae.eudi.wallet.trustlist.TrustedListClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
+import java.security.KeyFactory
+import java.security.PrivateKey
+import java.security.Signature
+import java.security.spec.PKCS8EncodedKeySpec
 
 /**
  * Assembles the EUDI Wallet SDK with Android debug-grade adapters — one instance per app process.
@@ -80,6 +92,9 @@ object DemoWallet {
         val storage = FileStorageDriver(File(filesDir, "wallet"))
 
         val trust = resolveTrust(http, File(filesDir, "trust"))
+        // Reader-auth identity for the Read-mDL role — the demo reuses the verifier's WRPAC (chains to the
+        // registrar CA, which holders trust as a reader anchor). Optional: absent asset → no reader auth.
+        val readerAuth = loadReaderAuth(context)
 
         // Wallet Provider backend: gives the client-auth WUA (attest_jwt_client_auth) and the per-issuance
         // key attestation the issuer requires for PID. Play Integrity attests the instance, falling back to the
@@ -100,6 +115,7 @@ object DemoWallet {
                 issuance = IssuanceConfig(clientId = CLIENT_ID, redirectUri = "eu.europa.ec.euidi://authorization"),
                 // Debug wallet: also log presentations that fail at final submission (opt-in).
                 transactionLog = TransactionLogConfig(recordFailures = true),
+                readerAuth = readerAuth,
             ),
             ports = WalletPorts(
                 secureAreas = listOf(secureArea),
@@ -193,8 +209,39 @@ object DemoWallet {
         return resp.body.decodeToString()
     }
 
+    /**
+     * The demo's ISO 18013-5 reader-auth identity, loaded from a gitignored `reader_wrpac.json` asset
+     * ({privateKeyPem, certPem, caCertPem} — the verifier's WRPAC, which chains to the registrar CA). Absent
+     * asset → null (Read mDL requests carry no reader auth; holders show the reader as unverified).
+     */
+    private fun loadReaderAuth(context: Context): ReaderAuthSigner? = runCatching {
+        val json = context.assets.open("reader_wrpac.json").bufferedReader().use { it.readText() }
+        val o = JSONObject(json)
+        val x5c = listOf(pemToDer(o.getString("certPem")), pemToDer(o.getString("caCertPem")))
+        val signer = PemEcCoseSigner(o.getString("privateKeyPem"))
+        LogStore.log("Reader-auth identity loaded — Read mDL signs its requests")
+        ReaderAuthSigner(signer, x5c, SigningAlgorithm.ES256)
+    }.getOrElse {
+        LogStore.log("Reader-auth identity not configured (reader_wrpac.json absent) — reads are unauthenticated")
+        null
+    }
+
     private fun pemToDer(pem: String): ByteArray = Base64.decode(
         pem.replace(Regex("-----(BEGIN|END) CERTIFICATE-----"), "").replace(Regex("\\s"), ""),
         Base64.DEFAULT,
     )
+
+    /** COSE ES256 signer over an embedded PKCS#8 EC private key — the demo reader's WRPAC key. */
+    private class PemEcCoseSigner(privateKeyPem: String) : CoseSigner {
+        private val key: PrivateKey = KeyFactory.getInstance("EC").generatePrivate(
+            PKCS8EncodedKeySpec(
+                Base64.decode(privateKeyPem.replace(Regex("-----(BEGIN|END) PRIVATE KEY-----"), "").replace(Regex("\\s"), ""), Base64.DEFAULT),
+            ),
+        )
+        override val algorithm: CoseAlgorithm = SigningAlgorithm.ES256.coseAlgorithm
+        override suspend fun sign(toBeSigned: ByteArray): ByteArray {
+            val der = Signature.getInstance("SHA256withECDSA").run { initSign(key); update(toBeSigned); sign() }
+            return Der.derSignatureToRaw(der, SigningAlgorithm.ES256.curve.coordinateSize)
+        }
+    }
 }

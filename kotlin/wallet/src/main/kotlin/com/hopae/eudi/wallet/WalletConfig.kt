@@ -2,6 +2,7 @@ package com.hopae.eudi.wallet
 
 import com.hopae.eudi.wallet.cbor.cose.EcCurve
 import com.hopae.eudi.wallet.mdoc.MdocDeviceAuthMode
+import com.hopae.eudi.wallet.mdoc.ReaderAuthSigner
 import com.hopae.eudi.wallet.vp.MdocTransactionDataBinder
 
 /**
@@ -13,6 +14,13 @@ class WalletConfig(
     val presentation: PresentationConfig = PresentationConfig(),
     val trust: TrustConfig = TrustConfig(),
     val transactionLog: TransactionLogConfig = TransactionLogConfig(),
+    /**
+     * The wallet's reader-authentication identity for the ISO 18013-5 reader role (Read mDL): a signer over a
+     * reader access certificate chain. When set, proximity read requests are reader-signed so the holder can
+     * authenticate *who is asking* (its chain is validated against the holder's [TrustConfig.readerAnchorsDer]).
+     * Null (default) → requests carry no reader auth and the holder shows the reader as unverified.
+     */
+    val readerAuth: ReaderAuthSigner? = null,
 )
 
 /** Audit / transaction-log behaviour. */

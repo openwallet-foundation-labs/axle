@@ -501,17 +501,44 @@ fun ProximityReaderScreen(wallet: Wallet) {
         }
     }
 
+    val c = WalletTheme.colors
+    fun onNfc() {
+        if (!granted) { permLauncher.launch(BLE_PERMISSIONS); return }
+        results = emptyList()
+        status = "Hold near the wallet (NFC)…"
+        scope.launch {
+            try {
+                val handover = NfcReader.readHandover(context as Activity)
+                val eng = MdocNfcEngagement.parseHandoverSelect(handover.handoverSelect) ?: run { status = "❌ Not an mdoc NFC tag"; return@launch }
+                status = if (handover.negotiated) "Connecting over BLE (negotiated)…" else "Connecting over BLE…"
+                val uuids = if (eng.peripheralServerMode) Ble.PERIPHERAL_SERVER else Ble.CENTRAL_CLIENT
+                val transport = BleGattClientTransport(context, Ble.bytesToUuid(eng.serviceUuid), uuids, logger = LogWalletLogger()).also { it.connect() }
+                status = "Requesting documents…"
+                val docs = wallet.reader.read(transport, eng.deviceEngagement, readerRequest(), handoverNdef = handover.handoverSelect, handoverRequestNdef = handover.handoverRequest)
+                results = docs
+                status = if (docs.isEmpty()) "No documents returned" else "✅ Read ${docs.size} document(s)"
+                LogStore.log("Reader read ${docs.size} document(s) over NFC+BLE")
+            } catch (e: Throwable) {
+                status = "❌ ${e.message}"
+                LogStore.log("❌ Reader (NFC): ${e.message}")
+            }
+        }
+    }
+
     Column(
-        Modifier.fillMaxWidth().padding(16.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxWidth().padding(20.dp, 4.dp, 20.dp, 24.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Proximity Reader", style = MaterialTheme.typography.titleLarge)
-        Text(
-            "Acts as an ISO 18013-5 mdoc reader — scan a wallet's QR or tap it over NFC, then read its mdoc over BLE.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Button(onClick = {
-            if (!granted) { permLauncher.launch(BLE_PERMISSIONS); return@Button }
+        WalletCard {
+            Text("Verify a document in person", style = MaterialTheme.typography.titleSmall, color = c.ink)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "This device acts as an ISO 18013-5 reader — scan the holder's QR (or tap over NFC), then read and verify their mdoc over Bluetooth.",
+                style = MaterialTheme.typography.bodyMedium, color = c.inkMuted,
+            )
+        }
+        PrimaryButton("Scan holder's QR", onClick = {
+            if (!granted) { permLauncher.launch(BLE_PERMISSIONS); return@PrimaryButton }
             scanLauncher.launch(ScanOptions().apply {
                 setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                 setPrompt("Scan the wallet's proximity QR")
@@ -519,47 +546,33 @@ fun ProximityReaderScreen(wallet: Wallet) {
                 setOrientationLocked(false)
                 setCaptureActivity(PortraitCaptureActivity::class.java)
             })
-        }) { Text("Scan wallet QR") }
-        Button(onClick = {
-            if (!granted) { permLauncher.launch(BLE_PERMISSIONS); return@Button }
-            results = emptyList()
-            status = "Hold near the wallet (NFC)…"
-            scope.launch {
-                try {
-                    val handover = NfcReader.readHandover(context as Activity)
-                    val eng = MdocNfcEngagement.parseHandoverSelect(handover.handoverSelect) ?: run { status = "❌ Not an mdoc NFC tag"; return@launch }
-                    status = if (handover.negotiated) "Connecting over BLE (negotiated)…" else "Connecting over BLE…"
-                    val uuids = if (eng.peripheralServerMode) Ble.PERIPHERAL_SERVER else Ble.CENTRAL_CLIENT
-                    val transport = BleGattClientTransport(context, Ble.bytesToUuid(eng.serviceUuid), uuids, logger = LogWalletLogger()).also { it.connect() }
-                    status = "Requesting documents…"
-                    val docs = wallet.reader.read(transport, eng.deviceEngagement, readerRequest(), handoverNdef = handover.handoverSelect, handoverRequestNdef = handover.handoverRequest)
-                    results = docs
-                    status = if (docs.isEmpty()) "No documents returned" else "✅ Read ${docs.size} document(s)"
-                    LogStore.log("Reader read ${docs.size} document(s) over NFC+BLE")
-                } catch (e: Throwable) {
-                    status = "❌ ${e.message}"
-                    LogStore.log("❌ Reader (NFC): ${e.message}")
-                }
-            }
-        }) { Text("Tap to read (NFC)") }
-        Text(status, style = MaterialTheme.typography.bodyLarge)
-        results.forEach { doc -> ReaderResultCard(doc) }
+        })
+        SecondaryButton("Tap over NFC", onClick = { onNfc() })
+
+        if (status.isNotBlank()) {
+            val tint = when { status.startsWith("❌") -> c.danger; status.startsWith("✅") -> c.trust; else -> c.inkMuted }
+            Text(status.removePrefix("❌ ").removePrefix("✅ "), style = MaterialTheme.typography.bodyMedium, color = tint)
+        }
+
+        if (results.isNotEmpty()) {
+            SectionLabel("Documents read")
+            results.forEach { doc -> ReaderResultCard(doc) }
+        }
     }
 }
 
 @Composable
 private fun ReaderResultCard(doc: VerifiedDocument) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(doc.docType, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                val (label, color) = if (doc.deviceAuthenticated) "verified" to MaterialTheme.colorScheme.primary else "unverified" to MaterialTheme.colorScheme.error
-                AssistChip(onClick = {}, label = { Text(label) }, colors = AssistChipDefaults.assistChipColors(labelColor = color))
-            }
-            doc.elements.forEach { (_, els) ->
-                els.forEach { (k, v) -> Text("$k: ${cborText(v)}", style = MaterialTheme.typography.bodyMedium) }
-            }
+    val c = WalletTheme.colors
+    WalletCard(padding = PaddingValues(0.dp)) {
+        Row(Modifier.fillMaxWidth().padding(16.dp, 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(docTypeLabel(doc.docType), style = MaterialTheme.typography.titleSmall, color = c.ink, modifier = Modifier.weight(1f))
+            TrustBadge(doc.deviceAuthenticated, trustedText = "Verified", untrustedText = "Unverified")
         }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
+        val flat = doc.elements.flatMap { (_, els) -> els.entries }
+        if (flat.isEmpty()) InfoRow("Elements", "—")
+        else flat.forEach { (k, v) -> InfoRow(claimPathLabel(listOf(k)), cborText(v)) }
     }
 }
 

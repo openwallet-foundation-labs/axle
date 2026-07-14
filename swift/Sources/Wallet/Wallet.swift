@@ -99,8 +99,9 @@ public struct Wallet {
                                          recordFailures: recordFailures,
                                          deviceAuthMode: config.presentation.mdocDeviceAuth,
                                          sessionCurve: config.presentation.proximitySessionCurve)
-        // Reader side: verify presented mdocs against the same issuer anchors used for status/issuance.
-        let reader = ProximityReaderService(issuerTrust: X5cMdocIssuerTrust(validator: validator))
+        // Reader side: verify presented mdocs against the same issuer anchors used for status/issuance;
+        // sign our own requests with the configured reader-auth identity so the holder can authenticate us.
+        let reader = ProximityReaderService(issuerTrust: X5cMdocIssuerTrust(validator: validator), readerAuth: config.readerAuth)
 
         return Wallet(credentials: CredentialsService(store: store, statusClient: statusClient),
                       issuance: issuance, presentation: presentation, proximity: proximity, reader: reader,

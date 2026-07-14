@@ -10,15 +10,22 @@ public struct WalletConfig {
     public let presentation: PresentationConfig
     public let trust: TrustConfig
     public let transactionLog: TransactionLogConfig
+    /// The wallet's reader-authentication identity for the ISO 18013-5 reader role (Read mDL): a signer over a
+    /// reader access certificate chain. When set, proximity read requests are reader-signed so the holder can
+    /// authenticate *who is asking* (its chain is validated against `TrustConfig.readerAnchorsDer`). Nil
+    /// (default) → requests carry no reader auth and the holder shows the reader as unverified.
+    public let readerAuth: ReaderAuthSigner?
 
     public init(issuance: IssuanceConfig = IssuanceConfig(),
                 presentation: PresentationConfig = PresentationConfig(),
                 trust: TrustConfig = TrustConfig(),
-                transactionLog: TransactionLogConfig = TransactionLogConfig()) {
+                transactionLog: TransactionLogConfig = TransactionLogConfig(),
+                readerAuth: ReaderAuthSigner? = nil) {
         self.issuance = issuance
         self.presentation = presentation
         self.trust = trust
         self.transactionLog = transactionLog
+        self.readerAuth = readerAuth
     }
 }
 

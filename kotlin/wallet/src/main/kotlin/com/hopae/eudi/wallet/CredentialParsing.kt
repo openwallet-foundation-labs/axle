@@ -85,11 +85,11 @@ private val ADMIN_ELEMENTS = setOf(
 )
 
 private fun categoryOf(format: CredentialFormat, path: List<String>): ClaimCategory {
-    val key = path.last().lowercase()
-    // SD-JWT VC: top-level registered claims are metadata (structural).
-    if (format is CredentialFormat.SdJwtVc && path.size == 1 && key in JWT_REGISTERED) return ClaimCategory.Metadata
-    // Administrative data elements, either format.
-    if (key in ADMIN_ELEMENTS) return ClaimCategory.Metadata
+    // SD-JWT VC: anything under a top-level registered claim is metadata — checked on the ROOT key so the
+    // nested children of object claims (cnf → jwk → …, status → status_list → …) are classified too.
+    if (format is CredentialFormat.SdJwtVc && path.first().lowercase() in JWT_REGISTERED) return ClaimCategory.Metadata
+    // Administrative data elements, either format (matched on the leaf name).
+    if (path.last().lowercase() in ADMIN_ELEMENTS) return ClaimCategory.Metadata
     return ClaimCategory.Subject
 }
 

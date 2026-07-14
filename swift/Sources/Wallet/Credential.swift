@@ -40,19 +40,46 @@ public enum Lifecycle {
 }
 
 /// A disclosed claim, path-addressed (namespace+element for mdoc, JSON path for SD-JWT VC).
-public struct Claim { public let path: [String]; public let value: ClaimValue }
+public struct Claim {
+    public let path: [String]
+    public let value: ClaimValue
+    public let category: ClaimCategory
+    public init(path: [String], value: ClaimValue, category: ClaimCategory = .subject) {
+        self.path = path; self.value = value; self.category = category
+    }
+}
 
-/// A claim value with a format-agnostic rendering.
+/// Whether a claim carries the subject's personal data or the credential's administrative metadata. Derived
+/// structurally where possible (SD-JWT VC registered claims like iss/iat/exp/vct/cnf/status) and from the
+/// ARF/ISO administrative element names otherwise. A hint for grouping — consumers may present it as they like.
+public enum ClaimCategory { case subject, metadata }
+
+/// The value's underlying shape, so a UI can render it without re-sniffing the raw type.
+public enum ClaimValueKind { case text, number, boolean, date, array, unknown }
+
+/// A claim value with a format-agnostic rendering and a `kind` hint.
 public struct ClaimValue {
     let json: JsonValue // internal — not exposed in the public signature
+    public let kind: ClaimValueKind
+    init(json: JsonValue, kind: ClaimValueKind = .text) { self.json = json; self.kind = kind }
     public func display() -> String {
         switch json {
         case let .str(s): return s
         case let .numInt(n): return String(n)
         case let .numDouble(d): return String(d)
-        case let .bool(b): return String(b)
+        case let .bool(b): return b ? "Yes" : "No"
+        case let .arr(items): return items.map { scalar($0) }.joined(separator: ", ")
         case .null: return ""
         default: return json.serialize()
+        }
+    }
+    private func scalar(_ v: JsonValue) -> String {
+        switch v {
+        case let .str(s): return s
+        case let .numInt(n): return String(n)
+        case let .numDouble(d): return String(d)
+        case let .bool(b): return b ? "Yes" : "No"
+        default: return v.serialize()
         }
     }
 }

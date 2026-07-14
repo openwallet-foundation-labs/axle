@@ -1,5 +1,6 @@
 package com.hopae.eudi.demo.ui.components
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,20 +60,22 @@ fun Keypad(
     modifier: Modifier = Modifier,
     onBiometric: (() -> Unit)? = null,
 ) {
+    val view = LocalView.current
+    fun tap() = view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
     Column(modifier.widthIn(max = 300.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9")).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { d -> DigitKey(d, Modifier.weight(1f)) { onDigit(d) } }
+                row.forEach { d -> DigitKey(d, Modifier.weight(1f)) { tap(); onDigit(d) } }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (onBiometric != null) {
-                IconKey(Modifier.weight(1f), onBiometric) { Icon(Icons.Filled.Fingerprint, null, tint = WalletTheme.colors.brand) }
+                IconKey(Modifier.weight(1f), { tap(); onBiometric() }) { Icon(Icons.Filled.Fingerprint, null, tint = WalletTheme.colors.brand) }
             } else {
                 Box(Modifier.weight(1f).height(56.dp))
             }
-            DigitKey("0", Modifier.weight(1f)) { onDigit("0") }
-            IconKey(Modifier.weight(1f), onDelete) { Icon(Icons.AutoMirrored.Filled.Backspace, null, tint = WalletTheme.colors.inkBody) }
+            DigitKey("0", Modifier.weight(1f)) { tap(); onDigit("0") }
+            IconKey(Modifier.weight(1f), { tap(); onDelete() }) { Icon(Icons.AutoMirrored.Filled.Backspace, null, tint = WalletTheme.colors.inkBody) }
         }
     }
 }

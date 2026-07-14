@@ -103,10 +103,10 @@ private fun Welcome(onContinue: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) { Text("★", color = EuGold, style = MaterialTheme.typography.titleLarge) }
         Spacer(Modifier.height(24.dp))
-        Text("Your EU Digital Identity,\nin your pocket", style = MaterialTheme.typography.titleLarge, color = c.ink, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(12.dp))
+        Text("Axle Wallet", style = MaterialTheme.typography.titleLarge, color = c.ink, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(8.dp))
         Text(
-            "Store your ID, driving licence and other credentials — and share only what's needed, right from your phone.",
+            "eIDAS 2.0 EU Digital Identity Wallet",
             style = MaterialTheme.typography.bodyMedium, color = c.inkMuted, textAlign = TextAlign.Center,
             modifier = Modifier.widthIn(max = 320.dp),
         )

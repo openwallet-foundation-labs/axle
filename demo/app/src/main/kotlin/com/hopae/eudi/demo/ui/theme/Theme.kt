@@ -8,6 +8,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -30,6 +31,14 @@ private val WalletScheme = lightColorScheme(
     onSurface = Ink,
     surfaceVariant = DeviceGrey,
     onSurfaceVariant = InkMuted,
+    // Neutralise the surface-container roles (menus, sheets, elevated surfaces) — otherwise they fall back to
+    // Material's baseline purple/pink palette. surfaceTint is brand blue so elevation never tints toward pink.
+    surfaceTint = BrandBlue,
+    surfaceContainerLowest = SurfaceWhite,
+    surfaceContainerLow = Color(0xFFF7F8FB),
+    surfaceContainer = SurfaceWhite,
+    surfaceContainerHigh = Color(0xFFF2F3F7),
+    surfaceContainerHighest = Color(0xFFECEEF3),
     outline = CardBorderStrong,
     outlineVariant = Divider,
     error = Danger,

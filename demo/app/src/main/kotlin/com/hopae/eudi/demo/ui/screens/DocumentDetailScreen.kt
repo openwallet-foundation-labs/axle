@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -95,6 +96,7 @@ fun DocumentDetailScreen(
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
                         text = { Text("Delete document", color = c.danger) },
+                        leadingIcon = { Icon(Icons.Outlined.Delete, null, tint = c.danger, modifier = Modifier.size(20.dp)) },
                         onClick = { menuOpen = false; confirmDelete = true },
                     )
                 }

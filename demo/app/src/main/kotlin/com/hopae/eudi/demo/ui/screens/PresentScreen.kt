@@ -1,5 +1,7 @@
 package com.hopae.eudi.demo.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -49,6 +51,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import com.hopae.eudi.demo.LogStore
+import com.hopae.eudi.demo.security.AppLock
 import com.hopae.eudi.demo.security.BiometricAuth
 import com.hopae.eudi.demo.security.WalletSecurity
 import com.hopae.eudi.demo.ui.components.InfoRow
@@ -129,7 +132,21 @@ fun PresentScreen(
             runCatching {
                 session.respond(buildSelection())
                 when (val t = session.state.first { it.isTerminal }) {
-                    is PresentationState.Completed -> { LogStore.log("✅ Presented"); step = PresentStep.Shared }
+                    is PresentationState.Completed -> {
+                        LogStore.log("✅ Presented")
+                        // Same-device return: the verifier supplies a redirect_uri (carrying a one-time
+                        // response_code) the wallet MUST follow — it hands the user back to the verifier, which
+                        // shows the result. On success reset to home (the verifier now owns the result screen);
+                        // with no redirect (cross-device) or if the browser can't open, fall back to Shared.
+                        val redirect = t.redirectUri
+                        val opened = redirect != null && runCatching {
+                            AppLock.suppressResumeLock() // returning from the browser shouldn't demand a re-unlock
+                            ctx.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(redirect)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }.onFailure { LogStore.log("❌ open redirect_uri: ${it.message}") }.isSuccess
+                        if (opened) onDone() else step = PresentStep.Shared
+                    }
                     is PresentationState.Failed -> { error = t.error.message; step = PresentStep.Failed }
                     else -> { error = "Unexpected state"; step = PresentStep.Failed }
                 }

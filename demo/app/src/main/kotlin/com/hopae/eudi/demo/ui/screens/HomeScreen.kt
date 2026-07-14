@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hopae.eudi.demo.ui.AddFirstDocument
 import com.hopae.eudi.demo.ui.DocumentRow
 import com.hopae.eudi.demo.ui.byRecentUse
 import com.hopae.eudi.demo.ui.credGradient
@@ -104,7 +105,7 @@ fun HomeScreen(
 
         val hero = ordered.firstOrNull()
         item {
-            if (hero == null) EmptyHero(onScan) else HeroCard(hero) { onOpenDoc(hero) }
+            if (hero == null) AddFirstDocument(onScan) else HeroCard(hero) { onOpenDoc(hero) }
         }
 
         if (hero != null) {
@@ -182,27 +183,6 @@ private fun HeroCard(cred: Credential, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun EmptyHero(onScan: () -> Unit) {
-    val c = WalletTheme.colors
-    WalletCard(padding = androidx.compose.foundation.layout.PaddingValues(24.dp)) {
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier.size(60.dp).clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(com.hopae.eudi.demo.ui.theme.DocGradients.Pid)),
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Outlined.CreditCard, null, tint = Color.White, modifier = Modifier.size(28.dp)) }
-            Spacer(Modifier.height(16.dp))
-            Text("Add your first document", style = MaterialTheme.typography.titleMedium, color = c.ink)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "Scan an issuer's QR to add your ID, driving licence and more — stored securely on this device.",
-                style = MaterialTheme.typography.bodyMedium, color = c.inkMuted, textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(20.dp))
-            com.hopae.eudi.demo.ui.components.PrimaryButton("Scan to add", onScan)
-        }
-    }
-}
 
 @Composable
 private fun QuickAction(label: String, icon: ImageVector, primary: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {

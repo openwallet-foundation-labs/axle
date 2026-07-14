@@ -198,7 +198,7 @@ fun WalletRoot(wallet: Wallet) {
                     onOpenActivity = { txDetail = it },
                 )
             }
-            composable(Routes.Documents) { DocumentsScreen(wallet, refreshKey, onOpenDoc = { detail = it }) }
+            composable(Routes.Documents) { DocumentsScreen(wallet, refreshKey, onScan = { launchScan() }, onOpenDoc = { detail = it }) }
             composable(Routes.Activity) { ActivityScreen(wallet, refreshKey, onOpenActivity = { txDetail = it }) }
             composable(Routes.Settings) { SettingsScreen(onOpenDebug = { nav.navigate(Routes.Debug) }) }
             composable(Routes.Debug) { DebugScreen(onBack = { nav.popBackStack() }) }
@@ -208,7 +208,6 @@ fun WalletRoot(wallet: Wallet) {
 
     // ── overlays ──
     issuing?.let { offer ->
-        BackHandler { issuing = null }
         IssueScreen(
             offer = offer, wallet = wallet, onAuth = openAuth,
             onDone = { issuing = null; refreshKey++ },

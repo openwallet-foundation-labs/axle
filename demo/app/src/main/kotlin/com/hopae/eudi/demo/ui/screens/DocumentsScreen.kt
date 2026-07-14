@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.hopae.eudi.demo.ui.AddFirstDocument
 import com.hopae.eudi.demo.ui.DocumentRow
 import com.hopae.eudi.demo.ui.byRecentUse
 import com.hopae.eudi.demo.ui.theme.WalletTheme
@@ -24,7 +25,7 @@ import com.hopae.eudi.wallet.Wallet
 import com.hopae.eudi.wallet.txlog.TransactionLogEntry
 
 @Composable
-fun DocumentsScreen(wallet: Wallet, refreshKey: Int, onOpenDoc: (Credential) -> Unit) {
+fun DocumentsScreen(wallet: Wallet, refreshKey: Int, onScan: () -> Unit, onOpenDoc: (Credential) -> Unit) {
     val c = WalletTheme.colors
     var creds by remember { mutableStateOf<List<Credential>>(emptyList()) }
     var txs by remember { mutableStateOf<List<TransactionLogEntry>>(emptyList()) }
@@ -45,8 +46,9 @@ fun DocumentsScreen(wallet: Wallet, refreshKey: Int, onOpenDoc: (Credential) -> 
     ) {
         item { Text("Documents", style = MaterialTheme.typography.titleLarge, color = c.ink) }
         if (ordered.isEmpty()) {
-            item { Text("No documents yet — tap Scan on Home to add your first credential.", style = MaterialTheme.typography.bodyMedium, color = c.inkMuted) }
+            item { AddFirstDocument(onScan) }
+        } else {
+            items(ordered) { cred -> DocumentRow(cred) { onOpenDoc(cred) } }
         }
-        items(ordered) { cred -> DocumentRow(cred) { onOpenDoc(cred) } }
     }
 }

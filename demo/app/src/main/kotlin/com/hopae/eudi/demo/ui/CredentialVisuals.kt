@@ -14,6 +14,9 @@ private fun typeKey(c: Credential): String = when (val f = c.format) {
     is CredentialFormat.MsoMdoc -> f.docType
 }
 
+/** The credential's type identifier (SD-JWT `vct` or mdoc `docType`) — used to match transaction-log entries. */
+fun credType(c: Credential): String = typeKey(c)
+
 private fun kindOf(c: Credential): DocKind {
     val t = typeKey(c).lowercase()
     return when {

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -61,8 +62,10 @@ import com.hopae.eudi.demo.security.AppLock
 import com.hopae.eudi.demo.ui.screens.ActivityScreen
 import com.hopae.eudi.demo.ui.screens.DebugScreen
 import com.hopae.eudi.demo.ui.screens.DocumentDetailScreen
+import com.hopae.eudi.demo.ui.screens.DocumentsScreen
 import com.hopae.eudi.demo.ui.screens.HomeScreen
 import com.hopae.eudi.demo.ui.screens.SettingsScreen
+import com.hopae.eudi.demo.ui.screens.TransactionDetailScreen
 import com.hopae.eudi.demo.ui.theme.WalletTheme
 import com.hopae.eudi.wallet.Credential
 import com.hopae.eudi.wallet.CredentialOffer
@@ -70,6 +73,7 @@ import com.hopae.eudi.wallet.IssuanceSession
 import com.hopae.eudi.wallet.PresentationSelection
 import com.hopae.eudi.wallet.PresentationState
 import com.hopae.eudi.wallet.Wallet
+import com.hopae.eudi.wallet.txlog.TransactionLogEntry
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.flow.first
@@ -77,13 +81,14 @@ import kotlinx.coroutines.launch
 
 private object Routes {
     const val Home = "home"
+    const val Documents = "documents"
     const val Activity = "activity"
     const val Settings = "settings"
     const val Debug = "debug"
     const val Reader = "reader"
 }
 
-private val MainTabs = setOf(Routes.Home, Routes.Activity, Routes.Settings)
+private val MainTabs = setOf(Routes.Home, Routes.Documents, Routes.Activity, Routes.Settings)
 
 @Composable
 fun WalletRoot(wallet: Wallet) {
@@ -97,6 +102,7 @@ fun WalletRoot(wallet: Wallet) {
     var txCodeFor by remember { mutableStateOf<CredentialOffer?>(null) }
     var consent by remember { mutableStateOf<PendingConsent?>(null) }
     var detail by remember { mutableStateOf<Credential?>(null) }
+    var txDetail by remember { mutableStateOf<TransactionLogEntry?>(null) }
     var showProximity by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<String?>(null) }
 
@@ -174,10 +180,13 @@ fun WalletRoot(wallet: Wallet) {
                     onReadMdl = { nav.navigate(Routes.Reader) },
                     onProximity = { showProximity = true },
                     onOpenDoc = { detail = it },
+                    onSeeDocuments = { nav.navigate(Routes.Documents) { launchSingleTop = true } },
                     onSeeActivity = { nav.navigate(Routes.Activity) { launchSingleTop = true } },
+                    onOpenActivity = { txDetail = it },
                 )
             }
-            composable(Routes.Activity) { ActivityScreen(wallet, refreshKey) }
+            composable(Routes.Documents) { DocumentsScreen(wallet, refreshKey, onOpenDoc = { detail = it }) }
+            composable(Routes.Activity) { ActivityScreen(wallet, refreshKey, onOpenActivity = { txDetail = it }) }
             composable(Routes.Settings) { SettingsScreen(onOpenDebug = { nav.navigate(Routes.Debug) }) }
             composable(Routes.Debug) { DebugScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.Reader) { ReaderRoute(wallet, onBack = { nav.popBackStack() }) }
@@ -246,6 +255,10 @@ fun WalletRoot(wallet: Wallet) {
             },
         )
     }
+    txDetail?.let { entry ->
+        BackHandler { txDetail = null }
+        TransactionDetailScreen(entry, onBack = { txDetail = null })
+    }
     if (showProximity) ProximityHolderDialog(wallet) { showProximity = false }
 
     busy?.let { message -> BusyOverlay(message) }
@@ -255,6 +268,7 @@ fun WalletRoot(wallet: Wallet) {
 private fun WalletBottomBar(nav: NavHostController, route: String?) {
     NavigationBar(containerColor = WalletTheme.colors.card) {
         BottomItem(nav, route, Routes.Home, Icons.Filled.Home, "Home")
+        BottomItem(nav, route, Routes.Documents, Icons.Filled.CreditCard, "Documents")
         BottomItem(nav, route, Routes.Activity, Icons.Filled.History, "Activity")
         BottomItem(nav, route, Routes.Settings, Icons.Filled.Settings, "Settings")
     }

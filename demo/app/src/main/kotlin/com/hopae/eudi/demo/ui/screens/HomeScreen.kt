@@ -38,11 +38,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.hopae.eudi.demo.ui.credGlyph
+import com.hopae.eudi.demo.ui.DocumentRow
+import com.hopae.eudi.demo.ui.byRecentUse
 import com.hopae.eudi.demo.ui.credGradient
 import com.hopae.eudi.demo.ui.credKicker
 import com.hopae.eudi.demo.ui.credTitle
-import com.hopae.eudi.demo.ui.components.DocTile
 import com.hopae.eudi.demo.ui.components.Pill
 import com.hopae.eudi.demo.ui.components.SecuredPill
 import com.hopae.eudi.demo.ui.components.WalletCard
@@ -66,7 +66,9 @@ fun HomeScreen(
     onReadMdl: () -> Unit,
     onProximity: () -> Unit,
     onOpenDoc: (Credential) -> Unit,
+    onSeeDocuments: () -> Unit,
     onSeeActivity: () -> Unit,
+    onOpenActivity: (TransactionLogEntry) -> Unit,
 ) {
     val c = WalletTheme.colors
     var creds by remember { mutableStateOf<List<Credential>>(emptyList()) }
@@ -79,6 +81,9 @@ fun HomeScreen(
         reload()
         runCatching { wallet.credentials.changes.collect { reload() } }
     }
+    // Surface the most-recently-used documents first (hero = the top one, then a short preview).
+    val ordered = remember(creds, recent) { creds.byRecentUse(recent) }
+    val previewCount = 3
 
     LazyColumn(
         Modifier.fillMaxWidth().background(c.screen),
@@ -96,7 +101,7 @@ fun HomeScreen(
         }
 
         item {
-            val hero = creds.firstOrNull()
+            val hero = ordered.firstOrNull()
             if (hero == null) EmptyHero(onScan) else HeroCard(hero) { onOpenDoc(hero) }
         }
 
@@ -108,24 +113,26 @@ fun HomeScreen(
             }
         }
 
-        if (creds.size > 1) {
+        if (ordered.size > 1) {
             item {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Documents", style = MaterialTheme.typography.titleSmall, color = c.ink, modifier = Modifier.weight(1f))
-                    Text("${creds.size}", style = MaterialTheme.typography.bodySmall, color = c.inkMuted)
+                    if (ordered.size - 1 > previewCount) {
+                        Text("See all", style = MaterialTheme.typography.labelMedium, color = c.brand, modifier = Modifier.clickable { onSeeDocuments() })
+                    }
                 }
             }
-            items(creds.drop(1)) { d -> DocRow(d) { onOpenDoc(d) } }
+            items(ordered.drop(1).take(previewCount)) { d -> DocumentRow(d) { onOpenDoc(d) } }
         }
 
         if (recent.isNotEmpty()) {
             item {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Recent activity", style = MaterialTheme.typography.titleSmall, color = c.ink, modifier = Modifier.weight(1f))
                     Text("See all", style = MaterialTheme.typography.labelMedium, color = c.brand, modifier = Modifier.clickable { onSeeActivity() })
                 }
             }
-            items(recent.take(3)) { e -> ActivityRow(e) }
+            items(recent.take(3)) { e -> ActivityRow(e, onClick = { onOpenActivity(e) }) }
         }
     }
 }
@@ -197,42 +204,27 @@ private fun QuickAction(label: String, icon: ImageVector, primary: Boolean, modi
 }
 
 @Composable
-private fun DocRow(cred: Credential, onClick: () -> Unit) {
-    val c = WalletTheme.colors
-    WalletCard(onClick = onClick, padding = androidx.compose.foundation.layout.PaddingValues(13.dp, 13.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-            DocTile(credGlyph(cred), credGradient(cred))
-            Column(Modifier.weight(1f)) {
-                Text(credTitle(cred), style = MaterialTheme.typography.titleSmall, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                cred.issuer?.displayName?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-            Pill("Valid", c.trustBg, c.trustDeep)
-            Spacer(Modifier.size(4.dp))
-            Icon(Icons.Filled.ChevronRight, null, tint = c.cardBorderStrong, modifier = Modifier.size(16.dp))
-        }
-    }
-}
-
-@Composable
-private fun ActivityRow(e: TransactionLogEntry) {
+private fun ActivityRow(e: TransactionLogEntry, onClick: () -> Unit) {
     val c = WalletTheme.colors
     val shared = e.type.name.contains("Present", ignoreCase = true)
     val issued = e.type.name.contains("Issu", ignoreCase = true)
     val arrow = when { shared -> "↑"; issued -> "↓"; else -> "✓" }
     val tint = when { shared -> c.brand; issued -> c.trust; else -> c.inkMuted }
     val bg = when { shared -> c.brandSoftBg; issued -> c.trustBg; else -> c.screen }
-    WalletCard(padding = androidx.compose.foundation.layout.PaddingValues(11.dp, 14.dp)) {
+    val title = e.relyingParty?.name ?: e.relyingParty?.id
+        ?: when { issued -> "Credential issued"; shared -> "Presentation"; else -> "Verification" }
+    val status = e.status.name.lowercase().replaceFirstChar { it.uppercase() }
+    WalletCard(onClick = onClick, padding = androidx.compose.foundation.layout.PaddingValues(11.dp, 14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.size(32.dp).clip(RoundedCornerShape(99.dp)).background(bg), contentAlignment = Alignment.Center) {
                 Text(arrow, color = tint, style = MaterialTheme.typography.titleSmall)
             }
             Column(Modifier.weight(1f)) {
-                Text(e.relyingParty?.name ?: e.relyingParty?.id ?: e.type.name, style = MaterialTheme.typography.bodyMedium, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${e.status} · ${e.documents.size} doc(s)", style = MaterialTheme.typography.bodySmall, color = c.inkFaint)
+                Text(title, style = MaterialTheme.typography.bodyMedium, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Time folded into the subtitle so it sits next to the content instead of pinned far right.
+                Text("$status · ${relTime(e.timestamp)}", style = MaterialTheme.typography.bodySmall, color = c.inkFaint)
             }
-            Text(relTime(e.timestamp), style = MaterialTheme.typography.bodySmall, color = c.inkFaint)
+            Icon(Icons.Filled.ChevronRight, null, tint = c.cardBorderStrong, modifier = Modifier.size(16.dp))
         }
     }
 }

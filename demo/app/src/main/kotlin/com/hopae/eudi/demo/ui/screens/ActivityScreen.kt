@@ -37,7 +37,7 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun ActivityScreen(wallet: Wallet, refreshKey: Int) {
+fun ActivityScreen(wallet: Wallet, refreshKey: Int, onOpenActivity: (TransactionLogEntry) -> Unit) {
     val c = WalletTheme.colors
     var entries by remember { mutableStateOf<List<TransactionLogEntry>>(emptyList()) }
     LaunchedEffect(refreshKey) { runCatching { wallet.transactions.history() }.onSuccess { entries = it } }
@@ -51,18 +51,18 @@ fun ActivityScreen(wallet: Wallet, refreshKey: Int) {
         if (entries.isEmpty()) {
             item { Text("Nothing yet — your issuances and presentations will appear here.", style = MaterialTheme.typography.bodyMedium, color = c.inkMuted) }
         }
-        items(entries) { e -> ActivityCard(e) }
+        items(entries) { e -> ActivityCard(e) { onOpenActivity(e) } }
     }
 }
 
 @Composable
-private fun ActivityCard(e: TransactionLogEntry) {
+private fun ActivityCard(e: TransactionLogEntry, onClick: () -> Unit) {
     val c = WalletTheme.colors
     val present = e.type == TransactionType.PRESENTATION
     val arrow = if (present) "↑" else "↓"
     val tint = if (present) c.brand else c.trust
     val bg = if (present) c.brandSoftBg else c.trustBg
-    WalletCard(padding = PaddingValues(13.dp)) {
+    WalletCard(onClick = onClick, padding = PaddingValues(13.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.size(34.dp).clip(RoundedCornerShape(99.dp)).background(bg), contentAlignment = Alignment.Center) {
                 Text(arrow, color = tint, style = MaterialTheme.typography.titleSmall)

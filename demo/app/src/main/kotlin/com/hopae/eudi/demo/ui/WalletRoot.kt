@@ -49,7 +49,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavHostController
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -105,6 +105,19 @@ fun WalletRoot(wallet: Wallet) {
     var txDetail by remember { mutableStateOf<TransactionLogEntry?>(null) }
     var showProximity by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<String?>(null) }
+
+    // Standard bottom-nav switch: single instance per tab, saving/restoring each tab's state. Both the bottom
+    // bar and the "See all" links go through this so the back stack stays consistent (tapping Home after a
+    // "See all" must return Home).
+    val navigateTab: (String) -> Unit = { dest ->
+        if (dest != nav.currentDestination?.route) {
+            nav.navigate(dest) {
+                popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
 
     val openAuth: (String, IssuanceSession) -> Unit = { url, session ->
         PendingAuth.session = session
@@ -170,7 +183,7 @@ fun WalletRoot(wallet: Wallet) {
     val route = backStack?.destination?.route
 
     Scaffold(
-        bottomBar = { if (route in MainTabs) WalletBottomBar(nav, route) },
+        bottomBar = { if (route in MainTabs) WalletBottomBar(navigateTab, route) },
     ) { padding ->
         NavHost(nav, startDestination = Routes.Home, modifier = Modifier.padding(padding).fillMaxSize()) {
             composable(Routes.Home) {
@@ -180,8 +193,8 @@ fun WalletRoot(wallet: Wallet) {
                     onReadMdl = { nav.navigate(Routes.Reader) },
                     onProximity = { showProximity = true },
                     onOpenDoc = { detail = it },
-                    onSeeDocuments = { nav.navigate(Routes.Documents) { launchSingleTop = true } },
-                    onSeeActivity = { nav.navigate(Routes.Activity) { launchSingleTop = true } },
+                    onSeeDocuments = { navigateTab(Routes.Documents) },
+                    onSeeActivity = { navigateTab(Routes.Activity) },
                     onOpenActivity = { txDetail = it },
                 )
             }
@@ -265,18 +278,18 @@ fun WalletRoot(wallet: Wallet) {
 }
 
 @Composable
-private fun WalletBottomBar(nav: NavHostController, route: String?) {
+private fun WalletBottomBar(onTab: (String) -> Unit, route: String?) {
     NavigationBar(containerColor = WalletTheme.colors.card) {
-        BottomItem(nav, route, Routes.Home, Icons.Filled.Home, "Home")
-        BottomItem(nav, route, Routes.Documents, Icons.Filled.CreditCard, "Documents")
-        BottomItem(nav, route, Routes.Activity, Icons.Filled.History, "Activity")
-        BottomItem(nav, route, Routes.Settings, Icons.Filled.Settings, "Settings")
+        BottomItem(onTab, route, Routes.Home, Icons.Filled.Home, "Home")
+        BottomItem(onTab, route, Routes.Documents, Icons.Filled.CreditCard, "Documents")
+        BottomItem(onTab, route, Routes.Activity, Icons.Filled.History, "Activity")
+        BottomItem(onTab, route, Routes.Settings, Icons.Filled.Settings, "Settings")
     }
 }
 
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.BottomItem(
-    nav: NavHostController,
+    onTab: (String) -> Unit,
     current: String?,
     route: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -285,13 +298,7 @@ private fun androidx.compose.foundation.layout.RowScope.BottomItem(
     val c = WalletTheme.colors
     NavigationBarItem(
         selected = current == route,
-        onClick = {
-            if (current != route) nav.navigate(route) {
-                popUpTo(Routes.Home) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
-            }
-        },
+        onClick = { onTab(route) },
         icon = { Icon(icon, null) },
         label = { Text(label) },
         colors = NavigationBarItemDefaults.colors(

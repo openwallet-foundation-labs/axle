@@ -23,10 +23,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -68,6 +71,7 @@ fun DocumentDetailScreen(
     val c = WalletTheme.colors
     var reveal by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
     val claims = (cred.lifecycle as? Lifecycle.Issued)?.claims.orEmpty()
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -84,6 +88,16 @@ fun DocumentDetailScreen(
             Text(credTitle(cred), style = MaterialTheme.typography.titleMedium, color = c.ink, modifier = Modifier.weight(1f))
             if (claims.any { isSensitive(it.path) }) {
                 CircleIcon(if (reveal) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility) { reveal = !reveal }
+                Spacer(Modifier.width(8.dp))
+            }
+            Box {
+                CircleIcon(Icons.Filled.MoreVert) { menuOpen = true }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Delete document", color = c.danger) },
+                        onClick = { menuOpen = false; confirmDelete = true },
+                    )
+                }
             }
         }
 
@@ -123,10 +137,11 @@ fun DocumentDetailScreen(
             }
         }
 
-        Spacer(Modifier.height(4.dp))
         // Proximity is the one genuinely holder-initiated present action (show *this* mDL over BLE/NFC).
         // Cross-device / QR presentation is request-driven — it starts by scanning the verifier from Home.
+        // (Delete lives in the top-right overflow menu.)
         onPresentProximity?.let {
+            Spacer(Modifier.height(4.dp))
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.brand)
                     .clickable { it() }.padding(vertical = 15.dp),
@@ -136,10 +151,6 @@ fun DocumentDetailScreen(
                 Spacer(Modifier.width(9.dp))
                 Text("Present via proximity", style = MaterialTheme.typography.labelLarge, color = Color.White)
             }
-        }
-        Box(Modifier.fillMaxWidth().padding(top = 2.dp), contentAlignment = Alignment.Center) {
-            Text("Delete document", style = MaterialTheme.typography.bodyMedium, color = c.danger, fontWeight = FontWeight(700),
-                modifier = Modifier.clickable { confirmDelete = true }.padding(8.dp))
         }
     }
 

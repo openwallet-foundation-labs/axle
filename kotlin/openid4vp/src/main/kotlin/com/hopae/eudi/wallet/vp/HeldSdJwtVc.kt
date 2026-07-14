@@ -41,7 +41,9 @@ class HeldSdJwtVc(
         val presented = SdJwtHolder.presentWithKeyBinding(
             issued = sdJwt,
             select = { it in pathSet },
-            audience = ctx.clientId,
+            // Over the DC API the KB-JWT audience is the caller origin prefixed with `origin:` (OpenID4VP
+            // Appendix A.2); for the remote (URL/QR) flow it is the verifier's client_id.
+            audience = ctx.origin?.let { "origin:$it" } ?: ctx.clientId,
             nonce = ctx.nonce,
             issuedAt = ctx.issuedAt,
             signer = holderSigner,

@@ -40,9 +40,12 @@ public struct HeldSdJwtVc: PresentableCredential {
             extra.append(("transaction_data_hashes", .arr(td.map { .str(sha256B64($0)) })))
             extra.append(("transaction_data_hashes_alg", .str("sha-256")))
         }
+        // Over the DC API the KB-JWT audience is the caller origin prefixed with `origin:` (OpenID4VP
+        // Appendix A.2); for the remote (URL/QR) flow it is the verifier's client_id.
+        let audience = ctx.origin.map { "origin:\($0)" } ?? ctx.clientId
         let presented = try await SdJwtHolder.presentWithKeyBinding(
             sdJwt, select: { pathSet.contains($0) },
-            audience: ctx.clientId, nonce: ctx.nonce, issuedAt: ctx.issuedAt, signer: holderSigner, extraClaims: extra
+            audience: audience, nonce: ctx.nonce, issuedAt: ctx.issuedAt, signer: holderSigner, extraClaims: extra
         )
         return presented.serialize()
     }

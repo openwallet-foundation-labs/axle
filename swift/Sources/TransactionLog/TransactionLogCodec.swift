@@ -30,6 +30,9 @@ public enum TransactionLogCodec {
         if let error = e.error { o.append(("error", .str(error))) }
         if let raw = e.rawRequest { o.append(("rawRequest", .str(Base64Url.encode(raw)))) }
         if let raw = e.rawResponse { o.append(("rawResponse", .str(Base64Url.encode(raw)))) }
+        if let transport = e.transport { o.append(("transport", .str(transport.rawValue))) }
+        if let issuerName = e.issuerName { o.append(("issuerName", .str(issuerName))) }
+        if let issuerRegistered = e.issuerRegistered { o.append(("issuerRegistered", .bool(issuerRegistered))) }
         return .obj(o)
     }
 
@@ -52,10 +55,17 @@ public enum TransactionLogCodec {
         if case let .str(s)? = json["rawRequest"] { rawRequest = try Base64Url.decode(s) }
         var rawResponse: [UInt8]?
         if case let .str(s)? = json["rawResponse"] { rawResponse = try Base64Url.decode(s) }
+        var transport: TransactionTransport?
+        if case let .str(s)? = json["transport"] { transport = TransactionTransport(rawValue: s) }
+        var issuerName: String?
+        if case let .str(s)? = json["issuerName"] { issuerName = s }
+        var issuerRegistered: Bool?
+        if case let .bool(b)? = json["issuerRegistered"] { issuerRegistered = b }
 
         return TransactionLogEntry(id: id, timestamp: ts, type: type, status: status, relyingParty: rp,
                                    issuer: issuer, documents: documents, error: error,
-                                   rawRequest: rawRequest, rawResponse: rawResponse)
+                                   rawRequest: rawRequest, rawResponse: rawResponse,
+                                   transport: transport, issuerName: issuerName, issuerRegistered: issuerRegistered)
     }
 
     private static func rpJson(_ rp: RelyingParty) -> JsonValue {
@@ -65,6 +75,14 @@ public enum TransactionLogCodec {
         if !rp.certificateChainDer.isEmpty {
             o.append(("certificateChain", .arr(rp.certificateChainDer.map { .str(Base64Url.encode($0)) })))
         }
+        if let clientIdScheme = rp.clientIdScheme { o.append(("clientIdScheme", .str(clientIdScheme))) }
+        if let subject = rp.subject { o.append(("subject", .str(subject))) }
+        if !rp.entitlements.isEmpty { o.append(("entitlements", .arr(rp.entitlements.map { .str($0) }))) }
+        if !rp.purpose.isEmpty { o.append(("purpose", .arr(rp.purpose.map(textJson)))) }
+        if let intermediaryName = rp.intermediaryName { o.append(("intermediaryName", .str(intermediaryName))) }
+        if let intermediarySub = rp.intermediarySub { o.append(("intermediarySub", .str(intermediarySub))) }
+        if let attested = rp.attested { o.append(("attested", .bool(attested))) }
+        if let statusValid = rp.statusValid { o.append(("statusValid", .bool(statusValid))) }
         return .obj(o)
     }
 
@@ -74,7 +92,30 @@ public enum TransactionLogCodec {
         var trusted = false; if case let .bool(b)? = json["trusted"] { trusted = b }
         var chain: [[UInt8]] = []
         if case let .arr(items)? = json["certificateChain"] { chain = items.compactMap { if case let .str(s) = $0 { return try? Base64Url.decode(s) }; return nil } }
-        return RelyingParty(id: id, name: name, trusted: trusted, certificateChainDer: chain)
+        var clientIdScheme: String?; if case let .str(s)? = json["clientIdScheme"] { clientIdScheme = s }
+        var subject: String?; if case let .str(s)? = json["subject"] { subject = s }
+        var entitlements: [String] = []
+        if case let .arr(items)? = json["entitlements"] { entitlements = items.compactMap { if case let .str(s) = $0 { return s }; return nil } }
+        var purpose: [LocalizedText] = []
+        if case let .arr(items)? = json["purpose"] { purpose = items.compactMap { if case .obj = $0 { return textFromJson($0) }; return nil } }
+        var intermediaryName: String?; if case let .str(s)? = json["intermediaryName"] { intermediaryName = s }
+        var intermediarySub: String?; if case let .str(s)? = json["intermediarySub"] { intermediarySub = s }
+        var attested: Bool?; if case let .bool(b)? = json["attested"] { attested = b }
+        var statusValid: Bool?; if case let .bool(b)? = json["statusValid"] { statusValid = b }
+        return RelyingParty(id: id, name: name, trusted: trusted, certificateChainDer: chain,
+                            clientIdScheme: clientIdScheme, subject: subject, entitlements: entitlements,
+                            purpose: purpose, intermediaryName: intermediaryName, intermediarySub: intermediarySub,
+                            attested: attested, statusValid: statusValid)
+    }
+
+    private static func textJson(_ t: LocalizedText) -> JsonValue {
+        .obj([("lang", .str(t.lang)), ("value", .str(t.value))])
+    }
+
+    private static func textFromJson(_ json: JsonValue) -> LocalizedText {
+        var lang = ""; if case let .str(s)? = json["lang"] { lang = s }
+        var value = ""; if case let .str(s)? = json["value"] { value = s }
+        return LocalizedText(lang: lang, value: value)
     }
 
     private static func docJson(_ d: LoggedDocument) -> JsonValue {

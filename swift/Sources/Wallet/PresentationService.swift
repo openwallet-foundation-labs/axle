@@ -100,10 +100,10 @@ public struct PresentationService {
                     terminal = try await submit(resolved, matches, selection, chosenHeld)
                 } catch {
                     // Only the final submission failed — record the attempted disclosure with .error status (opt-in).
-                    if recordFailures { try? await recordError(resolved, selection, matches) }
+                    if recordFailures { try? await recordError(resolved, selection, matches, statusValid) }
                     throw error
                 }
-                try await recordSuccess(resolved, selection, matches)
+                try await recordSuccess(resolved, selection, matches, statusValid)
                 s.emit(terminal)
             }
         }
@@ -229,21 +229,34 @@ public struct PresentationService {
         return nil
     }
 
-    private func recordSuccess(_ resolved: ResolvedRequest, _ selection: PresentationSelection, _ matches: DcqlMatchResult) async throws {
-        await txlog.recordPresentation(relyingParty: relyingPartyOf(resolved), documents: loggedDocuments(selection, matches), status: .success)
+    private func recordSuccess(_ resolved: ResolvedRequest, _ selection: PresentationSelection, _ matches: DcqlMatchResult, _ statusValid: Bool?) async throws {
+        await txlog.recordPresentation(relyingParty: relyingPartyOf(resolved, statusValid), documents: loggedDocuments(selection, matches), status: .success, transport: .remote)
     }
 
-    private func recordDeclined(_ resolved: ResolvedRequest) async throws {
-        await txlog.recordPresentation(relyingParty: relyingPartyOf(resolved), documents: [], status: .incomplete)
+    private func recordDeclined(_ resolved: ResolvedRequest, _ statusValid: Bool? = nil) async throws {
+        await txlog.recordPresentation(relyingParty: relyingPartyOf(resolved, statusValid), documents: [], status: .incomplete, transport: .remote)
     }
 
-    private func recordError(_ resolved: ResolvedRequest, _ selection: PresentationSelection, _ matches: DcqlMatchResult) async throws {
-        await txlog.recordPresentation(relyingParty: relyingPartyOf(resolved), documents: loggedDocuments(selection, matches), status: .error)
+    private func recordError(_ resolved: ResolvedRequest, _ selection: PresentationSelection, _ matches: DcqlMatchResult, _ statusValid: Bool?) async throws {
+        await txlog.recordPresentation(relyingParty: relyingPartyOf(resolved, statusValid), documents: loggedDocuments(selection, matches), status: .error, transport: .remote)
     }
 
-    private func relyingPartyOf(_ resolved: ResolvedRequest) -> RelyingParty {
-        RelyingParty(id: resolved.verifier.clientId, name: resolved.verifier.commonName,
-                     trusted: resolved.verifier.trusted, certificateChainDer: resolved.verifier.certificateChainDer ?? [])
+    private func relyingPartyOf(_ resolved: ResolvedRequest, _ statusValid: Bool?) -> RelyingParty {
+        let v = resolved.verifier
+        let reg = v.registration
+        return RelyingParty(
+            id: v.clientId,
+            name: v.commonName,
+            trusted: v.trusted,
+            certificateChainDer: v.certificateChainDer ?? [],
+            clientIdScheme: v.clientIdScheme,
+            subject: reg?.subject,
+            entitlements: reg?.entitlements ?? [],
+            purpose: reg?.purpose.map { LocalizedText(lang: $0.lang, value: $0.value) } ?? [],
+            intermediaryName: reg?.intermediaryName,
+            intermediarySub: reg?.intermediarySub,
+            attested: reg?.attested,
+            statusValid: statusValid)
     }
 
     private func loggedDocuments(_ selection: PresentationSelection, _ matches: DcqlMatchResult) -> [LoggedDocument] {

@@ -228,11 +228,13 @@ public struct IssuanceService {
             instances.append(CredentialInstance(key: proofKeys[i], payload: try decode(credential).1))
         }
         let id = existingId ?? newId()
+        let meta = await captureMetadata(response, issuerTrusted: issuerTrusted)
         try await store.save(CredentialEnvelope(id: id, format: format, createdAt: clock.now(),
                                                 lifecycle: .issued(policy: policy, instances: instances),
-                                                metadata: await captureMetadata(response, issuerTrusted: issuerTrusted)))
+                                                metadata: meta))
         // ARF/GDPR audit trail: record the issuance (covers immediate, deferred-completed, and reissued).
-        _ = await txlog.recordIssuance(issuer: response.credentialIssuer ?? "", documents: [loggedDocument(format)], status: .success)
+        _ = await txlog.recordIssuance(issuer: response.credentialIssuer ?? "", documents: [loggedDocument(format)],
+                                       status: .success, issuerName: meta?.issuerDisplayName, issuerRegistered: meta?.issuerRegistered)
         try await storage.put(collection: "followup", key: id.value, value: contextOf(response, proofKeys, dpopKey, policy, response.configurationId ?? "").encode())
         await autoNotify(response, dpopKey)
         return id

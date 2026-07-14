@@ -6,7 +6,19 @@ public enum TransactionType: String, Sendable { case presentation = "PRESENTATIO
 /// Outcome of the activity.
 public enum TransactionStatus: String, Sendable { case success = "SUCCESS", incomplete = "INCOMPLETE", error = "ERROR" }
 
-/// The verifier a presentation went to (from the resolved request + trust decision).
+/// A localized string (BCP-47 `lang` + `value`), e.g. a WRPRC `purpose`.
+public struct LocalizedText: Sendable {
+    public let lang: String
+    public let value: String
+    public init(lang: String, value: String) { self.lang = lang; self.value = value }
+}
+
+/// How a presentation was delivered.
+public enum TransactionTransport: String, Sendable { case remote = "REMOTE", proximity = "PROXIMITY", dcApi = "DC_API" }
+
+/// The verifier a presentation went to (from the resolved request + trust decision). Beyond identity + trust,
+/// the registration fields (from the validated WRPRC / registrar dataset) are all optional — absent when the
+/// RP presented no registration, so older records and unregistered RPs stay valid.
 public struct RelyingParty: Sendable {
     public let id: String
     public let name: String?
@@ -14,9 +26,30 @@ public struct RelyingParty: Sendable {
     public let trusted: Bool
     /// Leaf-first DER of the verifier's certificate chain, if any.
     public let certificateChainDer: [[UInt8]]
+    /// client_id scheme (x509_san_dns, …), when known.
+    public let clientIdScheme: String?
+    /// Registered semantic identifier of the RP (organizationIdentifier), from its registration.
+    public let subject: String?
+    /// EU-level entitlements/roles the RP is registered for.
+    public let entitlements: [String]
+    /// The RP's declared purpose / intended use (why it asked), localized.
+    public let purpose: [LocalizedText]
+    /// When the RP operates through an intermediary.
+    public let intermediaryName: String?
+    public let intermediarySub: String?
+    /// True iff a registrar-issued WRPRC attested the registration (vs a self-declared dataset).
+    public let attested: Bool?
+    /// Token Status List result for the WRPRC: true = valid, false = revoked, nil = not checked.
+    public let statusValid: Bool?
 
-    public init(id: String, name: String? = nil, trusted: Bool = false, certificateChainDer: [[UInt8]] = []) {
+    public init(id: String, name: String? = nil, trusted: Bool = false, certificateChainDer: [[UInt8]] = [],
+                clientIdScheme: String? = nil, subject: String? = nil, entitlements: [String] = [],
+                purpose: [LocalizedText] = [], intermediaryName: String? = nil, intermediarySub: String? = nil,
+                attested: Bool? = nil, statusValid: Bool? = nil) {
         self.id = id; self.name = name; self.trusted = trusted; self.certificateChainDer = certificateChainDer
+        self.clientIdScheme = clientIdScheme; self.subject = subject; self.entitlements = entitlements
+        self.purpose = purpose; self.intermediaryName = intermediaryName; self.intermediarySub = intermediarySub
+        self.attested = attested; self.statusValid = statusValid
     }
 }
 
@@ -53,13 +86,21 @@ public struct TransactionLogEntry: Sendable {
     public let error: String?
     public let rawRequest: [UInt8]?
     public let rawResponse: [UInt8]?
+    /// How a presentation was delivered (nil for issuance / older records).
+    public let transport: TransactionTransport?
+    /// Issuer display name (issuance), when known.
+    public let issuerName: String?
+    /// Whether the issuer was established as a registered issuer — 2A (issuance), when checked.
+    public let issuerRegistered: Bool?
 
     public init(id: String, timestamp: Int64, type: TransactionType, status: TransactionStatus,
                 relyingParty: RelyingParty? = nil, issuer: String? = nil, documents: [LoggedDocument] = [],
-                error: String? = nil, rawRequest: [UInt8]? = nil, rawResponse: [UInt8]? = nil) {
+                error: String? = nil, rawRequest: [UInt8]? = nil, rawResponse: [UInt8]? = nil,
+                transport: TransactionTransport? = nil, issuerName: String? = nil, issuerRegistered: Bool? = nil) {
         self.id = id; self.timestamp = timestamp; self.type = type; self.status = status
         self.relyingParty = relyingParty; self.issuer = issuer; self.documents = documents
         self.error = error; self.rawRequest = rawRequest; self.rawResponse = rawResponse
+        self.transport = transport; self.issuerName = issuerName; self.issuerRegistered = issuerRegistered
     }
 }
 
@@ -92,17 +133,20 @@ public struct TransactionLog {
     @discardableResult
     public func recordPresentation(relyingParty: RelyingParty, documents: [LoggedDocument],
                                    status: TransactionStatus = .success, error: String? = nil,
-                                   rawRequest: [UInt8]? = nil, rawResponse: [UInt8]? = nil) async -> TransactionLogEntry {
+                                   rawRequest: [UInt8]? = nil, rawResponse: [UInt8]? = nil,
+                                   transport: TransactionTransport? = nil) async -> TransactionLogEntry {
         await record(TransactionLogEntry(id: idGenerator(), timestamp: clock(), type: .presentation, status: status,
                                          relyingParty: relyingParty, documents: documents, error: error,
-                                         rawRequest: rawRequest, rawResponse: rawResponse))
+                                         rawRequest: rawRequest, rawResponse: rawResponse, transport: transport))
     }
 
     @discardableResult
     public func recordIssuance(issuer: String, documents: [LoggedDocument],
-                               status: TransactionStatus = .success, error: String? = nil) async -> TransactionLogEntry {
+                               status: TransactionStatus = .success, error: String? = nil,
+                               issuerName: String? = nil, issuerRegistered: Bool? = nil) async -> TransactionLogEntry {
         await record(TransactionLogEntry(id: idGenerator(), timestamp: clock(), type: .issuance, status: status,
-                                         issuer: issuer, documents: documents, error: error))
+                                         issuer: issuer, documents: documents, error: error,
+                                         issuerName: issuerName, issuerRegistered: issuerRegistered))
     }
 
     private func record(_ entry: TransactionLogEntry) async -> TransactionLogEntry {

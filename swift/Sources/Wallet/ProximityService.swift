@@ -150,7 +150,7 @@ public struct ProximityService {
         }
         let rp = RelyingParty(id: reader.commonName ?? origin, name: reader.commonName ?? origin,
                               trusted: reader.trusted, certificateChainDer: reader.certificateChainDer)
-        await txlog.recordPresentation(relyingParty: rp, documents: documents, status: .success)
+        await txlog.recordPresentation(relyingParty: rp, documents: documents, status: .success, transport: .dcApi)
     }
 
     private func verifyReader(_ deviceRequest: DeviceRequest, _ transcript: Cbor) async -> ProximityReaderInfo {
@@ -208,15 +208,15 @@ public struct ProximityService {
     }
 
     private func recordSuccess(_ request: ProximityRequest, _ selection: ProximitySelection) async throws {
-        await txlog.recordPresentation(relyingParty: proximityReader(request), documents: loggedDocuments(request, selection), status: .success)
+        await txlog.recordPresentation(relyingParty: proximityReader(request), documents: loggedDocuments(request, selection), status: .success, transport: .proximity)
     }
 
     private func recordError(_ request: ProximityRequest, _ selection: ProximitySelection) async throws {
-        await txlog.recordPresentation(relyingParty: proximityReader(request), documents: loggedDocuments(request, selection), status: .error)
+        await txlog.recordPresentation(relyingParty: proximityReader(request), documents: loggedDocuments(request, selection), status: .error, transport: .proximity)
     }
 
     private func recordDeclined(_ request: ProximityRequest) async throws {
-        await txlog.recordPresentation(relyingParty: proximityReader(request), documents: [], status: .incomplete)
+        await txlog.recordPresentation(relyingParty: proximityReader(request), documents: [], status: .incomplete, transport: .proximity)
     }
 
     private func loggedDocuments(_ request: ProximityRequest, _ selection: ProximitySelection) -> [LoggedDocument] {

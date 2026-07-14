@@ -519,6 +519,10 @@ fun ProximityReaderScreen(wallet: Wallet) {
         }
         action()
     }
+    // Check BLE readiness the moment the screen opens (i.e. when the Home "Reader" button is pressed), so a
+    // missing permission / disabled Bluetooth is prompted up front instead of surfacing as a silent timeout.
+    LaunchedEffect(Unit) { ensureReady {} }
+
     fun onNfc() {
         results = emptyList()
         status = "Hold near the wallet (NFC)…"

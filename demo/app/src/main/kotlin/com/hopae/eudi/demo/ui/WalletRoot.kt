@@ -292,7 +292,7 @@ private fun ReaderRoute(wallet: Wallet, onBack: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = c.ink, modifier = Modifier.size(18.dp)) }
             Spacer(Modifier.width(10.dp))
-            Text("Read mDL", style = MaterialTheme.typography.titleMedium, color = c.ink)
+            Text("Reader", style = MaterialTheme.typography.titleMedium, color = c.ink)
         }
         ProximityReaderScreen(wallet)
     }

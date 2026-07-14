@@ -116,7 +116,7 @@ fun HomeScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     QuickAction("Scan", Icons.Filled.QrCodeScanner, primary = true, modifier = Modifier.weight(1f), onClick = onScan)
                     QuickAction("Proximity", Icons.Filled.Sensors, primary = false, modifier = Modifier.weight(1f), onClick = onProximity)
-                    QuickAction("Read mDL", Icons.Filled.Sensors, primary = false, modifier = Modifier.weight(1f), onClick = onReadMdl)
+                    QuickAction("Reader", Icons.Filled.Sensors, primary = false, modifier = Modifier.weight(1f), onClick = onReadMdl)
                 }
             }
         }

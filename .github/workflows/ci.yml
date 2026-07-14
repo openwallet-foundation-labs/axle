@@ -7,9 +7,15 @@ on:
   schedule:
     - cron: '0 3 * * *' # nightly live interop
 
+# Superseded runs on the same ref are cancelled so a new push doesn't leave old runs burning minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
 jobs:
   kotlin:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -22,6 +28,7 @@ jobs:
   swift:
     runs-on: ubuntu-latest
     container: swift:6.2
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - run: swift test --package-path swift
@@ -30,6 +37,7 @@ jobs:
   interop:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4

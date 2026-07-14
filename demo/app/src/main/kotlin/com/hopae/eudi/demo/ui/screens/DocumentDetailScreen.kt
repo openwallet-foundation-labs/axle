@@ -95,8 +95,8 @@ fun DocumentDetailScreen(
                 CircleIcon(Icons.Filled.MoreVert) { menuOpen = true }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
-                        text = { Text("Delete document", color = c.danger) },
-                        leadingIcon = { Icon(Icons.Outlined.Delete, null, tint = c.danger, modifier = Modifier.size(20.dp)) },
+                        text = { Text("Delete document", color = c.danger, style = MaterialTheme.typography.bodyMedium) },
+                        leadingIcon = { Icon(Icons.Outlined.Delete, null, tint = c.danger, modifier = Modifier.size(18.dp)) },
                         onClick = { menuOpen = false; confirmDelete = true },
                     )
                 }

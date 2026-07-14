@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hopae.eudi.demo.ui.DocumentRow
@@ -101,16 +102,18 @@ fun HomeScreen(
             }
         }
 
+        val hero = ordered.firstOrNull()
         item {
-            val hero = ordered.firstOrNull()
             if (hero == null) EmptyHero(onScan) else HeroCard(hero) { onOpenDoc(hero) }
         }
 
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                QuickAction("Scan", Icons.Filled.QrCodeScanner, primary = true, modifier = Modifier.weight(1f), onClick = onScan)
-                QuickAction("Proximity", Icons.Filled.Sensors, primary = false, modifier = Modifier.weight(1f), onClick = onProximity)
-                QuickAction("Read mDL", Icons.Filled.Sensors, primary = false, modifier = Modifier.weight(1f), onClick = onReadMdl)
+        if (hero != null) {
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    QuickAction("Scan", Icons.Filled.QrCodeScanner, primary = true, modifier = Modifier.weight(1f), onClick = onScan)
+                    QuickAction("Proximity", Icons.Filled.Sensors, primary = false, modifier = Modifier.weight(1f), onClick = onProximity)
+                    QuickAction("Read mDL", Icons.Filled.Sensors, primary = false, modifier = Modifier.weight(1f), onClick = onReadMdl)
+                }
             }
         }
 
@@ -182,16 +185,21 @@ private fun HeroCard(cred: Credential, onClick: () -> Unit) {
 @Composable
 private fun EmptyHero(onScan: () -> Unit) {
     val c = WalletTheme.colors
-    WalletCard(onClick = onScan, padding = androidx.compose.foundation.layout.PaddingValues(22.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Box(Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(c.brandSoftBg), contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.CreditCard, null, tint = c.brand, modifier = Modifier.size(24.dp))
-            }
-            Column(Modifier.weight(1f)) {
-                Text("No documents yet", style = MaterialTheme.typography.titleSmall, color = c.ink)
-                Text("Scan an issuer QR to add your first credential.", style = MaterialTheme.typography.bodySmall, color = c.inkMuted)
-            }
-            Icon(Icons.Filled.ChevronRight, null, tint = c.inkFaint)
+    WalletCard(padding = androidx.compose.foundation.layout.PaddingValues(24.dp)) {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(60.dp).clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(com.hopae.eudi.demo.ui.theme.DocGradients.Pid)),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Outlined.CreditCard, null, tint = Color.White, modifier = Modifier.size(28.dp)) }
+            Spacer(Modifier.height(16.dp))
+            Text("Add your first document", style = MaterialTheme.typography.titleMedium, color = c.ink)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Scan an issuer's QR to add your ID, driving licence and more — stored securely on this device.",
+                style = MaterialTheme.typography.bodyMedium, color = c.inkMuted, textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(20.dp))
+            com.hopae.eudi.demo.ui.components.PrimaryButton("Scan to add", onScan)
         }
     }
 }

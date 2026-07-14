@@ -226,9 +226,13 @@ class IssuanceService internal constructor(
         val issuerTrusted = credentialTrust?.let { runCatching { it.isTrusted(first.format, first.credential) }.getOrDefault(false) }
         val instances = response.credentials.mapIndexed { i, credential -> CredentialInstance(proofKeys[i], decode(credential).second) }
         val id = existingId ?: newId()
-        store.save(CredentialEnvelope(id, format, clock.now(), EnvelopeLifecycle.Issued(policy, instances), captureMetadata(response, issuerTrusted)))
+        val meta = captureMetadata(response, issuerTrusted)
+        store.save(CredentialEnvelope(id, format, clock.now(), EnvelopeLifecycle.Issued(policy, instances), meta))
         // ARF/GDPR audit trail: record the issuance (covers immediate, deferred-completed, and reissued).
-        txlog.recordIssuance(response.credentialIssuer ?: "", listOf(loggedDocument(format)), TransactionStatus.SUCCESS)
+        txlog.recordIssuance(
+            response.credentialIssuer ?: "", listOf(loggedDocument(format)), TransactionStatus.SUCCESS,
+            issuerName = meta?.issuerDisplayName, issuerRegistered = meta?.issuerRegistered,
+        )
         // Persist reissue context and best-effort notify the issuer of acceptance.
         storage.put("followup", id.value, contextOf(response, proofKeys, dpopKey, policy, response.configurationId ?: "").encode())
         autoNotify(response, dpopKey)

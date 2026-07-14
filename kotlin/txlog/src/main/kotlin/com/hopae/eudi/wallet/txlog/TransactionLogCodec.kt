@@ -27,6 +27,9 @@ object TransactionLogCodec {
             e.error?.let { add("error" to JsonValue.Str(it)) }
             e.rawRequest?.let { add("rawRequest" to JsonValue.Str(Base64Url.encode(it))) }
             e.rawResponse?.let { add("rawResponse" to JsonValue.Str(Base64Url.encode(it))) }
+            e.transport?.let { add("transport" to JsonValue.Str(it.name)) }
+            e.issuerName?.let { add("issuerName" to JsonValue.Str(it)) }
+            e.issuerRegistered?.let { add("issuerRegistered" to JsonValue.Bool(it)) }
         }
     )
 
@@ -41,6 +44,9 @@ object TransactionLogCodec {
         error = o.str("error"),
         rawRequest = o.str("rawRequest")?.let { Base64Url.decode(it) },
         rawResponse = o.str("rawResponse")?.let { Base64Url.decode(it) },
+        transport = o.str("transport")?.let { runCatching { TransactionTransport.valueOf(it) }.getOrNull() },
+        issuerName = o.str("issuerName"),
+        issuerRegistered = (o["issuerRegistered"] as? JsonValue.Bool)?.value,
     )
 
     private fun rpJson(rp: RelyingParty) = JsonValue.Obj(
@@ -51,6 +57,14 @@ object TransactionLogCodec {
             if (rp.certificateChainDer.isNotEmpty()) {
                 add("certificateChain" to JsonValue.Arr(rp.certificateChainDer.map { JsonValue.Str(Base64Url.encode(it)) }))
             }
+            rp.clientIdScheme?.let { add("clientIdScheme" to JsonValue.Str(it)) }
+            rp.subject?.let { add("subject" to JsonValue.Str(it)) }
+            if (rp.entitlements.isNotEmpty()) add("entitlements" to JsonValue.Arr(rp.entitlements.map { JsonValue.Str(it) }))
+            if (rp.purpose.isNotEmpty()) add("purpose" to JsonValue.Arr(rp.purpose.map { textJson(it) }))
+            rp.intermediaryName?.let { add("intermediaryName" to JsonValue.Str(it)) }
+            rp.intermediarySub?.let { add("intermediarySub" to JsonValue.Str(it)) }
+            rp.attested?.let { add("attested" to JsonValue.Bool(it)) }
+            rp.statusValid?.let { add("statusValid" to JsonValue.Bool(it)) }
         }
     )
 
@@ -59,7 +73,18 @@ object TransactionLogCodec {
         name = o.str("name"),
         trusted = (o["trusted"] as? JsonValue.Bool)?.value ?: false,
         certificateChainDer = (o["certificateChain"] as? JsonValue.Arr)?.items?.mapNotNull { (it as? JsonValue.Str)?.value?.let(Base64Url::decode) } ?: emptyList(),
+        clientIdScheme = o.str("clientIdScheme"),
+        subject = o.str("subject"),
+        entitlements = (o["entitlements"] as? JsonValue.Arr)?.items?.mapNotNull { (it as? JsonValue.Str)?.value } ?: emptyList(),
+        purpose = (o["purpose"] as? JsonValue.Arr)?.items?.mapNotNull { (it as? JsonValue.Obj)?.let(::textFromJson) } ?: emptyList(),
+        intermediaryName = o.str("intermediaryName"),
+        intermediarySub = o.str("intermediarySub"),
+        attested = (o["attested"] as? JsonValue.Bool)?.value,
+        statusValid = (o["statusValid"] as? JsonValue.Bool)?.value,
     )
+
+    private fun textJson(t: LocalizedText) = JsonValue.Obj(listOf("lang" to JsonValue.Str(t.lang), "value" to JsonValue.Str(t.value)))
+    private fun textFromJson(o: JsonValue.Obj) = LocalizedText(o.str("lang") ?: "", o.str("value") ?: "")
 
     private fun docJson(d: LoggedDocument) = JsonValue.Obj(
         buildList {

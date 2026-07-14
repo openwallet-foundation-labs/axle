@@ -7,6 +7,17 @@ enum class TransactionType { PRESENTATION, ISSUANCE }
 enum class TransactionStatus { SUCCESS, INCOMPLETE, ERROR }
 
 /** The verifier a presentation went to (from the resolved request + trust decision). */
+/** A localized string (BCP-47 `lang` + `value`), e.g. a WRPRC `purpose`. */
+data class LocalizedText(val lang: String, val value: String)
+
+/** How a presentation was delivered. */
+enum class TransactionTransport { REMOTE, PROXIMITY, DC_API }
+
+/**
+ * The relying party a presentation was made to. Beyond identity + trust, the registration fields (from the
+ * validated WRPRC / registrar dataset) are all optional — absent when the RP presented no registration, so
+ * older records and unregistered RPs stay valid.
+ */
 class RelyingParty(
     val id: String,
     val name: String? = null,
@@ -14,6 +25,21 @@ class RelyingParty(
     val trusted: Boolean = false,
     /** Leaf-first DER of the verifier's certificate chain, if any. */
     val certificateChainDer: List<ByteArray> = emptyList(),
+    /** client_id scheme (x509_san_dns, …), when known. */
+    val clientIdScheme: String? = null,
+    /** Registered semantic identifier of the RP (organizationIdentifier), from its registration. */
+    val subject: String? = null,
+    /** EU-level entitlements/roles the RP is registered for. */
+    val entitlements: List<String> = emptyList(),
+    /** The RP's declared purpose / intended use (why it asked), localized. */
+    val purpose: List<LocalizedText> = emptyList(),
+    /** When the RP operates through an intermediary. */
+    val intermediaryName: String? = null,
+    val intermediarySub: String? = null,
+    /** True iff a registrar-issued WRPRC attested the registration (vs a self-declared dataset). */
+    val attested: Boolean? = null,
+    /** Token Status List result for the WRPRC: true = valid, false = revoked, null = not checked. */
+    val statusValid: Boolean? = null,
 )
 
 /** One disclosed claim: its path and (optionally) the value that was shared. */
@@ -44,6 +70,12 @@ class TransactionLogEntry(
     val error: String? = null,
     val rawRequest: ByteArray? = null,
     val rawResponse: ByteArray? = null,
+    /** How a presentation was delivered (null for issuance / older records). */
+    val transport: TransactionTransport? = null,
+    /** Issuer display name (issuance), when known. */
+    val issuerName: String? = null,
+    /** Whether the issuer was established as a registered issuer — 2A (issuance), when checked. */
+    val issuerRegistered: Boolean? = null,
 )
 
 /** Append-only persistence for transaction log entries (host-provided; see [InMemoryTransactionLogStore]). */
@@ -77,8 +109,12 @@ class TransactionLog(
         error: String? = null,
         rawRequest: ByteArray? = null,
         rawResponse: ByteArray? = null,
+        transport: TransactionTransport? = null,
     ): TransactionLogEntry = record(
-        TransactionLogEntry(idGenerator(), clock(), TransactionType.PRESENTATION, status, relyingParty, null, documents, error, rawRequest, rawResponse)
+        TransactionLogEntry(
+            idGenerator(), clock(), TransactionType.PRESENTATION, status, relyingParty, null, documents, error,
+            rawRequest, rawResponse, transport,
+        )
     )
 
     suspend fun recordIssuance(
@@ -86,8 +122,13 @@ class TransactionLog(
         documents: List<LoggedDocument>,
         status: TransactionStatus = TransactionStatus.SUCCESS,
         error: String? = null,
+        issuerName: String? = null,
+        issuerRegistered: Boolean? = null,
     ): TransactionLogEntry = record(
-        TransactionLogEntry(idGenerator(), clock(), TransactionType.ISSUANCE, status, null, issuer, documents, error)
+        TransactionLogEntry(
+            idGenerator(), clock(), TransactionType.ISSUANCE, status, null, issuer, documents, error,
+            issuerName = issuerName, issuerRegistered = issuerRegistered,
+        )
     )
 
     private suspend fun record(entry: TransactionLogEntry): TransactionLogEntry {

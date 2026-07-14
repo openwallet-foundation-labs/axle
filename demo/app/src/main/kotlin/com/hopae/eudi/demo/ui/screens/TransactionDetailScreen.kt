@@ -32,14 +32,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.hopae.eudi.demo.ui.components.absorbTouches
 import com.hopae.eudi.demo.ui.components.InfoRow
+import com.hopae.eudi.demo.ui.components.Pill
 import com.hopae.eudi.demo.ui.components.SectionLabel
 import com.hopae.eudi.demo.ui.components.TrustRow
 import com.hopae.eudi.demo.ui.components.WalletCard
+import com.hopae.eudi.demo.ui.components.absorbTouches
 import com.hopae.eudi.demo.ui.theme.WalletTheme
+import com.hopae.eudi.wallet.txlog.LocalizedText
 import com.hopae.eudi.wallet.txlog.LoggedDocument
 import com.hopae.eudi.wallet.txlog.TransactionLogEntry
+import com.hopae.eudi.wallet.txlog.TransactionTransport
 import com.hopae.eudi.wallet.txlog.TransactionType
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -54,7 +57,8 @@ fun TransactionDetailScreen(e: TransactionLogEntry, onBack: () -> Unit) {
     val arrow = if (present) "↑" else "↓"
     val tint = if (present) c.brand else c.trust
     val bg = if (present) c.brandSoftBg else c.trustBg
-    val title = e.relyingParty?.name ?: e.relyingParty?.id ?: e.issuer?.let { hostOf(it) }
+    val rp = e.relyingParty
+    val title = rp?.name ?: rp?.id ?: e.issuerName ?: e.issuer?.let { hostOf(it) }
         ?: if (present) "Presentation" else "Credential issued"
 
     Column(
@@ -80,22 +84,46 @@ fun TransactionDetailScreen(e: TransactionLogEntry, onBack: () -> Unit) {
                     Text(title, style = MaterialTheme.typography.titleSmall, color = c.ink)
                     Text(fullTime.format(Date(e.timestamp * 1000)), style = MaterialTheme.typography.bodySmall, color = c.inkMuted)
                 }
-                val ok = e.status.name == "SUCCESS"
-                Text(e.status.name, style = MaterialTheme.typography.labelSmall, color = if (ok) c.trust else c.danger, fontWeight = FontWeight(700))
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val ok = e.status.name == "SUCCESS"
+                    Text(e.status.name, style = MaterialTheme.typography.labelSmall, color = if (ok) c.trust else c.danger, fontWeight = FontWeight(700))
+                    e.transport?.let { Pill(transportLabel(it), c.screen, c.inkMuted) }
+                }
             }
         }
 
         // counterparty
-        if (present && e.relyingParty != null) {
+        if (present && rp != null) {
             SectionLabel("Relying party")
             WalletCard(padding = PaddingValues(0.dp)) {
-                e.relyingParty!!.name?.let { InfoRow("Name", it) }
-                InfoRow("Identifier", e.relyingParty!!.id)
-                TrustRow("Registered", if (e.relyingParty!!.trusted) "Verified" else "Not verified", e.relyingParty!!.trusted)
+                rp.name?.let { InfoRow("Name", it) }
+                InfoRow("Identifier", rp.id)
+                rp.subject?.takeIf { it.isNotBlank() }?.let { InfoRow("Registered as", it) }
+                TrustRow("Request verified", if (rp.trusted) "Yes" else "No", rp.trusted)
+                rp.attested?.let { InfoRow("Registration", if (it) "Registrar-sealed (WRPRC)" else "Self-declared") }
+                rp.statusValid?.let { InfoRow("Registration status", if (it) "Valid" else "Revoked", if (it) null else c.danger) }
+                rp.intermediaryName?.let { InfoRow("Via intermediary", it) }
             }
-        } else if (e.issuer != null) {
+            val purpose = purposeText(rp.purpose)
+            if (purpose.isNotBlank()) {
+                SectionLabel("Purpose")
+                WalletCard { Text(purpose, style = MaterialTheme.typography.bodyMedium, color = c.ink) }
+            }
+            if (rp.entitlements.isNotEmpty()) {
+                SectionLabel("Entitlements")
+                WalletCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        rp.entitlements.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium, color = c.inkBody) }
+                    }
+                }
+            }
+        } else if (!present) {
             SectionLabel("Issuer")
-            WalletCard(padding = PaddingValues(0.dp)) { InfoRow("Issuer", e.issuer!!) }
+            WalletCard(padding = PaddingValues(0.dp)) {
+                InfoRow("Issuer", e.issuerName ?: e.issuer?.let { hostOf(it) } ?: "—")
+                e.issuer?.let { InfoRow("Identifier", hostOf(it)) }
+                e.issuerRegistered?.let { TrustRow("Registered issuer", if (it) "Yes" else "No", it) }
+            }
         }
 
         // documents + claims
@@ -103,27 +131,29 @@ fun TransactionDetailScreen(e: TransactionLogEntry, onBack: () -> Unit) {
             SectionLabel(if (present) "Data shared" else "Data received")
             e.documents.forEach { doc ->
                 WalletCard(padding = PaddingValues(0.dp)) {
-                    Text(
-                        doc.type ?: doc.format,
-                        style = MaterialTheme.typography.titleSmall, color = c.ink,
-                        modifier = Modifier.padding(16.dp, 12.dp),
-                    )
+                    Text(doc.type ?: doc.format, style = MaterialTheme.typography.titleSmall, color = c.ink, modifier = Modifier.padding(16.dp, 12.dp))
                     Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
-                    if (doc.claims.isEmpty()) {
-                        InfoRow("Claims", "—")
-                    } else {
-                        doc.claims.forEach { claim ->
-                            InfoRow(claimLabel(doc, claim.path), claim.value ?: "Disclosed")
-                        }
-                    }
+                    if (doc.claims.isEmpty()) InfoRow("Claims", "—")
+                    else doc.claims.forEach { claim -> InfoRow(claimLabel(doc, claim.path), claim.value ?: "Disclosed") }
                 }
             }
         }
 
-        e.error?.let {
-            WalletCard { Text(it, style = MaterialTheme.typography.bodyMedium, color = c.danger) }
-        }
+        e.error?.let { WalletCard { Text(it, style = MaterialTheme.typography.bodyMedium, color = c.danger) } }
     }
+}
+
+private fun transportLabel(t: TransactionTransport): String = when (t) {
+    TransactionTransport.REMOTE -> "Online · QR"
+    TransactionTransport.PROXIMITY -> "In person"
+    TransactionTransport.DC_API -> "In-app"
+}
+
+/** Pick the purpose text in the device language, falling back to the first entry. */
+private fun purposeText(purpose: List<LocalizedText>): String {
+    if (purpose.isEmpty()) return ""
+    val lang = Locale.getDefault().language
+    return (purpose.firstOrNull { it.lang.startsWith(lang, true) } ?: purpose.first()).value
 }
 
 private fun claimLabel(doc: LoggedDocument, path: List<String>): String {

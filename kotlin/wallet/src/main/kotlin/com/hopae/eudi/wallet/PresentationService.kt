@@ -21,11 +21,13 @@ import com.hopae.eudi.wallet.store.CredentialStore
 import com.hopae.eudi.wallet.store.EnvelopeLifecycle
 import com.hopae.eudi.wallet.trust.RegistrarApiClient
 import com.hopae.eudi.wallet.trust.TrustException
+import com.hopae.eudi.wallet.txlog.LocalizedText
 import com.hopae.eudi.wallet.txlog.LoggedClaim
 import com.hopae.eudi.wallet.txlog.LoggedDocument
 import com.hopae.eudi.wallet.txlog.RelyingParty
 import com.hopae.eudi.wallet.txlog.TransactionLog
 import com.hopae.eudi.wallet.txlog.TransactionStatus
+import com.hopae.eudi.wallet.txlog.TransactionTransport
 import com.hopae.eudi.wallet.vp.DcqlMatchResult
 import com.hopae.eudi.wallet.vp.HeldMdoc
 import com.hopae.eudi.wallet.vp.HeldSdJwtVc
@@ -127,10 +129,10 @@ class PresentationService internal constructor(
                         submit(resolved, matches, selection, chosenHeld)
                     } catch (e: Throwable) {
                         // Only the final submission failed — record the attempted disclosure with ERROR status (opt-in).
-                        if (recordFailures) runCatching { recordError(resolved, selection, matches) }
+                        if (recordFailures) runCatching { recordError(resolved, selection, matches, statusValid) }
                         throw e
                     }
-                    recordSuccess(resolved, selection, matches)
+                    recordSuccess(resolved, selection, matches, statusValid)
                     emit(terminal)
                 }
             }
@@ -262,24 +264,36 @@ class PresentationService internal constructor(
     private fun CredentialEnvelope.firstInstance(): CredentialInstance? =
         (lifecycle as? EnvelopeLifecycle.Issued)?.instances?.firstOrNull()
 
-    private suspend fun recordSuccess(resolved: ResolvedRequest, selection: PresentationSelection, matches: DcqlMatchResult) {
-        txlog.recordPresentation(relyingPartyOf(resolved), loggedDocuments(selection, matches), TransactionStatus.SUCCESS)
+    private suspend fun recordSuccess(resolved: ResolvedRequest, selection: PresentationSelection, matches: DcqlMatchResult, statusValid: Boolean?) {
+        txlog.recordPresentation(relyingPartyOf(resolved, statusValid), loggedDocuments(selection, matches), TransactionStatus.SUCCESS, transport = TransactionTransport.REMOTE)
     }
 
-    private suspend fun recordDeclined(resolved: ResolvedRequest) {
-        txlog.recordPresentation(relyingPartyOf(resolved), documents = emptyList(), status = TransactionStatus.INCOMPLETE)
+    private suspend fun recordDeclined(resolved: ResolvedRequest, statusValid: Boolean? = null) {
+        txlog.recordPresentation(relyingPartyOf(resolved, statusValid), documents = emptyList(), status = TransactionStatus.INCOMPLETE, transport = TransactionTransport.REMOTE)
     }
 
-    private suspend fun recordError(resolved: ResolvedRequest, selection: PresentationSelection, matches: DcqlMatchResult) {
-        txlog.recordPresentation(relyingPartyOf(resolved), loggedDocuments(selection, matches), TransactionStatus.ERROR)
+    private suspend fun recordError(resolved: ResolvedRequest, selection: PresentationSelection, matches: DcqlMatchResult, statusValid: Boolean?) {
+        txlog.recordPresentation(relyingPartyOf(resolved, statusValid), loggedDocuments(selection, matches), TransactionStatus.ERROR, transport = TransactionTransport.REMOTE)
     }
 
-    private fun relyingPartyOf(resolved: ResolvedRequest): RelyingParty = RelyingParty(
-        id = resolved.verifier.clientId,
-        name = resolved.verifier.commonName,
-        trusted = resolved.verifier.trusted,
-        certificateChainDer = resolved.verifier.certificateChainDer ?: emptyList(),
-    )
+    private fun relyingPartyOf(resolved: ResolvedRequest, statusValid: Boolean?): RelyingParty {
+        val v = resolved.verifier
+        val reg = v.registration
+        return RelyingParty(
+            id = v.clientId,
+            name = v.commonName,
+            trusted = v.trusted,
+            certificateChainDer = v.certificateChainDer ?: emptyList(),
+            clientIdScheme = v.clientIdScheme,
+            subject = reg?.subject,
+            entitlements = reg?.entitlements ?: emptyList(),
+            purpose = reg?.purpose?.map { LocalizedText(it.lang, it.value) } ?: emptyList(),
+            intermediaryName = reg?.intermediaryName,
+            intermediarySub = reg?.intermediarySub,
+            attested = reg?.attested,
+            statusValid = statusValid,
+        )
+    }
 
     private fun loggedDocuments(selection: PresentationSelection, matches: DcqlMatchResult): List<LoggedDocument> =
         selection.chosen.flatMap { (queryId, credentialIds) ->

@@ -36,6 +36,7 @@ import com.hopae.eudi.wallet.txlog.LoggedDocument
 import com.hopae.eudi.wallet.txlog.RelyingParty
 import com.hopae.eudi.wallet.txlog.TransactionLog
 import com.hopae.eudi.wallet.txlog.TransactionStatus
+import com.hopae.eudi.wallet.txlog.TransactionTransport
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -167,7 +168,7 @@ class ProximityService internal constructor(
             )
         }
         val rp = RelyingParty(reader.commonName ?: origin, reader.commonName ?: origin, reader.trusted, reader.certificateChainDer)
-        txlog.recordPresentation(rp, documents, TransactionStatus.SUCCESS)
+        txlog.recordPresentation(rp, documents, TransactionStatus.SUCCESS, transport = TransactionTransport.DC_API)
     }
 
     /**
@@ -252,15 +253,15 @@ class ProximityService internal constructor(
     }
 
     private suspend fun recordSuccess(request: ProximityRequest, selection: ProximitySelection) {
-        txlog.recordPresentation(proximityReader(request), loggedDocuments(request, selection), TransactionStatus.SUCCESS)
+        txlog.recordPresentation(proximityReader(request), loggedDocuments(request, selection), TransactionStatus.SUCCESS, transport = TransactionTransport.PROXIMITY)
     }
 
     private suspend fun recordError(request: ProximityRequest, selection: ProximitySelection) {
-        txlog.recordPresentation(proximityReader(request), loggedDocuments(request, selection), TransactionStatus.ERROR)
+        txlog.recordPresentation(proximityReader(request), loggedDocuments(request, selection), TransactionStatus.ERROR, transport = TransactionTransport.PROXIMITY)
     }
 
     private suspend fun recordDeclined(request: ProximityRequest) {
-        txlog.recordPresentation(proximityReader(request), documents = emptyList(), status = TransactionStatus.INCOMPLETE)
+        txlog.recordPresentation(proximityReader(request), documents = emptyList(), status = TransactionStatus.INCOMPLETE, transport = TransactionTransport.PROXIMITY)
     }
 
     private fun loggedDocuments(request: ProximityRequest, selection: ProximitySelection): List<LoggedDocument> =

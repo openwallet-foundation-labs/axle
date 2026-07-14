@@ -64,6 +64,11 @@ export class RequestBuilderService {
       response_mode: 'direct_post.jwt',
       response_uri: `${this.baseUrl}/response/${transactionId}`,
       state: transactionId,
+      // OpenID4VP 1.0 request-object `aud` (ETSI TS 119 472-2 OIDFVP-HAIP-COMMON-REQ-RO-22): with static
+      // wallet discovery (our cross-device QR case) it MUST be the symbolic string "https://self-issued.me/v2".
+      // The DC API path deliberately omits `aud` — there the wallet is invoked directly by the browser, not
+      // via static discovery, so an SIOP-style audience would be wrong (and steers the wallet to reject it).
+      aud: 'https://self-issued.me/v2',
       client_metadata: this.clientMetadata(enc),
     };
     return { jwt: await this.keystore.signRequestObject(payload, rp), nonce };
@@ -87,16 +92,27 @@ export class RequestBuilderService {
   }
 
   /**
-   * `client_metadata` advertising the response-encryption key + parameters (HAIP mandates encrypted responses).
-   * The wallet encrypts to the `alg=ECDH-ES` JWK (matching its `kid`); `encrypted_response_enc_values_supported`
-   * selects A256GCM. We do NOT advertise mdoc `deviceauth_alg_values` (deviceMac) — this verifier verifies
-   * `deviceSignature` only, so the wallet must not be steered to MAC-based device auth.
+   * `client_metadata` advertising the response-encryption key + parameters (HAIP mandates encrypted responses)
+   * and the formats/algorithms this verifier accepts. The wallet encrypts to the `alg=ECDH-ES` JWK (matching
+   * its `kid`); `encrypted_response_enc_values_supported` selects A256GCM.
+   *
+   * `vp_formats_supported` is REQUIRED verifier metadata (OpenID4VP 1.0 §11.1) and, over the DC API, the wallet
+   * has no other channel to learn it (no federation / wallet-metadata exchange), so §5 makes it mandatory here.
+   * We advertise ES256 only: for mso_mdoc the COSE ids `-7` (ES256) and `-9` (its curve-pinned variant) — the
+   * two encodings the wallet accepts for a device *signature*. Listing exactly these pins the wallet to
+   * `deviceSignature` and blocks `deviceMac`: on an encrypted response an EReaderKey exists, so leaving
+   * `deviceauth_alg_values` unset (any alg accepted) would actually *permit* MAC — naming the signature algs is
+   * what forbids it (this verifier verifies `deviceSignature` only). The mdoc MAC alg id (-65537) is excluded.
    */
   private clientMetadata(enc: EncKeyInput): Record<string, unknown> {
     return {
       jwks: { keys: [encClientMetadataJwk(enc.publicJwk, enc.kid)] },
       // HAIP: verifiers MUST list BOTH A128GCM and A256GCM (the wallet picks; it SHOULD use A256GCM).
       encrypted_response_enc_values_supported: ['A128GCM', 'A256GCM'],
+      vp_formats_supported: {
+        'dc+sd-jwt': { 'sd-jwt_alg_values': ['ES256'], 'kb-jwt_alg_values': ['ES256'] },
+        mso_mdoc: { issuerauth_alg_values: [-7, -9], deviceauth_alg_values: [-7, -9] },
+      },
     };
   }
 
@@ -106,9 +122,6 @@ export class RequestBuilderService {
       response_type: 'vp_token',
       nonce,
       iat: Math.floor(Date.now() / 1000),
-      // OpenID4VP 1.0 request-object `aud` (ETSI TS 119 472-2 OIDFVP-HAIP-COMMON-REQ-RO-22): with static
-      // wallet discovery (our cross-device case) it MUST be the symbolic string "https://self-issued.me/v2".
-      aud: 'https://self-issued.me/v2',
       dcql_query: buildDcqlQuery(keys),
       verifier_info: this.verifierInfo(rp),
     };

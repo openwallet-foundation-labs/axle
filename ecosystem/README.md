@@ -4,9 +4,18 @@ A standards-conformant, self-operated sandbox for the EU Digital Identity Wallet
 relationship is anchored in X.509 certificates and published as ETSI-standard, JAdES-signed **Trusted Lists**
 — so wallets, issuers and verifiers can establish trust the same way they would in the real eIDAS ecosystem.
 
-## Live — Trusted List portal
+## Live sandbox
 
-**https://trusted-list.vercel.app**
+Every counterpart the wallet talks to, hosted and reachable:
+
+| Service | URL | Role |
+|---|---|---|
+| **PID Issuer** | https://pid-issuer.vercel.app/ | OpenID4VCI — issue PID (SD-JWT VC & mdoc) + mDL |
+| **Verifier** | https://eudi-verifier.vercel.app/ | OpenID4VP + DC API — request & verify presentations |
+| **RP Registrar** | https://demo-registrar.vercel.app/ | Register relying parties; issue WRPAC/WRPRC (separate repo) |
+| **Trusted List** | https://trusted-list.vercel.app/ | Scheme Operator — JAdES-signed trust lists |
+
+## Trusted List portal — https://trusted-list.vercel.app
 
 The Scheme Operator (**Hopae**) publishes the Trusted Lists of the entities in the sandbox. Each list is a
 [ETSI TS 119 602](https://www.etsi.org/standards) *List of Trusted Entities* (LoTE), signed as
@@ -49,14 +58,22 @@ the Scheme Operator → then checking the credential's certificate chains to a C
   Wallet/Key Attestation (WUA verified against the Trusted List), Token Status List.
 - [`issuer-fe/`](./issuer-fe) — the issuance consent screen for the authorization-code flow (Vite + React,
   European eID styling, "issue this PID to your wallet").
+- [`verifier-be/`](./verifier-be) — the relying party: OpenID4VP 1.0 + HAIP backend that builds & verifies
+  presentations over QR (`request_uri` + `direct_post`) and the W3C Digital Credentials API, with WRPAC-signed
+  requests, encrypted responses, and Token Status List revocation checks.
+- [`verifier-fe/`](./verifier-fe) — the relying-party UI: create a request (QR / DC API), then show the
+  verified claims + trust status (Vite + React).
+
+The **Wallet Provider** (WUA + key attestation) lives at the repo root in [`../wallet-provider`](../wallet-provider),
+and the **RP Registrar** is a separate service (sandbox at https://demo-registrar.vercel.app/).
 
 ## Roadmap
 
 - [x] **P1** Scheme Operator + Trusted Lists (wallet providers, PID issuers, attestation issuers, registrar)
 - [x] **P2** Issuer — OpenID4VCI 1.0 + HAIP: PID (SD-JWT VC + mdoc) via authorization-code, mDL (mdoc) via
   pre-authorized-code; DPoP, Wallet/Key Attestation, Token Status List (`issuer-be` + `issuer-fe`)
-- [ ] **P3** Verifier (relying party) that consumes these lists
-- [ ] **P4** Registrar backend
+- [x] **P3** Verifier (relying party) — OpenID4VP 1.0 + HAIP over QR + DC API (`verifier-be` + `verifier-fe`)
+- [x] **P4** Registrar — RP registration + WRPAC/WRPRC (ETSI TS 119 475; separate service)
 
 ## Security
 

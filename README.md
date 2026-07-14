@@ -1,59 +1,105 @@
 # EUDI Wallet SDK
 
-A **from-scratch** EUDI (European Digital Identity) wallet SDK for issuing, storing, and presenting
-digital credentials under **eIDAS 2.0** (ARF / HAIP). It ships as two native implementations —
-**Kotlin** and **Swift** — that share only an API contract, with a pure core that builds and tests on
-plain Linux.
+A **headless, from-scratch SDK for building EU Digital Identity (EUDI) wallets** — issuing, storing, and
+presenting digital credentials under **eIDAS 2.0** (ARF · HAIP). Embed it in your own app and you own the
+UI; the SDK owns the protocols, cryptography, and trust.
 
-## Concept
+It ships as **two native implementations — Kotlin and Swift** — that share only an API contract, with a pure
+core that builds and tests on plain Linux. New to EUDI? Start with **[Concepts](docs/docs/concepts.mdx)**.
 
-- **Headless** — no UI. A B2B library your app embeds; you own the screens.
-- **Native two-fold** — a Kotlin implementation and a Swift implementation, each idiomatic to its
-  platform, sharing only an API shape (no common runtime).
-- **Full scratch** — the EU reference wallet is an interop target, not a dependency. Every layer
-  (CBOR/COSE, SD-JWT VC, mdoc, OpenID4VCI/VP, X.509 trust) is implemented in-house.
-- **Ports & adapters** — the core is pure and Linux-testable; the host injects thin platform
-  capabilities (keys, storage, HTTP, BLE) via constructor injection — no DI framework.
+## Why this SDK
 
-Everything is reached through a single assembled `Wallet` facade: `credentials`, `issuance`,
-`presentation`, `proximity`, `transactions`. See **[SPEC-MATRIX.md](SPEC-MATRIX.md)** for the exact
-standards and versions implemented, and **[INTEROP.md](INTEROP.md)** for a live PID issuance against
-the official EUDI reference issuer.
+- **Headless (UI-less).** A B2B library your app embeds — no screens, no opinions about your UX. You wire
+  it to your product; you keep full control of the user experience.
+- **Dependency-injected, no framework.** The core is pure and platform-agnostic. Every platform capability
+  — secure-key hardware, storage, HTTP, Bluetooth/NFC — is a small **port** you supply an **adapter** for
+  (plain constructor injection). Swap any piece; test the core on Linux.
+- **Batteries included, not required.** Production **Android adapters** live in `android/` — use them as-is,
+  or as a reference for your own. A full **Android demo wallet** (Jetpack Compose) is in `demo/`.
+- **Full scratch, standards-first.** The EU reference wallet is an *interop target, not a dependency*. Every
+  layer — CBOR/COSE, SD-JWT VC, ISO mdoc, OpenID4VCI/VP, X.509 trust, Token Status List — is implemented
+  in-house against the source specifications (see **[SPEC-MATRIX.md](SPEC-MATRIX.md)** and the
+  [specifications reference](docs/docs/reference/specs.md)).
+
+Everything is reached through one assembled `Wallet` facade — `credentials`, `issuance`, `presentation`,
+`proximity`, `reader`, `transactions`.
+
+## Try the hosted sandbox
+
+A live end-to-end EUDI ecosystem you can point the wallet at — issue a PID, present it to a verifier, all
+against real trusted-list-anchored trust:
+
+| Service | URL | Role |
+|---|---|---|
+| **PID Issuer** | https://pid-issuer.vercel.app/ | Issues PID (SD-JWT VC & mdoc) and mDL — OpenID4VCI |
+| **Verifier** | https://eudi-verifier.vercel.app/ | Requests & verifies presentations — OpenID4VP + DC API |
+| **RP Registrar** | https://demo-registrar.vercel.app/ | Registers relying parties; issues WRPAC/WRPRC (ETSI TS 119 475) |
+| **Trusted List** | https://trusted-list.vercel.app/ | Scheme Operator — JAdES-signed trust lists (ETSI TS 119 602) |
+
+The demo wallet in `demo/` is pre-wired to these. Build it (`cd demo && ./gradlew :app:assembleDebug`) or
+see **[demo/RELEASE.md](demo/RELEASE.md)** for signed AAB + Play internal-testing distribution.
 
 ## Repository layout
 
 | Path | What |
 |---|---|
-| `kotlin/` | Kotlin SDK (pure JVM, Gradle multi-module) |
-| `swift/` | Swift package (no Apple-framework imports; Linux-buildable) |
-| `android/` | Android platform-adapter libraries (`com.hopae.eudi.android:core`/`proximity`/`dcapi`) — Keystore SecureArea, storage, OkHttp, BLE + NFC transports, DC API registrar |
-| `demo/` | Android wallet app (Compose) — consumes `kotlin/` + `android/` via composite builds; release + Play internal-testing distribution in [`demo/RELEASE.md`](demo/RELEASE.md) |
-| `docs/` | Docusaurus developer docs (English + 한국어) |
-| `wallet-provider/` | NestJS Wallet Provider backend (WUA / wallet-unit attestation) |
+| `kotlin/` | Kotlin SDK (pure JVM, Gradle multi-module) — the reference core |
+| `swift/` | Swift package mirroring the Kotlin modules 1:1 (no Apple-framework imports; Linux-buildable) |
+| `android/` | Android platform-adapter presets (`com.hopae.eudi.android:core`/`proximity`/`dcapi`/`attestation`) — Keystore/StrongBox SecureArea, file storage, OkHttp, BLE + NFC transports, DC API glue, Play Integrity attestation |
+| `demo/` | Android wallet app (Compose) consuming `kotlin/` + `android/` — the reference assembly; release guide in [`demo/RELEASE.md`](demo/RELEASE.md) |
+| `ios/` | iOS platform plan (SecureEnclave adapter + DC API) — not yet implemented |
+| `docs/` | Docusaurus developer docs (English + 한국어) — [see below](#documentation) |
+| `ecosystem/` | The reference sandbox services (issuer, verifier, trusted list) — [see below](#the-reference-ecosystem) |
+| `wallet-provider/` | NestJS Wallet Provider backend — Wallet Unit Attestation (WUA) + key attestation + Play Integrity |
 | `vectors/` | Shared golden test vectors consumed by both test suites |
 
-**Core rule:** everything under `kotlin/` and `swift/` builds and tests on plain Linux. Platform
-features (secure hardware, storage, BLE, DC API) live behind ports.
+**Core rule:** everything under `kotlin/` and `swift/` builds and tests on plain Linux. Platform features
+(secure hardware, storage, BLE, DC API) live strictly behind ports.
+
+## Architecture: ports & adapters
+
+The core is pure; the host injects capabilities. Assembling a wallet is: pick adapters, set config, call
+`Wallet.create(config, ports)`.
+
+```
+        your app (UI)                     ← you build this
+             │
+        ┌────▼─────────────────────────┐
+        │   Wallet (facade)            │  credentials · issuance · presentation
+        │                              │  proximity · reader · transactions
+        └────┬─────────────────────────┘
+   pure core │  OpenID4VCI/VP · SD-JWT VC · ISO mdoc · X.509 trust · CBOR/COSE
+        ┌────▼─────────────────────────┐
+        │   Ports (SPI)                │  SecureArea · StorageDriver · HttpTransport
+        │                              │  ProximityTransport · WalletAttestationProvider
+        └────┬─────────────────────────┘
+   adapters  │  ← android/ presets (or your own)
+        Keystore · files · OkHttp · BLE/NFC · Play Integrity
+```
+
+The [`android/`](android/) adapters are a ready-made preset; [`demo/app/.../DemoWallet.kt`](demo/app/src/main/kotlin/com/hopae/eudi/demo/DemoWallet.kt)
+is the canonical "assemble from adapters + config" example. Full walkthrough in
+[`docs/` → Getting Started](docs/docs/getting-started.mdx) and [Architecture](docs/docs/architecture.md).
 
 ## Modules
 
 Each concern is a separate module (Kotlin name / Swift target), tested in isolation.
 
-| Module | Purpose | Key files |
+| Module | Purpose | Key types |
 |---|---|---|
-| `cbor` / `CborCose` | CBOR (RFC 8949) + COSE | `Cbor`, `CborEncoder`/`CborDecoder`, `cose/CoseSign1`, `CoseKey`, `EcPublicKey`, `Der` |
-| `sdjwt` / `SdJwt` | SD-JWT VC + JOSE (JWS/JWE) | `SdJwt`, `SdJwtIssuer`, `SdJwtHolder`, `SdJwtVerifier`, `SdJwtVcVerifier`, `Jose` (JWS + `SecureAreaJwsSigner`), `Jwe`, `Jwk`, `JsonValue`, `Base64Url` |
-| `mdoc` / `MDoc` | ISO 18013-5 mdoc | `Mdoc` (`IssuerSigned`/MSO), `DeviceRequest` (`ReaderAuth`), `DeviceResponse`, `MdocPresenter`, `MdocReader`, `MdocVerifier`, `MdocSessionTranscript` |
-| `openid4vci` / `OpenID4VCI` | OpenID4VCI issuance | `Openid4VciClient`, `Models`, `ClientAttestation`, `SignedMetadata`; `MockIssuer` (test fixtures) |
-| `openid4vp` / `OpenID4VP` | OpenID4VP presentation | `Openid4VpClient`, `DcqlEngine`, `Request`, `HeldSdJwtVc`/`HeldMdoc`, `Oid4vpSessionTranscript`; `MockVerifier`/`MockMdocVerifier`/`MockDcApiVerifier` (fixtures) |
-| `trust` / `Trust` | X.509 PKIX trust | `X509ChainValidator`, `X509Support`, `X509RequestVerifier`, `X5cIssuerKeyResolver`, `X5cMdocReaderTrust`, `TrustAnchors`; `TestCerts` (fixtures) |
-| `statuslist` / `StatusList` | IETF Token Status List | `StatusListClient` (fetch + verify + index lookup) |
-| `credential-store` / `CredentialStore` | Persisted credential store | `CredentialStore`, `Envelope`, `EnvelopeCodec` (deterministic CBOR) |
-| `proximity` / `Proximity` | ISO 18013-5 session + NFC handover | `ProximitySessionTranscript`, `SessionEncryption` (ECDH+AES-GCM), `SessionMessages`, `Hkdf`; NFC handover — `MdocNfcEngagement`, `NfcTnep`, `NfcEngagementProcessor` (holder HCE state machine), `MdocNfcHandover` (reader driver, static + negotiated/TNEP) |
-| `txlog` / `TransactionLog` | Audit log (ARF/GDPR) | `TransactionLog` (record/history/query), `TransactionLogCodec`, `RelyingParty`, `LoggedDocument` |
-| `wallet-api` / `WalletAPI` | Port SPI + shared types | `spi/` ports (`SecureArea`, `StorageDriver`, `HttpTransport`, `ProximityTransport`, …), `Types`, `SecureAreaCoseSigner` |
-| `wallet` / `Wallet` | **The facade** | `Wallet`, `WalletConfig`, `WalletPorts`, `CredentialsService`, `IssuanceService`/`Session`, `PresentationService`/`Session`, `ProximityService`/`Session`, `Credential`, `WalletError` |
-| `testkit` / `WalletTestKit` | Test doubles | `SoftwareSecureArea`, `InMemoryStorageDriver`, mock issuer/verifier/reader, `TestCerts` |
+| `cbor` / `CborCose` | CBOR (RFC 8949) + COSE primitives | `Cbor`, `CborEncoder`, `cose/CoseSign1`, `CoseKey`, `EcPublicKey`, `Ecdsa`, `Der` |
+| `sdjwt` / `SdJwt` | SD-JWT VC + JOSE (JWS/JWE/JWK) | `SdJwt`, `SdJwtIssuer/Holder/Verifier`, `SdJwtVcVerifier`, `Jws`, `Jwe`, `SecureAreaJwsSigner` |
+| `mdoc` / `MDoc` | ISO 18013-5 mdoc / mDL | `IssuerSigned`/`MobileSecurityObject`, `DeviceRequest`, `DeviceResponse`, `MdocPresenter`, `MdocReader`, `ReaderAuthSigner`, `Hpke` |
+| `openid4vci` / `OpenID4VCI` | OpenID4VCI issuance | `Openid4VciClient`, `CredentialOffer`, `CredentialIssuerMetadata`, `DpopProver`, `KeyAttestationSource` |
+| `openid4vp` / `OpenID4VP` | OpenID4VP presentation + DCQL | `Openid4VpClient`, `DcqlQuery`, `DcqlMatchResult`, `TransactionData`, `RegistrationInfo` |
+| `trust` / `Trust` | X.509 PKIX trust + WRPRC | `X509ChainValidator`, `X5cMdocIssuerTrust/ReaderTrust`, `X509RequestVerifier`, `WRPRCVerifier`, `RegistrarApiClient` |
+| `statuslist` / `StatusList` | IETF Token Status List (revocation) | `StatusListClient`, `CwtStatusListClient`, `CredentialStatus` |
+| `credential-store` / `CredentialStore` | Persisted credential store | `CredentialStore`, `CredentialEnvelope`, `EnvelopeCodec` (deterministic CBOR) |
+| `proximity` / `Proximity` | ISO 18013-5 engagement + NFC handover | `DeviceEngagement`, `ProximitySessionTranscript`, `SessionMessages`, `MdocNfcEngagement`, `Tnep` |
+| `txlog` / `TransactionLog` | Audit log (ARF/GDPR) | `TransactionLog`, `TransactionLogStore` (port), `TransactionLogEntry`, `RelyingParty` |
+| `wallet-api` / `WalletAPI` | Port SPI + shared types | `spi/` ports (`SecureArea`, `StorageDriver`, `HttpTransport`, `ProximityTransport`, `WalletAttestationProvider`), `Types`, `SecureAreaCoseSigner` |
+| `wallet` / `Wallet` | **The facade + composition root** | `Wallet`, `WalletConfig`, `WalletPorts`, `CredentialsService`, `IssuanceService`, `PresentationService`, `ProximityService`, `ProximityReaderService` |
+| `testkit` / `WalletTestKit` | Test doubles + adapter contracts | `SoftwareSecureArea`, `InMemoryStorageDriver`, `SecureAreaContract`, `StorageDriverContract` |
 
 ## Build & test
 
@@ -72,15 +118,41 @@ cd swift && swift test \
 cd demo && ./gradlew :app:assembleDebug     # app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Docs
+## Documentation
 
-The developer documentation (guides, API reference, both languages, Kotlin + Swift examples) lives in
+Full developer documentation (guides + API reference, Kotlin + Swift examples, English + 한국어) lives in
 `docs/` as a Docusaurus site:
 
+- **[Concepts](docs/docs/concepts.mdx)** — EUDI/eIDAS vocabulary for developers new to the domain
+- **[Architecture](docs/docs/architecture.md)** · **[Getting Started](docs/docs/getting-started.mdx)** — assemble the SDK from ports & adapters
+- **Guides** — [Issuance](docs/docs/guides/issuance.mdx) · [Presentation](docs/docs/guides/presentation.mdx) · [Digital Credentials API](docs/docs/guides/dc-api.md) · [Proximity](docs/docs/guides/proximity.mdx) · [Trust & Audit](docs/docs/guides/trust-and-audit.mdx)
+- **Reference** — [Facade](docs/docs/reference/facade.md) · [Ports](docs/docs/reference/ports.mdx) · [Specifications](docs/docs/reference/specs.md)
+
 ```bash
-cd docs
-npm install
+cd docs && npm install
 npm start                 # dev server (English)
 npm start -- --locale ko  # dev server (한국어)
-npm run build             # static build of both locales → build/ and build/ko/
+npm run build             # static build of both locales
 ```
+
+## The reference ecosystem
+
+A complete EUDI sandbox — every counterpart the wallet talks to — lives in this repo (except the Registrar,
+which is a separate service; sandbox at [demo-registrar.vercel.app](https://demo-registrar.vercel.app/)):
+
+| Service | Path | Role |
+|---|---|---|
+| **Issuer backend** | [`ecosystem/issuer-be`](ecosystem/issuer-be/README.md) | OpenID4VCI 1.0 + HAIP — issues PID (SD-JWT VC & mdoc) and mDL |
+| **Issuer frontend** | [`ecosystem/issuer-fe`](ecosystem/issuer-fe/README.md) | Issuance-consent screen (authorization-code flow) |
+| **Verifier backend** | [`ecosystem/verifier-be`](ecosystem/verifier-be/README.md) | OpenID4VP 1.0 + HAIP — builds & verifies presentations (QR + DC API) |
+| **Verifier frontend** | [`ecosystem/verifier-fe`](ecosystem/verifier-fe/README.md) | Relying-party UI (request QR / DC API, show result) |
+| **Trusted List** | [`ecosystem/trusted-list`](ecosystem/trusted-list/README.md) | Scheme Operator — JAdES-signed trust lists + ecosystem CAs ([KEYS.md](ecosystem/KEYS.md)) |
+| **Wallet Provider** | [`wallet-provider`](wallet-provider/README.md) | Wallet Unit Attestation (WUA) + key attestation + Play Integrity ([PLAY-INTEGRITY.md](wallet-provider/PLAY-INTEGRITY.md)) |
+
+See [`ecosystem/README.md`](ecosystem/README.md) for the trust model overview.
+
+## Status
+
+Reference / sandbox implementation for eIDAS 2.0 EUDI interoperability. The Kotlin and Swift cores and the
+Android adapters are functional and tested (CI runs both suites); iOS adapters are planned. The hosted
+services above are a **non-production sandbox**.

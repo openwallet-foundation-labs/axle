@@ -4,6 +4,7 @@
 const sidebars = {
   docs: [
     'intro',
+    'concepts',
     'architecture',
     'getting-started',
     {
@@ -21,7 +22,7 @@ const sidebars = {
     {
       type: 'category',
       label: 'Reference',
-      items: ['reference/facade', 'reference/ports'],
+      items: ['reference/facade', 'reference/ports', 'reference/specs'],
     },
     'android-demo',
   ],

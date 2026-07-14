@@ -13,6 +13,8 @@ A **from-scratch** EUDI (European Digital Identity) wallet SDK for issuing, stor
 digital credentials under **eIDAS 2.0** (ARF / HAIP). It ships as two native implementations —
 **Kotlin** and **Swift** — that share only an API contract.
 
+New to EU Digital Identity? Start with **[Concepts](./concepts)** for the vocabulary.
+
 ## Design principles
 
 - **Headless.** No UI. The SDK is a B2B library your app embeds; you own the screens.
@@ -68,6 +70,17 @@ wallet.transactions   // audit history
 
 </TabItem>
 </Tabs>
+
+## Try the live sandbox
+
+The SDK talks to a hosted, standards-conformant EUDI ecosystem you can use right now:
+
+| Service | URL | Role |
+|---|---|---|
+| PID Issuer | https://pid-issuer.vercel.app/ | OpenID4VCI — issue PID (SD-JWT VC & mdoc) + mDL |
+| Verifier | https://eudi-verifier.vercel.app/ | OpenID4VP + DC API — request & verify presentations |
+| RP Registrar | https://demo-registrar.vercel.app/ | Register relying parties; issue WRPAC/WRPRC |
+| Trusted List | https://trusted-list.vercel.app/ | Scheme Operator — JAdES-signed trust lists |
 
 Continue to **[Getting started](./getting-started)** to assemble a wallet, or
 **[Architecture](./architecture)** for the module layout.

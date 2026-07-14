@@ -1,0 +1,216 @@
+---
+id: concepts
+title: Concepts
+sidebar_position: 2
+---
+
+# Concepts
+
+This page is the glossary for the rest of the docs. If you have never worked with EUDI, eIDAS, or
+verifiable credentials, read it top to bottom — each term is defined in two to five sentences with a
+pointer to its governing spec. If you already know the vocabulary, skip to
+**[Architecture](./architecture)** or the **[spec bibliography](./reference/specs)**.
+
+:::note Mental model
+A **wallet** (an app on a phone) receives signed **credentials** from **issuers**, stores them, and
+later shows selected pieces to **verifiers** — all under a shared **trust framework** so every party
+can check who they are talking to and whether the data is genuine.
+:::
+
+## The framework
+
+**eIDAS 2.0** — Regulation (EU) 2024/1183, amending the original 2014 eIDAS regulation. It mandates
+that every EU member state offer its citizens and residents a digital identity wallet, and it defines
+the legal weight of the credentials that wallet holds. It is the law that makes everything below
+required rather than optional.
+
+**EUDI Wallet (EU Digital Identity Wallet)** — the wallet application eIDAS 2.0 requires each member
+state to provide (directly or via accredited providers). A single, phone-based place for a person to
+hold their government identity plus other attestations, and to prove things about themselves online
+and in person without over-sharing.
+
+**ARF (Architecture Reference Framework)** — the EU Commission's technical specification of how EUDI
+wallets, issuers, and verifiers must behave and interoperate. It is not itself a standard body's
+document; instead it *selects and profiles* existing standards (OpenID4VCI/VP, ISO mdoc, SD-JWT VC,
+ETSI trust lists, …) into one coherent architecture. When a choice in this SDK looks arbitrary, the
+ARF usually made it. Reference: EUDI Wallet Architecture and Reference Framework (versioned; see the
+[bibliography](./reference/specs)).
+
+## Actors and roles
+
+**Holder / User** — the natural person the credentials are about and who controls the wallet. They
+decide, per interaction, which credentials and which individual attributes to disclose.
+
+**Wallet (Unit / Instance)** — the concrete installation of a wallet app on one person's device. The
+ARF calls the deployed, provisioned unit a *Wallet Unit* (or *Wallet Instance*); it holds keys in the
+device's secure hardware and mediates every issuance and presentation. In this SDK the Wallet Unit is
+the assembled `Wallet` facade.
+
+**Wallet Provider** — the organisation that publishes and vouches for a wallet solution (a member
+state or an accredited private provider). It attests that a given Wallet Unit is genuine and
+untampered via the Wallet Unit Attestation (see below), and runs the backend that issues those
+attestations.
+
+**Issuer / Attestation Provider** — a party that signs and delivers credentials to a wallet. A **PID
+Provider** issues the government-backed Person Identification Data; a **QEAA/EAA Provider** issues
+(Qualified) Electronic Attestations of Attributes such as a diploma, a professional licence, or a
+loyalty membership. Issuers run an OpenID4VCI credential-issuer endpoint.
+
+**Relying Party / Verifier** — the party that requests and checks credentials to make a decision (a
+bank onboarding a customer, a bar checking age, a government portal). "Relying Party" is the legal
+role; "Verifier" is the same actor viewed as the technical endpoint that runs OpenID4VP or an ISO
+18013-5 reader.
+
+**RP Registrar** — the national body that registers Relying Parties and records what data each is
+legally entitled to request. It issues the access and registration certificates (WRPAC / WRPRC, see
+below) that let a wallet recognise a legitimate verifier and see its declared purpose. Reference:
+ETSI TS 119 475 / ARF.
+
+**Trusted List / Scheme Operator** — the authority that publishes machine-readable lists of who is
+trusted in which role (which issuers may issue PIDs, which CAs anchor verifier certificates, …). A
+wallet's trust decisions bottom out in these lists. Reference: ETSI TS 119 602 (see *Trusted Lists*
+below).
+
+**Intermediary (optional)** — a service that sits between a Relying Party and wallets, running the
+presentation protocol on the RP's behalf (common for merchants who don't want to operate their own
+verifier). The wallet still sees and enforces the RP's registered identity and purpose.
+
+## Credential kinds
+
+**PID (Person Identification Data)** — the core government-issued identity credential: legal name,
+date of birth, and similar core attributes. It is the highest-assurance credential a wallet holds and
+the anchor other services trust. Defined by the ARF's PID Rulebook.
+
+**(Q)EAA — (Qualified) Electronic Attestation of Attributes** — any non-PID attestation about the
+holder: a university degree, a health-insurance card, an employer badge, a loyalty tier. A
+*Qualified* EAA (QEAA) is issued by a qualified trust service provider and carries stronger legal
+effect than a plain EAA. Defined by eIDAS 2.0 / ARF.
+
+**mDL (mobile Driving Licence)** — a driving licence carried as an mdoc credential. It is the
+flagship ISO/IEC 18013-5 use case and the reason the mdoc format and in-person proximity flow exist;
+in the EUDI context an mDL is a specific kind of (Q)EAA. Reference: ISO/IEC 18013-5.
+
+## Credential formats
+
+**SD-JWT VC** — a JSON/JWT-based credential format built for **selective disclosure**. The issuer
+signs the credential once but replaces each disclosable claim with a salted hash; the holder later
+reveals only the specific claims a verifier needs, and the verifier re-computes the hashes to confirm
+they were part of the original signed set. This is how a holder can prove "over 18" without revealing
+their birth date. Reference: IETF SD-JWT VC (`draft-ietf-oauth-sd-jwt-vc`) built on the SD-JWT
+mechanism of **RFC 9901**.
+
+**KB-JWT (Key-Binding JWT)** — a short JWT the holder signs at presentation time and attaches to an
+SD-JWT VC. It binds the disclosed credential to the holder's private key and to *this* request (it
+carries the verifier's nonce and audience), proving the presenter actually possesses the key the
+credential was issued to, not just a copy of the credential. Reference: RFC 9901 / IETF SD-JWT VC.
+
+**ISO mdoc / `mso_mdoc`** — the CBOR-based mobile document format from ISO/IEC 18013-5 (the format of
+the mDL). Claims are grouped into **namespaces** (e.g. `org.iso.18013.5.1`); a signed **MSO (Mobile
+Security Object)** holds the digests that authenticate each claim, giving the same selective-disclosure
+property as SD-JWT VC. At presentation the device adds **device authentication** (a signature or MAC
+over the session transcript) to prove key possession. Reference: ISO/IEC 18013-5.
+
+## Protocols
+
+**OpenID4VCI (OpenID for Verifiable Credential Issuance)** — the protocol a wallet uses to obtain a
+credential from an issuer: discover issuer metadata, authorize (pre-authorized code or authorization
+code), prove possession of a fresh key, and receive one or more signed credentials. This SDK reaches
+it through `wallet.issuance`. Reference: OpenID4VCI 1.0.
+
+**OpenID4VP (OpenID for Verifiable Presentations)** — the protocol a verifier uses to request
+credentials and a wallet uses to present them remotely (cross-device via QR, or same-device via a
+link). The request states what is needed and carries the verifier's identity and nonce; the wallet
+responds with disclosed claims plus proof of key possession. Reference: OpenID4VP 1.0.
+
+**DCQL (Digital Credentials Query Language)** — the JSON query language OpenID4VP uses to say *which*
+credentials and claims a verifier wants ("a PID, disclosing only family_name and the age-over-18
+flag"). The wallet matches its stored credentials against a DCQL query to find eligible candidates.
+Reference: OpenID4VP 1.0 (DCQL section).
+
+**W3C Digital Credentials API** — a browser/OS API that lets a web page request a credential and hands
+the request to the operating system's credential chooser, which routes it to an installed wallet. It
+provides an origin-bound, phishing-resistant path for presentation on the same device; the payload it
+carries is still an OpenID4VP request. Reference: W3C Digital Credentials API.
+
+**ISO/IEC 18013-5** — the standard for **in-person / proximity** presentation: device engagement (QR
+or NFC tap), an encrypted BLE/NFC session established by ECDH, reader authentication, and mdoc device
+retrieval — no network connection to the verifier required. In this SDK it is `wallet.proximity`
+(holder) and `wallet.reader` (verifier). Reference: ISO/IEC 18013-5.
+
+**ISO/IEC 18013-7** — the online extension of 18013-5: it defines how to present an mdoc **over
+OpenID4VP and the Digital Credentials API** rather than over a proximity link, so the same mdoc
+credential works remotely. Reference: ISO/IEC 18013-7.
+
+**HAIP (High Assurance Interoperability Profile)** — an OpenID profile that pins the many open choices
+in OpenID4VCI/VP down to one concrete, interoperable set (which credential formats, which key-binding,
+which client-authentication, DPoP, PAR, and so on). The ARF requires HAIP, which is why this SDK's
+defaults look opinionated rather than configurable. Reference: OpenID4VC High Assurance Interoperability
+Profile.
+
+## Trust and assurance
+
+**Wallet Unit Attestation (WUA)** — a signed statement from the **Wallet Provider** that a specific
+Wallet Unit is a genuine, non-revoked instance of an approved wallet solution. An issuer inspects the
+WUA before releasing a high-value credential so it knows it is provisioning trustworthy software on a
+trustworthy device. In this SDK it comes from the `WalletAttestationProvider` port. Reference: ARF /
+ETSI TS 119 472-3.
+
+**Key Attestation** — evidence that the specific key a credential will be bound to lives in the
+device's secure hardware and was generated there. Where the WUA vouches for the *wallet instance*, a
+key attestation vouches for the *individual issuance key*, so the issuer knows the private key cannot
+be exported. The two are distinct even though some specs conflate the naming. Reference: ARF /
+OpenID4VCI key attestation.
+
+**X.509 trust anchors / DSC (Document Signer Certificate)** — issuers sign credentials with a private
+key whose certificate chains up to a trusted root (the trust anchor). For mdoc that leaf is the
+**Document Signer Certificate (DSC)**, itself issued under a country's IACA root. A wallet or verifier
+validates the chain to a configured anchor before believing a signature. Reference: RFC 5280 (PKIX) /
+ISO/IEC 18013-5 Annex B.
+
+**Trusted Lists** — signed, machine-readable registries that publish the trust anchors for each role
+(PID providers, QEAA providers, RP registrars, wallet providers). Instead of hard-coding certificates,
+a party fetches the relevant list and trusts what it names. Reference: ETSI TS 119 602 (and the
+historical ETSI TS 119 612 trust-list format).
+
+**WRPAC (Wallet-Relying-Party Access Certificate)** — the certificate the RP Registrar issues to a
+Relying Party that authorises it to talk to wallets at all. The wallet checks the WRPAC to confirm the
+verifier is a registered party before processing its request. Reference: ETSI TS 119 475.
+
+**WRPRC (Wallet-Relying-Party Registration Certificate)** — the companion certificate that declares
+*what* a Relying Party is registered to request and for which purpose. The wallet uses it to show the
+holder the verifier's legitimate data needs and to reject over-asking. In OpenID4VP it rides in
+`verifier_info`; for mdoc it appears as `euWrprc`. Reference: ETSI TS 119 475 / ETSI TS 119 472-2.
+
+**Token Status List** — a compact, privacy-preserving mechanism for **revocation and suspension**: the
+issuer publishes a bit-array where each credential's status is one referenced index, and a verifier
+checks that bit to see if the credential is still valid. It avoids per-credential status calls that
+would leak which credential is being checked. In this SDK it is the `statuslist` module. Reference:
+IETF Token Status List (`draft-ietf-oauth-status-list`).
+
+## Supporting standards
+
+These are general OAuth/JOSE building blocks that HAIP pins into the issuance flow:
+
+| Standard | RFC | What it does |
+|---|---|---|
+| **DPoP** — Demonstrating Proof of Possession | RFC 9449 | Binds an access token to a key the client proves it holds, so a stolen token is useless without the key. |
+| **PAR** — Pushed Authorization Requests | RFC 9126 | The client sends the authorization-request parameters to the server over a back channel first, keeping them off the front-channel URL. |
+| **PKCE** — Proof Key for Code Exchange | RFC 7636 | Ties an authorization code to the client that started the flow, preventing code interception on public clients. |
+
+## Where this shows up in the SDK
+
+The vocabulary above maps onto a small, concrete surface. This is a high-level orientation, not the
+full API — see **[Architecture](./architecture)** for the module and port layout.
+
+| Concept | SDK surface |
+|---|---|
+| OpenID4VCI (issuance) | `wallet.issuance` |
+| OpenID4VP + DC API (remote presentation) | `wallet.presentation` |
+| ISO/IEC 18013-5 (proximity) | `wallet.proximity` (holder) · `wallet.reader` (verifier) |
+| SD-JWT VC / mdoc formats, DCQL matching, Token Status List | `wallet.credentials` (the credential store) |
+| Wallet Unit Attestation (WUA) | the `WalletAttestationProvider` port |
+| X.509 trust anchors / Trusted Lists | `WalletConfig.trust` |
+| Audit of disclosures & trust decisions | `wallet.transactions` |
+
+For the exact documents behind every term on this page, see the
+**[spec bibliography](./reference/specs)**.

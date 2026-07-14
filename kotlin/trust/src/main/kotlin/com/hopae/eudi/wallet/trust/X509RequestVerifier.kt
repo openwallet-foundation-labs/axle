@@ -80,6 +80,7 @@ class X509RequestVerifier(
                 val verified = verifier.verify(wrprc, x5c.first())
                 RegistrationInfo(
                     subject = verified.subject,
+                    subjectName = verified.name,
                     entitlements = verified.entitlements,
                     purpose = verified.purpose.map { RegistrationLocalizedText(it.lang, it.value) },
                     intermediarySub = verified.intermediary?.sub,

@@ -143,7 +143,7 @@ public struct PresentationService {
             // RPRC_21 attribute-scope check: which requested attributes fall outside what the RP registered.
             let unregistered = RegistrationScope.unregistered(resolved.dcqlQuery, registered: registered)
             return VerifierRegistration(
-                subject: r.subject, entitlements: r.entitlements,
+                subject: r.subject, subjectName: r.subjectName, entitlements: r.entitlements,
                 purpose: r.purpose.map { PurposeText(lang: $0.lang, value: $0.value) },
                 intermediarySub: r.intermediarySub, intermediaryName: r.intermediaryName,
                 // Reaching here means any revoked WRPRC was already refused; validated iff a status client ran.

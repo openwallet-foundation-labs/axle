@@ -197,6 +197,10 @@ private fun ReviewRequest(
     val c = WalletTheme.colors
     val v = request.verifier
     val reg = v.registration
+    // Show the actual (final) relying party. For an intermediated request the signing cert's commonName is the
+    // intermediary, so prefer the WRPRC subject name and surface the intermediary separately as "via …".
+    val rpName = reg?.subjectName ?: reg?.subject?.takeIf { it.isNotBlank() } ?: v.commonName ?: v.clientId
+    val rpSubtitle = reg?.intermediaryName?.let { "via $it" } ?: v.clientId
     // Required queries first, so the screen reads shared-then-optional overall.
     val orderedQueries = request.queries.sortedByDescending { it.required }
     Column(Modifier.fillMaxSize()) {
@@ -205,11 +209,11 @@ private fun ReviewRequest(
             WalletCard {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(c.ink), contentAlignment = Alignment.Center) {
-                        Text((v.commonName ?: v.clientId).take(1).uppercase(), color = Color.White, style = MaterialTheme.typography.titleMedium)
+                        Text(rpName.take(1).uppercase(), color = Color.White, style = MaterialTheme.typography.titleMedium)
                     }
                     Column(Modifier.weight(1f)) {
-                        Text(v.commonName ?: v.clientId, style = MaterialTheme.typography.titleSmall, color = c.ink)
-                        Text(v.clientId, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, maxLines = 1)
+                        Text(rpName, style = MaterialTheme.typography.titleSmall, color = c.ink)
+                        Text(rpSubtitle, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, maxLines = 1)
                     }
                     TrustBadge(v.trusted, trustedText = "Verified", untrustedText = "Unverified")
                 }

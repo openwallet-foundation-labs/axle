@@ -39,6 +39,8 @@ public struct VerifierRegistration {
     /// `sub` — the registered semantic identifier (bound to the WRPAC organizationIdentifier). For an
     /// intermediated request this is the **final** relying party, never the intermediary.
     public let subject: String
+    /// The relying party's display name (the **final** RP for an intermediated request), if the WRPRC carries one.
+    public let subjectName: String?
     /// EU-level entitlements/roles asserted for the relying party (≥1).
     public let entitlements: [String]
     /// The declared intended-use, for display on the consent screen.
@@ -65,11 +67,12 @@ public struct VerifierRegistration {
     /// over-asking verifier is visible at approval. Each entry is the claim path as string segments.
     public let unregisteredClaims: [[String]]
 
-    public init(subject: String, entitlements: [String], purpose: [PurposeText],
+    public init(subject: String, subjectName: String? = nil, entitlements: [String], purpose: [PurposeText],
                 intermediarySub: String?, intermediaryName: String?, statusValid: Bool?,
                 attested: Bool = false, registrarVerified: Bool = false, registryURI: String? = nil,
                 policyURI: String? = nil, unregisteredClaims: [[String]] = []) {
         self.subject = subject
+        self.subjectName = subjectName
         self.entitlements = entitlements
         self.purpose = purpose
         self.intermediarySub = intermediarySub

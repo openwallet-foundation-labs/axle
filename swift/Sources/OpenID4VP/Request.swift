@@ -19,6 +19,8 @@ public struct RegistrationLocalizedText: Equatable {
 public struct RegistrationInfo {
     /// `sub` — the registered semantic identifier, bound to the WRPAC organizationIdentifier (GEN-5.1.1-02).
     public let subject: String
+    /// `name` — the relying party's display name (the **final** RP for an intermediated request), if present.
+    public let subjectName: String?
     /// EU-level entitlements/roles asserted for the relying party (≥1).
     public let entitlements: [String]
     /// The declared intended-use, localized, for the consent screen.
@@ -37,11 +39,12 @@ public struct RegistrationInfo {
     /// self-declared dataset — used for the attribute-scope check (RPRC_21).
     public let registeredCredentials: [RegisteredCredential]
 
-    public init(subject: String, entitlements: [String], purpose: [RegistrationLocalizedText],
+    public init(subject: String, subjectName: String? = nil, entitlements: [String], purpose: [RegistrationLocalizedText],
                 intermediarySub: String?, intermediaryName: String?, status: JsonValue?,
                 attested: Bool = false, dataset: RegistrarDataset? = nil,
                 registeredCredentials: [RegisteredCredential] = []) {
         self.subject = subject
+        self.subjectName = subjectName
         self.entitlements = entitlements
         self.purpose = purpose
         self.intermediarySub = intermediarySub

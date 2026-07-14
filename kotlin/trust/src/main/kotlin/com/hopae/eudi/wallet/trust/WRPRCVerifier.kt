@@ -26,6 +26,8 @@ data class VerifiedWRPRC(
      * intermediated request this is always the **final** relying party, never the intermediary.
      */
     val subject: String,
+    /** `name` — the relying party's display name (the final RP for an intermediated request), if present. */
+    val name: String?,
     /** `entitlements` — the EU-level roles asserted for the relying party (>=1). */
     val entitlements: List<String>,
     /** `purpose` — the declared intended-use, for display on the consent screen. */
@@ -106,6 +108,7 @@ class WRPRCVerifier(
 
         val subject = (payload["sub"] as? JsonValue.Str)?.value?.takeIf { it.isNotEmpty() }
             ?: throw TrustException("WRPRC missing `sub`")
+        val name = (payload["name"] as? JsonValue.Str)?.value?.takeIf { it.isNotEmpty() }
 
         // intermediary (Table 10) + actor claim binding (GEN-5.2.4-09): when the RP operates through an
         // intermediary, `act.sub` must equal the intermediary's identifier.
@@ -147,7 +150,7 @@ class WRPRCVerifier(
         // `credentials` (§5.2.4) — the attestation types + claim paths the RP is registered to request.
         val registeredCredentials = RegisteredCredential.listFromJson(payload["credentials"] as? JsonValue.Arr)
 
-        return VerifiedWRPRC(subject, entitlements, purpose, intermediary, registeredCredentials, payload, payload["status"])
+        return VerifiedWRPRC(subject, name, entitlements, purpose, intermediary, registeredCredentials, payload, payload["status"])
     }
 
     companion object {

@@ -50,7 +50,7 @@ class GetCredentialActivity : FragmentActivity() {
                         ConsentItem(dr.docType, dr.requested.flatMap { (_, els) -> els.map { it.identifier } })
                     }
                 }.getOrDefault(emptyList())
-                showConsent(origin, trusted = false, items,
+                showConsent(DcApiVerifier(origin, "In-app request", signedRequestVerified = false, wrprcVerified = null), items,
                     onApprove = {
                         lifecycleScope.launch {
                             runCatching {
@@ -78,7 +78,12 @@ class GetCredentialActivity : FragmentActivity() {
                 val items = presentation.queries.map { q ->
                     ConsentItem(q.queryId, q.candidates.firstOrNull()?.disclosedPaths?.map { it.last() } ?: listOf("no matching credential"))
                 }
-                showConsent(presentation.verifier.commonName ?: presentation.verifier.clientId, presentation.verifier.trusted, items,
+                val v = presentation.verifier
+                val reg = v.registration
+                val rpName = reg?.subjectName ?: reg?.subject?.takeIf { it.isNotBlank() } ?: v.commonName ?: v.clientId
+                val subtitle = reg?.intermediaryName?.let { "via $it" } ?: "In-app request"
+                val wrprc = reg?.let { it.attested || it.registrarVerified }
+                showConsent(DcApiVerifier(rpName, subtitle, v.trusted, wrprc), items,
                     onApprove = {
                         lifecycleScope.launch {
                             runCatching {
@@ -105,8 +110,8 @@ class GetCredentialActivity : FragmentActivity() {
         finish()
     }
 
-    private fun showConsent(verifier: String, trusted: Boolean, items: List<ConsentItem>, onApprove: () -> Unit, onDecline: () -> Unit) {
-        setContent { WalletTheme { DcApiConsentSheet(verifier, trusted, items, onApprove, onDecline) } }
+    private fun showConsent(verifier: DcApiVerifier, items: List<ConsentItem>, onApprove: () -> Unit, onDecline: () -> Unit) {
+        setContent { WalletTheme { DcApiConsentSheet(verifier, items, onApprove, onDecline) } }
     }
 
     /** The app-owned privileged-caller allowlist (which browsers may present a web origin). */

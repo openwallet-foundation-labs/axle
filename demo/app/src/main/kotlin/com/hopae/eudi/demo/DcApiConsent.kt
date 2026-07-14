@@ -47,6 +47,7 @@ import com.hopae.eudi.demo.ui.components.PrimaryButton
 import com.hopae.eudi.demo.ui.components.SecondaryButton
 import com.hopae.eudi.demo.ui.components.SectionLabel
 import com.hopae.eudi.demo.ui.components.TrustBadge
+import com.hopae.eudi.demo.ui.components.TrustRow
 import com.hopae.eudi.demo.ui.components.WalletCard
 import com.hopae.eudi.demo.ui.screens.GroupHeader
 import com.hopae.eudi.demo.ui.theme.WalletTheme
@@ -60,10 +61,19 @@ class ConsentItem(val label: String, val elements: List<String>)
  * success screen — the activity finishes and the caller receives the response). Used by both DC API paths
  * (raw-mdoc ISO 18013-7 and OpenID4VP).
  */
+/** The requester shown on a DC API consent: display name, subtitle ("via …" / origin), and trust flags. */
+class DcApiVerifier(
+    val name: String,
+    val subtitle: String,
+    /** Whether the signed request verified to a trust anchor (false for an unsigned/origin-only request). */
+    val signedRequestVerified: Boolean,
+    /** WRPRC registrar-verified, or null when the request carries no registration (e.g. raw-mdoc). */
+    val wrprcVerified: Boolean?,
+)
+
 @Composable
 fun DcApiConsentSheet(
-    verifier: String,
-    trusted: Boolean,
+    verifier: DcApiVerifier,
     items: List<ConsentItem>,
     onApprove: () -> Unit,
     onDecline: () -> Unit,
@@ -107,10 +117,17 @@ fun DcApiConsentSheet(
                         Icon(Icons.Filled.Public, null, tint = Color.White, modifier = Modifier.size(22.dp))
                     }
                     Column(Modifier.weight(1f)) {
-                        Text(verifier, style = MaterialTheme.typography.titleSmall, color = c.ink, maxLines = 2)
-                        Text("In-app request", style = MaterialTheme.typography.bodySmall, color = c.inkMuted)
+                        Text(verifier.name, style = MaterialTheme.typography.titleSmall, color = c.ink, maxLines = 2)
+                        Text(verifier.subtitle, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, maxLines = 1)
                     }
-                    TrustBadge(trusted, trustedText = "Verified", untrustedText = "Unverified")
+                    TrustBadge(verifier.signedRequestVerified, trustedText = "Verified", untrustedText = "Unverified")
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            WalletCard(padding = PaddingValues(0.dp)) {
+                TrustRow("Signed request", if (verifier.signedRequestVerified) "Verified" else "Not verified", verifier.signedRequestVerified)
+                verifier.wrprcVerified?.let { ok ->
+                    TrustRow("Registration (WRPRC)", if (ok) "Verified by registrar" else "Self-declared", ok)
                 }
             }
             Spacer(Modifier.height(16.dp))

@@ -22,6 +22,8 @@ data class RegistrationLocalizedText(val lang: String, val value: String)
 class RegistrationInfo(
     /** `sub` — the registered semantic identifier, bound to the WRPAC organizationIdentifier (GEN-5.1.1-02). */
     val subject: String,
+    /** `name` — the relying party's display name (the **final** RP for an intermediated request), if present. */
+    val subjectName: String? = null,
     /** EU-level entitlements/roles asserted for the relying party (>=1). */
     val entitlements: List<String>,
     /** The declared intended-use, localized, for the consent screen. */

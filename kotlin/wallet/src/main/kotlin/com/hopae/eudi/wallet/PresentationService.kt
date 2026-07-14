@@ -185,6 +185,7 @@ class PresentationService internal constructor(
             val unregistered = RegistrationScope.unregistered(resolved.dcqlQuery, registered)
             VerifierRegistration(
                 subject = r.subject,
+                subjectName = r.subjectName,
                 entitlements = r.entitlements,
                 purpose = r.purpose.map { PurposeText(it.lang, it.value) },
                 intermediarySub = r.intermediarySub,

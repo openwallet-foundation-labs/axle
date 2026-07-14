@@ -40,6 +40,8 @@ class VerifierRegistration(
      * intermediated request this is the **final** relying party, never the intermediary.
      */
     val subject: String,
+    /** The relying party's display name (the **final** RP for an intermediated request), if the WRPRC carries one. */
+    val subjectName: String? = null,
     /** EU-level entitlements/roles asserted for the relying party (>=1). */
     val entitlements: List<String>,
     /** The declared intended-use, for display on the consent screen. */

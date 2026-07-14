@@ -32,6 +32,8 @@ public struct VerifiedWRPRC: Sendable {
     /// `sub` — the registered semantic identifier (e.g. `VATLU-12345678`), bound to the WRPAC. For an
     /// intermediated request this is always the **final** relying party, never the intermediary.
     public let subject: String
+    /// `name` — the relying party's display name (the final RP for an intermediated request), if present.
+    public let name: String?
     /// `entitlements` — the EU-level roles asserted for the relying party (≥1).
     public let entitlements: [String]
     /// `purpose` — the declared intended-use, for display on the consent screen.
@@ -127,6 +129,8 @@ public struct WRPRCVerifier: @unchecked Sendable {
         guard case let .str(subject)? = payload["sub"], !subject.isEmpty else {
             throw TrustError("WRPRC missing `sub`")
         }
+        var name: String?
+        if case let .str(n)? = payload["name"], !n.isEmpty { name = n }
 
         // intermediary (Table 10) + actor claim binding (GEN-5.2.4-09): when the RP operates through
         // an intermediary, `act.sub` must equal the intermediary's identifier.
@@ -178,6 +182,7 @@ public struct WRPRCVerifier: @unchecked Sendable {
 
         return VerifiedWRPRC(
             subject: subject,
+            name: name,
             entitlements: entitlements,
             purpose: purpose,
             intermediary: intermediary,

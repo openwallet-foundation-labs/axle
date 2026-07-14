@@ -72,6 +72,7 @@ public struct X509RequestVerifier: RequestTrustVerifier {
             let verified = try await wrprcVerifier.verify(wrprc, wrpacLeafDer: x5c[0])
             return RegistrationInfo(
                 subject: verified.subject,
+                subjectName: verified.name,
                 entitlements: verified.entitlements,
                 purpose: verified.purpose.map { RegistrationLocalizedText(lang: $0.lang, value: $0.value) },
                 intermediarySub: verified.intermediary?.sub,

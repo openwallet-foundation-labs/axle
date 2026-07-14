@@ -1,0 +1,229 @@
+---
+title: Android adapter modules
+---
+
+# Android adapter modules
+
+The Axle SDK is **headless and portable**: the core does all credential, key, issuance, and presentation
+logic in pure Kotlin/Swift and has no platform dependencies. Everything platform-specific is a **port**
+(SPI) the host implements and injects at `Wallet.create(config, ports)` — see
+[Ports](../reference/ports) and [Architecture](../architecture).
+
+On Android that means you must supply real implementations of those ports: hardware-backed keys, byte
+storage, HTTP, and (when you use them) proximity, Digital Credentials API, and a Wallet Provider link.
+The repository ships **ready-made presets** under `android/` so you don't have to write them from
+scratch.
+
+:::note These are presets, not the SDK
+The `android/` modules are the **reusable adapter layer**, published under the Maven group
+`com.hopae.eudi.android` (distinct from the SDK's `com.hopae.eudi`, so artifacts never clash). The SDK
+is the portable core; the adapters are optional. Depend on them as-is, fork them, or read them as a
+reference and write your own against the same SPI — a wallet targeting a non-standard secure element,
+storage backend, or radio stack does exactly that. The SPI interfaces live in the **`wallet-api`**
+module (`com.hopae.eudi.wallet.spi`); `TransactionLogStore` lives in `txlog`.
+:::
+
+For a full end-to-end assembly (trust anchors, reader-auth, build) see the
+[Android adapters & demo](../android-demo) page; this page is the per-module reference — for each module:
+what behavior Android requires, which port it fills, what the preset implements, and when to use it as-is
+vs. customize.
+
+## Module overview
+
+| Module | SPI port(s) filled | Android capability used | Key classes | Use as-is when… / Customize when… |
+|---|---|---|---|---|
+| `core` | `SecureArea`, `StorageDriver`, `HttpTransport`, `TransactionLogStore` | Android Keystore / StrongBox, app files dir, OkHttp | `AndroidKeystoreSecureArea`, `FileStorageDriver`, `OkHttpTransport`, `FileTransactionLogStore` | As-is for standard hardware-backed keys + local files. Customize for an external SE / cloud HSM, encrypted-at-rest storage, or custom HTTP (pinning, interceptors, proxy). |
+| `proximity` | `ProximityTransport` | BLE (GATT client/server), NFC HCE | `Ble`, `BleGattServerTransport`, `BleGattClientTransport`, `NfcEngagementService`, `NfcReader` | As-is for ISO 18013-5 BLE + NFC handover on the platform stack. Customize for a different BLE library, Wi-Fi Aware, or to change advertising/permission behavior. |
+| `dcapi` | *(none — provider glue on the facade)* | Credential Manager (Digital Credentials API) | `DcApiRegistrar`, `DcApiRequest`, `DcApiResult`, `DcApiBranding` | As-is to expose the wallet to browser DC API requests. Customize the request-handling activity, consent UI, and allowlist (app-owned). See [DC API guide](./dc-api). |
+| `attestation` | `WalletAttestationProvider` | Google Play Integrity | `WalletProviderAttestation`, `PlayIntegrityTokenProvider`, `IntegrityTokenProvider` | As-is to talk to a `wallet-provider/`-shaped backend attested by Play Integrity. Customize for a different backend API or a non-GMS / non-Play integrity source. |
+
+Everything is host-injected through `WalletPorts` — there is no DI framework. `WalletClock` and `Rng`
+use the SDK defaults; `WalletLogger` is intentionally **app-supplied** (real logging is app-specific),
+so no concrete logger ships in `android/core` — the demo's `LogWalletLogger` is an example.
+
+## `android/core`
+
+**Required behavior.** Every Android wallet must supply the three required ports plus, for a persistent
+audit log, `TransactionLogStore`:
+
+- `SecureArea` — private-key custody. Keys must never leave the secure boundary; the SDK routes every
+  `sign` / `keyAgreement` / `attestation` through it.
+- `StorageDriver` — byte persistence keyed by collection + key, with a transaction scope.
+- `HttpTransport` — HTTP execution that **honours `followRedirects`** (the OpenID4VCI/VP flows intercept
+  redirects).
+- `TransactionLogStore` — append-only audit persistence (defaults to in-memory; production persists).
+
+**What the preset implements.**
+
+- **`AndroidKeystoreSecureArea`** → `SecureArea`. Hardware-bound EC keys via the Android Keystore,
+  preferring **StrongBox** when present and falling back to the TEE (`StrongBoxUnavailableException`).
+  Keys persist across app restarts; private keys never leave hardware. Emits an Android Key Attestation
+  certificate chain (format `android-keystore-x5c`) when the key was created with a challenge; supports
+  ES256/384/512 and ECDH key agreement (Android 12+).
+- **`FileStorageDriver(baseDir)`** → `StorageDriver`. Persists values as plain files under a base
+  directory (typically the app's private files dir). **Debug-grade** — no encryption, no transactional
+  rollback.
+- **`OkHttpTransport(base, logger)`** → `HttpTransport`. OkHttp-backed; applies the per-request redirect
+  policy and traces each call through the injected `WalletLogger`.
+- **`FileTransactionLogStore(file)`** → `TransactionLogStore`. One JSON line per entry, append-only.
+
+```kotlin
+val logger: WalletLogger? = LogWalletLogger()   // your app-supplied logger (optional)
+val secureArea = AndroidKeystoreSecureArea()
+val storage = FileStorageDriver(File(context.filesDir, "wallet"))
+
+val wallet = Wallet.create(
+    config = WalletConfig(),
+    ports = WalletPorts(
+        secureAreas = listOf(secureArea),                                           // SecureArea
+        storage = storage,                                                          // StorageDriver
+        http = OkHttpTransport(logger = logger),                                    // HttpTransport
+        transactionLogStore = FileTransactionLogStore(File(context.filesDir, "logs/transactions.log")),
+        logger = logger,
+    ),
+)
+```
+
+**Use as-is vs. customize.**
+
+- Use `AndroidKeystoreSecureArea` for standard hardware-backed custody. **Customize** (write your own
+  `SecureArea`) for an external secure element / eSIM / smartcard, a remote WSCD or cloud HSM, or to
+  require user authentication (biometric) per signature. `secureAreas` is a list, so you can run a
+  StrongBox area alongside a TEE area. Qualify any custom area with `SecureAreaContract.verify(area)`
+  from the test kit.
+- Use `FileStorageDriver` only for debug builds. **Customize** for production: wrap or replace it with an
+  encrypted store (EncryptedFile, SQLCipher, DataStore) — the preset stores plaintext.
+- Use `OkHttpTransport` for standard networking. **Customize** — pass your own preconfigured
+  `OkHttpClient` (`OkHttpTransport(base = myClient)`) or implement `HttpTransport` directly — to add
+  certificate pinning, interceptors, a proxy, or a different HTTP library.
+
+## `android/proximity`
+
+**Required behavior.** ISO/IEC 18013-5 in-person device retrieval needs a duplex framed-message channel
+over a radio: the `ProximityTransport` port (`send` / `receive` / `close`, plus `retrievalMethods()` /
+`nfcCarrier()` so the transport can advertise its BLE carrier into the QR / NFC engagement). The SDK
+drives the message exchange; the host supplies the radio. This port is **per-session** — you pass a fresh
+transport to each `wallet.proximity.present(...)` / `wallet.reader.read(...)` call, not through
+`WalletPorts`.
+
+**What the preset implements.** A complete BLE + NFC device-retrieval stack (phone-to-phone verified —
+see `INTEROP.md`):
+
+- **`Ble`** / **`BleModeUuids`** — the ISO 18013-5 §8.3.3.1.1 characteristic UUIDs and the two modes
+  (`PERIPHERAL_SERVER`, `CENTRAL_CLIENT`).
+- **`BleGattServerTransport`** → `ProximityTransport` — the GATT **server** side (advertises, receives on
+  Client2Server, notifies on Server2Client). Holder in peripheral-server mode, or reader in central-client
+  mode; serves the §8.3.3.1.1.4 Ident characteristic when acting as reader.
+- **`BleGattClientTransport`** → `ProximityTransport` — the GATT **client** side (scans, connects,
+  subscribes), with retry hardening for Android's flaky initial connect and optional Ident verification.
+- **`NfcEngagementService`** — a `HostApduService` (NFC Forum Type 4 tag / HCE) that runs the SDK's
+  `NfcEngagementProcessor` state machine for static or negotiated handover; includes foreground-routing
+  helpers to win HCE routing conflicts.
+- **`NfcReader`** — the reader side: puts the phone in NFC reader mode and drives `MdocNfcHandover`,
+  auto-detecting static vs. TNEP negotiated handover.
+
+The module's **library manifest merges** the BLE/NFC permissions, the `bluetooth_le` / `nfc.hce`
+features, and the `NfcEngagementService` declaration into your app — you don't redeclare them (you still
+request the runtime BLE permissions).
+
+```kotlin
+// Holder: advertise over BLE peripheral-server and present via QR engagement.
+val uuid = UUID.randomUUID()
+val transport = BleGattServerTransport(
+    context, uuid, Ble.PERIPHERAL_SERVER,
+    advertisedMethods = listOf(DeviceEngagement.bleRetrievalMethod(peripheralServerUuid = Ble.uuidToBytes(uuid))),
+    logger = logger,
+)
+val session = wallet.proximity.present(transport)   // engagement carries the BLE UUID
+
+// Reader: connect as GATT client and read.
+val client = BleGattClientTransport(context, uuid, Ble.PERIPHERAL_SERVER, logger = logger).also { it.connect() }
+val documents = wallet.reader.read(client, engagement, requested)
+```
+
+For the full holder/reader lifecycle including NFC handover (arming `NfcEngagementService.processor`,
+`NfcReader.readHandover`), see `demo/.../ui/ProximityScreens.kt` and the [Proximity guide](./proximity).
+
+**Use as-is vs. customize.** Use the presets for ISO 18013-5 BLE and NFC on the standard Android radio
+stack. **Customize** (implement `ProximityTransport` yourself) for a different BLE library or GATT
+strategy, to add **Wi-Fi Aware** as a carrier, or to change advertising, MTU, or permission handling — a
+minimal transport only needs `send` / `receive` / `close`, with `retrievalMethods()` / `nfcCarrier()`
+defaulting to none.
+
+## `android/dcapi`
+
+**Required behavior.** The [W3C Digital Credentials API](https://w3c-fedid.github.io/digital-credentials/)
+lets a browser invoke your wallet through the Android **Credential Manager**. Unlike the other modules
+this fills **no `WalletPorts` port** — the credential logic is already in the facade
+(`wallet.presentation.startDcApi`, `wallet.proximity.respondDcApiMdoc`); this module is the Android
+**provider glue** around it.
+
+**What the preset implements.** `DcApiRegistrar` (Credential Manager registration + bundled WASM
+matcher), `DcApiRequest` / `DcApiResult` (request-envelope parsing + result marshalling), and
+`DcApiBranding` (per-credential OS-selector title/subtitle/icon).
+
+```kotlin
+// Register the wallet as a DC API provider; re-run whenever credentials change.
+DcApiRegistrar.register(activity, wallet, DcApiBranding(logoPng = appIconPng()), logger = logger)
+```
+
+You still own the request-handling activity, its consent flow, and the privileged-caller allowlist.
+**Use as-is** to expose the wallet to browser DC API requests; **customize** the activity and branding.
+This module needs a GMS device; every other capability is unaffected without it.
+
+:::tip
+The full walkthrough (dependencies, provider activity, HPKE, `expected_origins` replay protection) lives
+in the dedicated **[Digital Credentials API guide](./dc-api)** — this section only points there.
+:::
+
+## `android/attestation`
+
+**Required behavior.** For attestation-based client authentication during issuance (HAIP), the SDK needs
+a link to your Wallet Provider backend via the `WalletAttestationProvider` port: `walletAttestation`
+returns a Wallet Unit Attestation (WUA) for client auth, and `keyAttestation` returns a per-issuance key
+attestation over the holder keys the issuer binds credentials to. This port is **optional** — issuance
+against issuers that accept a public `client_id` works without it.
+
+**What the preset implements.**
+
+- **`WalletProviderAttestation`** → `WalletAttestationProvider`. A plain-Kotlin composition of SDK ports
+  (`HttpTransport` + `SecureArea`) plus an integrity source, talking to the SDK's `wallet-provider/`
+  backend shape (`GET /nonce`, `POST /wallet-instances`, `POST /wallet-attestation`,
+  `POST /key-attestation`). It registers the wallet instance once (persisted via the optional
+  `StorageDriver` so a restart reuses it) and signs the instance-key proof of possession with the
+  injected `SecureArea`.
+- **`IntegrityTokenProvider`** (fun interface) — the device-integrity token source, with
+  **`PlayIntegrityTokenProvider`** (Google Play Integrity, bound to your Cloud project number) and a
+  **`DevIntegrityTokenProvider`** fallback for side-loaded debug builds.
+
+```kotlin
+val walletAttestation = WalletProviderAttestation(
+    baseUrl = "https://your-wallet-provider.example/wp",
+    http = http,
+    secureArea = secureArea,   // signs the instance-key proof of possession
+    integrity = PlayIntegrityTokenProvider(context, gcpProjectNumber, fallback = DevIntegrityTokenProvider(), logger = logger),
+    clientId = "wallet-dev",   // must equal IssuanceConfig.clientId so the WUA `sub` matches at the issuer
+    storage = storage,         // persists the instance registration id across restarts
+)
+// → WalletPorts(..., walletAttestation = walletAttestation)
+```
+
+:::note Production integrity
+Pass `fallback = null` in production so a failed Play Integrity check surfaces instead of silently
+degrading to the `dev-integrity:` token. `DevIntegrityTokenProvider` is for development, tests, and the
+demo's side-loaded fallback only — never ship it.
+:::
+
+**Use as-is vs. customize.** Use `WalletProviderAttestation` when your backend matches the reference
+`wallet-provider/` API. **Customize** (implement `WalletAttestationProvider` yourself) for a different
+backend contract; **swap the `IntegrityTokenProvider`** if you don't use Play Integrity — e.g. a non-GMS
+device, a different attestation scheme, or your own backend that expects a different integrity artifact.
+
+## Writing your own adapter
+
+Any of these can be replaced with your own implementation of the same SPI — the SDK core doesn't change.
+Implement the interface from `wallet-api` (`com.hopae.eudi.wallet.spi`), inject it through `WalletPorts`,
+and qualify it against the shared **contract test suites** in the test kit
+(`SecureAreaContract.verify(area)`, `StorageDriverContract.verify(driver)`) — the same checks that run on
+Linux CI against the software reference adapters. See [Ports](../reference/ports),
+[Architecture](../architecture), and [Getting started](../getting-started#your-own-adapters).

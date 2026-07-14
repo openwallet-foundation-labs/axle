@@ -142,10 +142,10 @@ class PresentationService internal constructor(
     }
 
     /**
-     * Dataset-only registration confirmation (wrprc.md §5, RPRC_16/18). Returns the RP's registrar-signed
+     * Dataset-only registration confirmation (ETSI TS 119 475, RPRC_16/18). Returns the RP's registrar-signed
      * registered credentials when the request carried only a self-declared `registrar_dataset` AND the User
      * opted in AND the TS5 lookup succeeds; null otherwise (WRPRC-attested, opted out, or the call failed —
-     * in which case we proceed with the self-declared dataset, unverified, per §5.3).
+     * in which case we proceed with the self-declared dataset, unverified).
      */
     private suspend fun resolveRegistrarApi(resolved: ResolvedRequest): List<RegisteredCredential>? {
         val reg = resolved.verifier.registration ?: return null
@@ -157,7 +157,7 @@ class PresentationService internal constructor(
         return try {
             api.fetchRegisteredCredentials(registryURI, identifier, reg.dataset?.intendedUseIdentifier)
         } catch (_: Exception) {
-            null // §5.3: could not obtain the registered info — proceed, the dataset stays unverified
+            null // could not obtain the registered info — proceed, the dataset stays unverified
         }
     }
 

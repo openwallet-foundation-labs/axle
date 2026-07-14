@@ -1,0 +1,220 @@
+---
+title: Android 어댑터 모듈
+---
+
+# Android 어댑터 모듈
+
+Axle SDK는 **헤드리스이며 이식 가능**합니다. 크리덴셜·키·발급·제시 로직 전부를 순수 Kotlin/Swift 코어가
+처리하고 플랫폼 의존성이 없습니다. 플랫폼 종속적인 것은 모두 호스트가 구현해 `Wallet.create(config, ports)`로
+주입하는 **포트**(SPI)입니다 — [Ports](../reference/ports)와 [Architecture](../architecture)를 참고하세요.
+
+Android에서는 이 포트들의 실제 구현을 직접 제공해야 합니다: 하드웨어 기반 키, 바이트 저장소, HTTP, 그리고
+(사용한다면) 근접 제시·Digital Credentials API·Wallet Provider 연동입니다. 저장소는 이를 처음부터 작성할
+필요가 없도록 `android/` 아래에 **미리 만들어 둔 프리셋**을 제공합니다.
+
+:::note 이것은 SDK가 아니라 프리셋입니다
+`android/` 모듈은 **재사용 가능한 어댑터 레이어**로, Maven 그룹 `com.hopae.eudi.android`(SDK의
+`com.hopae.eudi`와 구분되어 아티팩트가 절대 충돌하지 않음)로 게시됩니다. SDK는 이식 가능한 코어이고,
+어댑터는 선택 사항입니다. 그대로 의존하거나, 포크하거나, 참조 구현으로 읽고 같은 SPI에 대해 직접 작성할 수
+있습니다 — 비표준 시큐어 엘리먼트, 저장소 백엔드, 무선 스택을 대상으로 하는 지갑이 바로 그렇게 합니다. SPI
+인터페이스는 **`wallet-api`** 모듈(`com.hopae.eudi.wallet.spi`)에 있고, `TransactionLogStore`는
+`txlog`에 있습니다.
+:::
+
+전체 조립(트러스트 앵커, reader-auth, 빌드)은 [Android adapters & demo](../android-demo) 페이지를
+참고하세요. 이 페이지는 모듈별 레퍼런스로, 각 모듈에 대해 Android가 요구하는 동작, 채우는 포트, 프리셋이
+구현한 것, 그리고 그대로 쓸지 커스터마이즈할지의 기준을 다룹니다.
+
+## 모듈 개요
+
+| 모듈 | 채우는 SPI 포트 | 사용하는 Android 기능 | 핵심 클래스 | 그대로 쓸 때… / 커스터마이즈할 때… |
+|---|---|---|---|---|
+| `core` | `SecureArea`, `StorageDriver`, `HttpTransport`, `TransactionLogStore` | Android Keystore / StrongBox, 앱 files 디렉터리, OkHttp | `AndroidKeystoreSecureArea`, `FileStorageDriver`, `OkHttpTransport`, `FileTransactionLogStore` | 표준 하드웨어 기반 키 + 로컬 파일이면 그대로. 외부 SE / 클라우드 HSM, 저장 시 암호화, 커스텀 HTTP(피닝·인터셉터·프록시)면 커스터마이즈. |
+| `proximity` | `ProximityTransport` | BLE (GATT client/server), NFC HCE | `Ble`, `BleGattServerTransport`, `BleGattClientTransport`, `NfcEngagementService`, `NfcReader` | 플랫폼 스택 위 ISO 18013-5 BLE + NFC handover면 그대로. 다른 BLE 라이브러리, Wi-Fi Aware, 광고/권한 동작 변경이면 커스터마이즈. |
+| `dcapi` | *(없음 — 파사드 위 프로바이더 글루)* | Credential Manager (Digital Credentials API) | `DcApiRegistrar`, `DcApiRequest`, `DcApiResult`, `DcApiBranding` | 브라우저 DC API 요청에 지갑을 노출하려면 그대로. 요청 처리 액티비티·동의 UI·허용목록(앱 소유)은 커스터마이즈. [DC API 가이드](./dc-api) 참고. |
+| `attestation` | `WalletAttestationProvider` | Google Play Integrity | `WalletProviderAttestation`, `PlayIntegrityTokenProvider`, `IntegrityTokenProvider` | Play Integrity로 증명되는 `wallet-provider/` 형태 백엔드와 통신하려면 그대로. 다른 백엔드 API나 non-GMS / 비-Play 무결성 소스면 커스터마이즈. |
+
+모든 것은 `WalletPorts`를 통해 호스트가 주입합니다 — DI 프레임워크는 없습니다. `WalletClock`과 `Rng`는
+SDK 기본값을 쓰고, `WalletLogger`는 의도적으로 **앱이 제공**합니다(실제 로깅은 앱마다 다름). 따라서
+`android/core`에는 구체 로거가 포함되지 않습니다 — 데모의 `LogWalletLogger`가 예시입니다.
+
+## `android/core`
+
+**요구되는 동작.** 모든 Android 지갑은 필수 포트 3개와, 영속 감사 로그를 위한 `TransactionLogStore`를
+제공해야 합니다:
+
+- `SecureArea` — 개인키 보관. 키는 시큐어 경계를 절대 벗어나면 안 되며, SDK는 모든
+  `sign` / `keyAgreement` / `attestation`을 이 포트로 라우팅합니다.
+- `StorageDriver` — collection + key로 키잉된 바이트 영속, 트랜잭션 스코프 포함.
+- `HttpTransport` — **`followRedirects`를 준수**하는 HTTP 실행(OpenID4VCI/VP 플로우가 리다이렉트를
+  가로챕니다).
+- `TransactionLogStore` — 추가 전용 감사 영속(기본은 인메모리, 프로덕션은 영속화).
+
+**프리셋이 구현한 것.**
+
+- **`AndroidKeystoreSecureArea`** → `SecureArea`. Android Keystore를 통한 하드웨어 바인딩 EC 키로,
+  가능하면 **StrongBox**를 우선하고 없으면 TEE로 폴백합니다(`StrongBoxUnavailableException`). 키는 앱
+  재시작 후에도 유지되며, 개인키는 하드웨어를 벗어나지 않습니다. 챌린지로 생성된 키에 대해 Android Key
+  Attestation 인증서 체인(형식 `android-keystore-x5c`)을 방출하고, ES256/384/512와 ECDH 키 합의(Android
+  12+)를 지원합니다.
+- **`FileStorageDriver(baseDir)`** → `StorageDriver`. 값을 기준 디렉터리(보통 앱의 private files 디렉터리)
+  아래 평문 파일로 영속합니다. **디버그 등급** — 암호화도, 트랜잭션 롤백도 없습니다.
+- **`OkHttpTransport(base, logger)`** → `HttpTransport`. OkHttp 기반으로, 요청별 리다이렉트 정책을
+  적용하고 주입된 `WalletLogger`로 각 호출을 추적합니다.
+- **`FileTransactionLogStore(file)`** → `TransactionLogStore`. 항목당 JSON 한 줄, 추가 전용입니다.
+
+```kotlin
+val logger: WalletLogger? = LogWalletLogger()   // 앱이 제공하는 로거(선택)
+val secureArea = AndroidKeystoreSecureArea()
+val storage = FileStorageDriver(File(context.filesDir, "wallet"))
+
+val wallet = Wallet.create(
+    config = WalletConfig(),
+    ports = WalletPorts(
+        secureAreas = listOf(secureArea),                                           // SecureArea
+        storage = storage,                                                          // StorageDriver
+        http = OkHttpTransport(logger = logger),                                    // HttpTransport
+        transactionLogStore = FileTransactionLogStore(File(context.filesDir, "logs/transactions.log")),
+        logger = logger,
+    ),
+)
+```
+
+**그대로 쓸지 vs 커스터마이즈.**
+
+- 표준 하드웨어 기반 보관이면 `AndroidKeystoreSecureArea`를 사용하세요. 외부 시큐어 엘리먼트 / eSIM /
+  스마트카드, 원격 WSCD나 클라우드 HSM, 또는 서명마다 사용자 인증(생체)을 요구하려면 **커스터마이즈**(직접
+  `SecureArea` 작성)하세요. `secureAreas`는 리스트라서 StrongBox 영역과 TEE 영역을 함께 운용할 수
+  있습니다. 커스텀 영역은 테스트 킷의 `SecureAreaContract.verify(area)`로 자격을 검증하세요.
+- `FileStorageDriver`는 디버그 빌드에만 사용하세요. 프로덕션은 **커스터마이즈**: 암호화 저장소(EncryptedFile,
+  SQLCipher, DataStore)로 감싸거나 대체하세요 — 프리셋은 평문으로 저장합니다.
+- 표준 네트워킹이면 `OkHttpTransport`를 쓰세요. 인증서 피닝, 인터셉터, 프록시, 다른 HTTP 라이브러리가
+  필요하면 **커스터마이즈**하세요 — 미리 구성한 `OkHttpClient`를 넘기거나(`OkHttpTransport(base = myClient)`)
+  `HttpTransport`를 직접 구현합니다.
+
+## `android/proximity`
+
+**요구되는 동작.** ISO/IEC 18013-5 대면 device retrieval에는 무선 위의 양방향 프레임 메시지 채널이
+필요합니다: `ProximityTransport` 포트(`send` / `receive` / `close`, 그리고 QR / NFC engagement에 BLE
+carrier를 광고할 수 있도록 `retrievalMethods()` / `nfcCarrier()`)입니다. SDK가 메시지 교환을 구동하고,
+호스트가 무선을 제공합니다. 이 포트는 **세션마다** 새로 만들어 각 `wallet.proximity.present(...)` /
+`wallet.reader.read(...)` 호출에 넘기는 것이며, `WalletPorts`를 통하지 않습니다.
+
+**프리셋이 구현한 것.** 완전한 BLE + NFC device-retrieval 스택입니다(폰-투-폰 검증됨 — `INTEROP.md` 참고):
+
+- **`Ble`** / **`BleModeUuids`** — ISO 18013-5 §8.3.3.1.1 특성 UUID와 두 모드
+  (`PERIPHERAL_SERVER`, `CENTRAL_CLIENT`).
+- **`BleGattServerTransport`** → `ProximityTransport` — GATT **서버** 측(광고, Client2Server 수신,
+  Server2Client 알림). peripheral-server 모드의 holder 또는 central-client 모드의 reader이며, reader로
+  동작할 때 §8.3.3.1.1.4 Ident 특성을 제공합니다.
+- **`BleGattClientTransport`** → `ProximityTransport` — GATT **클라이언트** 측(스캔, 연결, 구독). Android의
+  불안정한 초기 연결에 대한 재시도 강화와 선택적 Ident 검증을 포함합니다.
+- **`NfcEngagementService`** — SDK의 `NfcEngagementProcessor` 상태 머신을 static/negotiated handover로
+  구동하는 `HostApduService`(NFC Forum Type 4 tag / HCE)이며, HCE 라우팅 충돌을 이기기 위한 포그라운드
+  라우팅 헬퍼를 포함합니다.
+- **`NfcReader`** — reader 측: 폰을 NFC reader 모드로 두고 `MdocNfcHandover`를 구동하며 static vs TNEP
+  negotiated handover를 자동 감지합니다.
+
+모듈의 **라이브러리 매니페스트**가 BLE/NFC 권한, `bluetooth_le` / `nfc.hce` 기능, `NfcEngagementService`
+선언을 앱에 **병합**합니다 — 다시 선언할 필요가 없습니다(런타임 BLE 권한 요청은 여전히 앱이 합니다).
+
+```kotlin
+// Holder: BLE peripheral-server로 광고하고 QR engagement로 제시.
+val uuid = UUID.randomUUID()
+val transport = BleGattServerTransport(
+    context, uuid, Ble.PERIPHERAL_SERVER,
+    advertisedMethods = listOf(DeviceEngagement.bleRetrievalMethod(peripheralServerUuid = Ble.uuidToBytes(uuid))),
+    logger = logger,
+)
+val session = wallet.proximity.present(transport)   // engagement이 BLE UUID를 담음
+
+// Reader: GATT 클라이언트로 연결해 읽기.
+val client = BleGattClientTransport(context, uuid, Ble.PERIPHERAL_SERVER, logger = logger).also { it.connect() }
+val documents = wallet.reader.read(client, engagement, requested)
+```
+
+NFC handover를 포함한 전체 holder/reader 라이프사이클(`NfcEngagementService.processor` 무장,
+`NfcReader.readHandover`)은 `demo/.../ui/ProximityScreens.kt`와 [Proximity 가이드](./proximity)를
+참고하세요.
+
+**그대로 쓸지 vs 커스터마이즈.** 표준 Android 무선 스택 위 ISO 18013-5 BLE와 NFC면 프리셋을 사용하세요.
+다른 BLE 라이브러리나 GATT 전략, **Wi-Fi Aware** carrier 추가, 광고·MTU·권한 처리 변경이면
+**커스터마이즈**(직접 `ProximityTransport` 구현)하세요 — 최소 transport는 `send` / `receive` / `close`만
+있으면 되고, `retrievalMethods()` / `nfcCarrier()`는 기본이 none입니다.
+
+## `android/dcapi`
+
+**요구되는 동작.** [W3C Digital Credentials API](https://w3c-fedid.github.io/digital-credentials/)는
+브라우저가 Android **Credential Manager**를 통해 지갑을 호출하게 해줍니다. 다른 모듈과 달리 이 모듈은
+**`WalletPorts` 포트를 채우지 않습니다** — 크리덴셜 로직은 이미 파사드에 있고
+(`wallet.presentation.startDcApi`, `wallet.proximity.respondDcApiMdoc`), 이 모듈은 그 주위의 Android
+**프로바이더 글루**입니다.
+
+**프리셋이 구현한 것.** `DcApiRegistrar`(Credential Manager 등록 + 번들된 WASM matcher),
+`DcApiRequest` / `DcApiResult`(요청 봉투 파싱 + 결과 마샬링), `DcApiBranding`(크리덴셜별 OS 선택창
+제목/부제/아이콘).
+
+```kotlin
+// 지갑을 DC API 프로바이더로 등록; 크리덴셜이 바뀔 때마다 재실행.
+DcApiRegistrar.register(activity, wallet, DcApiBranding(logoPng = appIconPng()), logger = logger)
+```
+
+요청 처리 액티비티, 그 동의 플로우, 특권 호출자 허용목록은 여전히 앱이 소유합니다. 브라우저 DC API 요청에
+지갑을 노출하려면 **그대로** 쓰고, 액티비티와 브랜딩은 **커스터마이즈**하세요. 이 모듈은 GMS 기기가
+필요하지만, 나머지 기능은 이것 없이도 영향받지 않습니다.
+
+:::tip
+전체 워크스루(의존성, 프로바이더 액티비티, HPKE, `expected_origins` 재생 방어)는 전용
+**[Digital Credentials API 가이드](./dc-api)**에 있습니다 — 이 섹션은 그곳을 가리키기만 합니다.
+:::
+
+## `android/attestation`
+
+**요구되는 동작.** 발급 중 attestation 기반 클라이언트 인증(HAIP)을 위해 SDK는 `WalletAttestationProvider`
+포트를 통해 Wallet Provider 백엔드와의 연동이 필요합니다: `walletAttestation`은 클라이언트 인증용 Wallet
+Unit Attestation(WUA)을, `keyAttestation`은 발급자가 크리덴셜을 바인딩할 holder 키에 대한 발급별 key
+attestation을 반환합니다. 이 포트는 **선택**입니다 — 공개 `client_id`를 받는 발급자에 대한 발급은 이것
+없이도 동작합니다.
+
+**프리셋이 구현한 것.**
+
+- **`WalletProviderAttestation`** → `WalletAttestationProvider`. SDK 포트(`HttpTransport` + `SecureArea`)와
+  무결성 소스를 조합한 순수 Kotlin 구현으로, SDK의 `wallet-provider/` 백엔드 형태(`GET /nonce`,
+  `POST /wallet-instances`, `POST /wallet-attestation`, `POST /key-attestation`)와 통신합니다. 지갑
+  인스턴스를 한 번 등록하고(선택적 `StorageDriver`로 영속해 재시작 시 재사용), 인스턴스 키의 소유 증명을
+  주입된 `SecureArea`로 서명합니다.
+- **`IntegrityTokenProvider`**(fun interface) — 기기 무결성 토큰 소스로,
+  **`PlayIntegrityTokenProvider`**(Cloud 프로젝트 번호에 바인딩된 Google Play Integrity)와 사이드로드
+  디버그 빌드용 **`DevIntegrityTokenProvider`** 폴백을 제공합니다.
+
+```kotlin
+val walletAttestation = WalletProviderAttestation(
+    baseUrl = "https://your-wallet-provider.example/wp",
+    http = http,
+    secureArea = secureArea,   // 인스턴스 키의 소유 증명에 서명
+    integrity = PlayIntegrityTokenProvider(context, gcpProjectNumber, fallback = DevIntegrityTokenProvider(), logger = logger),
+    clientId = "wallet-dev",   // 발급자에서 WUA `sub`가 맞도록 IssuanceConfig.clientId와 동일해야 함
+    storage = storage,         // 인스턴스 등록 id를 재시작 간 영속
+)
+// → WalletPorts(..., walletAttestation = walletAttestation)
+```
+
+:::note 프로덕션 무결성
+프로덕션에서는 `fallback = null`을 넘겨, Play Integrity 검사 실패가 `dev-integrity:` 토큰으로 조용히
+격하되지 않고 표면화되게 하세요. `DevIntegrityTokenProvider`는 개발·테스트·데모의 사이드로드 폴백 전용이며,
+절대 배포하지 마세요.
+:::
+
+**그대로 쓸지 vs 커스터마이즈.** 백엔드가 참조 `wallet-provider/` API와 일치하면
+`WalletProviderAttestation`을 사용하세요. 다른 백엔드 계약이면 **커스터마이즈**(직접
+`WalletAttestationProvider` 구현)하고, Play Integrity를 쓰지 않으면 **`IntegrityTokenProvider`를
+교체**하세요 — 예: non-GMS 기기, 다른 attestation 방식, 또는 다른 무결성 아티팩트를 기대하는 자체 백엔드.
+
+## 직접 어댑터 작성하기
+
+이 어댑터들은 모두 같은 SPI의 자체 구현으로 대체할 수 있습니다 — SDK 코어는 바뀌지 않습니다.
+`wallet-api`(`com.hopae.eudi.wallet.spi`)의 인터페이스를 구현하고, `WalletPorts`로 주입한 뒤, 테스트 킷의
+공유 **계약 테스트 스위트**(`SecureAreaContract.verify(area)`, `StorageDriverContract.verify(driver)`)로
+자격을 검증하세요 — 소프트웨어 참조 어댑터에 대해 Linux CI에서 도는 것과 동일한 검사입니다.
+[Ports](../reference/ports), [Architecture](../architecture),
+[Getting started](../getting-started)의 "직접 어댑터 구현하기"를 참고하세요.

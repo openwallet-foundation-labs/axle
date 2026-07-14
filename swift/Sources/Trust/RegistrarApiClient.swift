@@ -9,7 +9,7 @@ public struct RegistrarApiError: Error, CustomStringConvertible {
 }
 
 /// Client for the Registrar's TS5 *RP registration* API (EUDI Wallet TS5), used on the **dataset-only**
-/// presentation path (wrprc.md §5): when the request carries a self-declared `registrar_dataset` but no
+/// presentation path (ETSI TS 119 475): when the request carries a self-declared `registrar_dataset` but no
 /// registrar-sealed WRPRC, and the User has opted in (RPRC_16), the wallet fetches the same information
 /// *registrar-signed* to confirm what the RP is registered to request (RPRC_18).
 ///

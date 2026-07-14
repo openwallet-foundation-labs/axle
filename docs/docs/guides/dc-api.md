@@ -144,17 +144,25 @@ override fun onCreate(savedInstanceState: Bundle?) {
         return
     }
 
-    // openid4vp-v1-unsigned / -signed.
-    val openid4vp = extractOpenId4Vp(option.requestJson) ?: return failAndFinish("no openid4vp request")
+    // openid4vp-v1-unsigned / -signed / -multisigned. Capture the matched protocol — the response envelope must echo it.
+    val vp = matchProtocol(option.requestJson,
+        listOf("openid4vp-v1-unsigned", "openid4vp-v1-signed", "openid4vp-v1-multisigned")) ?: return failAndFinish("no openid4vp request")
+    val (vpProtocol, vpData) = vp
     lifecycleScope.launch {
-        val session = wallet.presentation.startDcApi(openid4vp, origin)
+        val session = wallet.presentation.startDcApi(vpData.toString(), origin)
         val resolved = session.state.first { it is RequestResolved || it is Failed } as RequestResolved
         session.respond(PresentationSelection.auto(resolved.request))
         val done = session.state.first { it.isTerminal } as PresentationState.Completed
-        respond(DigitalCredential(done.dcApiResponse!!)); finish()
+        // Wrap the SDK's inner response ({vp_token} | {response:<JWE>}) in the platform's {protocol, data}
+        // envelope, echoing the request protocol — recent Chrome rejects a response with no top-level `protocol`.
+        val content = JSONObject().put("protocol", vpProtocol).put("data", JSONObject(done.dcApiResponse!!))
+        respond(DigitalCredential(content.toString())); finish()
     }
 }
 ```
+
+Both paths return the same `{"protocol", "data"}` envelope; the `DcApiResult.openId4VpResponseJson(protocol, response)` /
+`mdocResponseJson(protocol, response)` helpers in `android/dcapi` build it for you (echoing the matched request protocol).
 
 ## 4. org-iso-mdoc and HPKE
 

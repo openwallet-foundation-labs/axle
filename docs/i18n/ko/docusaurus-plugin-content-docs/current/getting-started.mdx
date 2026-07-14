@@ -145,6 +145,42 @@ let wallet = Wallet.create(
 </TabItem>
 </Tabs>
 
+### 직접 어댑터 구현하기
+
+대부분의 앱은 미리 만들어진 `android/` 프리셋(`AndroidKeystoreSecureArea`, `FileStorageDriver`,
+`OkHttpTransport`, …)에 의존합니다 — [Android 어댑터 및 데모](./android-demo)를 참고하세요. 다른 플랫폼을
+대상으로 하거나 프리셋을 강화하려면 포트를 직접 구현하세요. 어댑터를 올바르게 만드는 두 가지 규칙이 있습니다:
+
+- **`SecureArea`**는 개인 키 보관 경계입니다: `createKey`, `publicKey`, `sign`(원시 `r||s`),
+  `keyAgreement`, `attestation`, `deleteKey`를 구현하고 `capabilities`를 정직하게 선언하세요(mdoc `Mac`용으로
+  구성된 월렛은 `capabilities.keyAgreement`를 확인합니다). 개인 키는 절대 이 경계를 벗어나면 안 됩니다.
+- **`HttpTransport`**는 반드시 `request.followRedirects`를 준수해야 합니다 — OpenID4VCI/VP 플로우는
+  리다이렉트를 가로채므로, 항상 리다이렉트를 따라가는 트랜스포트는 발급과 제시를 깨뜨립니다.
+
+테스트 킷의 `SoftwareSecureArea`와 `InMemoryStorageDriver`를 참조 구현으로 사용하고, 프리셋을 검증하는 것과
+동일한 공유 **컨트랙트 테스트 스위트**로 어댑터를 검증하세요:
+
+<Tabs groupId="lang">
+<TabItem value="kotlin" label="Kotlin">
+
+```kotlin
+// 테스트 킷 — 컨트랙트 위반 시 IllegalStateException을 던집니다.
+SecureAreaContract.verify(mySecureArea)
+StorageDriverContract.verify(myStorageDriver)
+```
+
+</TabItem>
+<TabItem value="swift" label="Swift">
+
+```swift
+// 테스트 킷 — 컨트랙트 위반 시 예외를 던집니다.
+try await SecureAreaContract.verify(mySecureArea)
+try await StorageDriverContract.verify(myStorageDriver)
+```
+
+</TabItem>
+</Tabs>
+
 ## 스레드 안전성과 종료
 
 `Wallet`은 **스레드 안전**하며 **다중 인스턴스**를 지원합니다 — 하나의 인스턴스를 여러 코루틴 / 태스크에서

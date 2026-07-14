@@ -111,16 +111,16 @@ public struct PresentationService {
         return session
     }
 
-    /// Dataset-only registration confirmation (wrprc.md §5, RPRC_16/18). Returns the RP's registrar-signed
+    /// Dataset-only registration confirmation (ETSI TS 119 475, RPRC_16/18). Returns the RP's registrar-signed
     /// registered credentials when the request carried only a self-declared `registrar_dataset` AND the User
     /// opted in AND the TS5 lookup succeeds; nil otherwise (WRPRC-attested, opted out, or the call failed — in
-    /// which case we proceed with the self-declared dataset, unverified, per §5.3).
+    /// which case we proceed with the self-declared dataset, unverified).
     private func resolveRegistrarApi(_ resolved: ResolvedRequest) async -> [RegisteredCredential]? {
         guard let reg = resolved.verifier.registration else { return nil }
         if reg.attested { return nil }                 // a WRPRC already gives authoritative, offline-verified registration
         guard verifyRegistrationViaApi, let api = registrarApi else { return nil } // RPRC_16 opt-in
         guard let registryURI = reg.dataset?.registryURI, let identifier = reg.dataset?.identifier else { return nil }
-        // §5.3: could not obtain the registered info → proceed, the dataset stays unverified.
+        // could not obtain the registered info → proceed, the dataset stays unverified.
         return try? await api.fetchRegisteredCredentials(registryURI: registryURI, identifier: identifier,
                                                          intendedUseIdentifier: reg.dataset?.intendedUseIdentifier)
     }

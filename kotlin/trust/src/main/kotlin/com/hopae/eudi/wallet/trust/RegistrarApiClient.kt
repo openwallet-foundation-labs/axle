@@ -13,7 +13,7 @@ class RegistrarApiException(message: String) : Exception(message)
 
 /**
  * Client for the Registrar's TS5 *RP registration* API (ETSI TS 119 472-3 / EUDI Wallet TS5), used on the
- * **dataset-only** presentation path (wrprc.md §5): when the request carries a self-declared
+ * **dataset-only** presentation path (ETSI TS 119 475): when the request carries a self-declared
  * `registrar_dataset` but no registrar-sealed WRPRC, and the User has opted in (RPRC_16), the wallet fetches
  * the same information *registrar-signed* to confirm what the RP is registered to request (RPRC_18).
  *

@@ -66,7 +66,7 @@ public struct PresentationConfig {
     public let proximitySessionCurve: EcCurve
     /// ETSI TS 119 475 RPRC_16: when a verifier presents only a self-declared `registrar_dataset` (no
     /// registrar-sealed WRPRC), consult the registrar's TS5 API to obtain the *registrar-signed* registration
-    /// before consent (wrprc.md §5). This is an online call keyed by the RP identifier, so it is opt-in and off
+    /// before consent (ETSI TS 119 475). This is an online call keyed by the RP identifier, so it is opt-in and off
     /// by default; when off, the self-declared dataset is still shown but not presented as registrar-verified.
     /// A WRPRC-attested request never triggers a lookup (it is already authoritative + offline-verifiable).
     public let verifyRegistrationViaRegistrarApi: Bool

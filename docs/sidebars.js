@@ -15,6 +15,7 @@ const sidebars = {
         'guides/issuance',
         'guides/presentation',
         'guides/dc-api',
+        'guides/android-adapters',
         'guides/proximity',
         'guides/trust-and-audit',
       ],

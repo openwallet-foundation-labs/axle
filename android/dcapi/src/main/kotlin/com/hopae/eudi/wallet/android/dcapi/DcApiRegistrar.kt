@@ -40,7 +40,7 @@ class DcApiBranding(
 object DcApiRegistrar {
     private const val MATCHER_ASSET = "identitycredentialmatcher.wasm"
     private val PROTOCOLS = listOf(
-        "openid4vp-v1-signed", "openid4vp-v1-unsigned", "openid4vp-v1-multisigned", "org-iso-mdoc", "openid4vp",
+        "openid4vp-v1-signed", "openid4vp-v1-unsigned", "openid4vp-v1-multisigned", "org-iso-mdoc",
     )
 
     /**

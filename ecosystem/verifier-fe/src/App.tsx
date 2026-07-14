@@ -196,7 +196,7 @@ export default function App() {
       setPhase({ name: 'dcapi', note: 'Select a credential in your wallet…' });
 
       const resp = await anyNav.credentials.get({
-        digital: { requests: [{ protocol: 'openid4vp', data: (created.dc_api_request as { request: unknown }).request }] },
+        digital: { requests: [{ protocol: created.dc_api_request.protocol, data: created.dc_api_request.request }] },
       } as unknown);
       if (!resp) throw new Error('The wallet returned no response.');
 

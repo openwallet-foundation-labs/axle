@@ -37,7 +37,7 @@ object DcApiRequest {
     fun extractOpenId4Vp(requestJson: String): String? {
         val root = runCatching { JSONObject(requestJson) }.getOrNull() ?: return null
         val requests = root.optJSONArray("requests") ?: return requestJson
-        for (proto in listOf("openid4vp-v1-unsigned", "openid4vp-v1-signed", "openid4vp")) {
+        for (proto in listOf("openid4vp-v1-unsigned", "openid4vp-v1-signed")) {
             for (i in 0 until requests.length()) {
                 val req = requests.optJSONObject(i) ?: continue
                 if (req.optString("protocol") == proto) return req.get("data").toString()

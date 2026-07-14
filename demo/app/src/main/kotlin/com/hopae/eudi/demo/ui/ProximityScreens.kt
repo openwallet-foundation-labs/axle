@@ -96,6 +96,7 @@ import com.hopae.eudi.wallet.RequestedDocumentView
 import com.google.zxing.BarcodeFormat
 import com.hopae.eudi.demo.LogStore
 import com.hopae.eudi.demo.PortraitCaptureActivity
+import com.hopae.eudi.demo.security.AppLock
 import android.app.Activity
 import com.hopae.eudi.demo.adapters.LogWalletLogger
 import com.hopae.eudi.wallet.android.proximity.Ble
@@ -185,6 +186,7 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
         }
         if (!btOn) {
             status = "Turn on Bluetooth to present"
+            AppLock.suppressResumeLock() // the enable-Bluetooth system activity shouldn't demand a re-unlock
             enableBtLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
             return@DisposableEffect onDispose {}
         }
@@ -539,6 +541,7 @@ fun ProximityReaderScreen(wallet: Wallet) {
         }
         PrimaryButton("Scan holder's QR", onClick = {
             if (!granted) { permLauncher.launch(BLE_PERMISSIONS); return@PrimaryButton }
+            AppLock.suppressResumeLock() // returning from the scanner shouldn't demand a re-unlock
             scanLauncher.launch(ScanOptions().apply {
                 setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                 setPrompt("Scan the wallet's proximity QR")

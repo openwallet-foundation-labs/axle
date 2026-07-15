@@ -71,6 +71,15 @@ struct ContentView: View {
                 )
             }
         }
+        .fullScreenCover(isPresented: presentingBinding) {
+            if let session = model.presentingSession {
+                PresentView(
+                    session: session,
+                    onDone: { model.finishPresentation(reload: true) },
+                    onCancel: { model.finishPresentation(reload: false) }
+                )
+            }
+        }
         .onOpenURL { model.handleURI($0.absoluteString, source: "Opened link") }
     }
 
@@ -100,6 +109,10 @@ struct ContentView: View {
 
     private var issuingBinding: Binding<Bool> {
         Binding(get: { model.issuingOffer != nil }, set: { if !$0 { model.issuingOffer = nil } })
+    }
+
+    private var presentingBinding: Binding<Bool> {
+        Binding(get: { model.presentingSession != nil }, set: { if !$0 { model.presentingSession = nil } })
     }
 
     private var showingResult: Binding<Bool> {

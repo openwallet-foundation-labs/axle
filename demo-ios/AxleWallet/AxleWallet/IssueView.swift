@@ -279,7 +279,7 @@ struct IssueView: View {
 
 // MARK: - Reusable pieces
 
-private struct DocumentHeaderCard: View {
+struct DocumentHeaderCard: View {
     let badge: String
     let format: String
     let title: String
@@ -332,7 +332,7 @@ func docTypeOrVct(_ format: CredentialFormat) -> String {
     }
 }
 
-private struct Section2<Content: View>: View {
+struct Section2<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
     var body: some View {
@@ -344,7 +344,7 @@ private struct Section2<Content: View>: View {
     }
 }
 
-private struct InfoRow: View {
+struct InfoRow: View {
     let title: String
     let value: String
     var body: some View {
@@ -358,7 +358,7 @@ private struct InfoRow: View {
     }
 }
 
-private struct NoteText: View {
+struct NoteText: View {
     let text: String
     init(_ text: String) { self.text = text }
     var body: some View {
@@ -369,7 +369,7 @@ private struct NoteText: View {
     }
 }
 
-private struct TrustBadge: View {
+struct TrustBadge: View {
     let ok: Bool
     let okText: String
     let badText: String
@@ -396,7 +396,7 @@ private struct ClaimsList: View {
     }
 }
 
-private struct Footer: View {
+struct Footer: View {
     let primary: String
     let secondary: String?
     var primaryEnabled: Bool = true
@@ -424,7 +424,7 @@ private struct Footer: View {
     }
 }
 
-private struct CenteredStatus: View {
+struct CenteredStatus: View {
     var system: String?
     let title: String
     let subtitle: String

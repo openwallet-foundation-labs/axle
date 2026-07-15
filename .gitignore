@@ -17,3 +17,8 @@ wallet-provider/*.db-*
 
 # Demo reader-auth identity (private key) — provisioned per machine, never committed
 demo/app/src/main/assets/reader_wrpac.json
+
+# Xcode (demo-ios) — per-user state and build output, never committed
+xcuserdata/
+*.xcuserstate
+DerivedData/

@@ -29,6 +29,20 @@ function isMobile(): boolean {
   return /Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(navigator.userAgent);
 }
 
+/**
+ * OpenID4VP over the browser Digital Credentials API is not routed to wallets on Safari / iOS — Apple's platform
+ * only routes `org-iso-mdoc` (ISO 18013-7 Annex C), and every iOS browser is WebKit. Hide the OpenID4VP DC API
+ * option there so it isn't offered where `navigator.credentials.get` would never reach a wallet; QR (OpenID4VP)
+ * and the ISO mdoc DC API remain.
+ */
+function supportsOpenId4VpDcApi(): boolean {
+  const ua = navigator.userAgent;
+  const iOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua));
+  const safari = /^((?!chrome|crios|android|fxios|edg|opr|opera).)*safari/i.test(ua);
+  return !(iOS || safari);
+}
+const OPENID4VP_DC_API_SUPPORTED = supportsOpenId4VpDcApi();
+
 type CredKey = 'pid_sd_jwt' | 'pid_mdoc' | 'mdl';
 type RpMode = 'plain' | 'intermediary';
 type DcApiProtocol = 'openid4vp' | 'org-iso-mdoc';
@@ -349,11 +363,13 @@ function ConfigView(props: {
           {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <QrCode className="h-5 w-5" />}
           Request via QR
         </Button>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Button size="lg" variant="secondary" onClick={() => onDcApi('openid4vp')} disabled={busy}>
-            <Smartphone className="h-5 w-5" />
-            DC API · OpenID4VP
-          </Button>
+        <div className={OPENID4VP_DC_API_SUPPORTED ? 'grid gap-3 sm:grid-cols-2' : 'flex flex-col gap-3'}>
+          {OPENID4VP_DC_API_SUPPORTED && (
+            <Button size="lg" variant="secondary" onClick={() => onDcApi('openid4vp')} disabled={busy}>
+              <Smartphone className="h-5 w-5" />
+              DC API · OpenID4VP
+            </Button>
+          )}
           <Button
             size="lg"
             variant="secondary"

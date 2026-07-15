@@ -57,7 +57,7 @@ val history = wallet.transactions.history()                         // 최신순
 val byRp = wallet.transactions.query(relyingPartyId = "verifier.example")
 
 val entry = history.first()
-entry.relyingParty   // RelyingParty(id, name, trusted, certificateChainDer)
+entry.relyingParty   // id, name, trusted, chain + registration: subject, purpose, entitlements, attested, statusValid, outOfScope
 entry.documents      // 크리덴셜별: format, type, 공개된 클레임 경로
 entry.status         // SUCCESS | INCOMPLETE | ERROR
 ```
@@ -70,7 +70,7 @@ let history = await wallet.transactions.history()                   // 최신순
 let byRp = await wallet.transactions.query(relyingPartyId: "verifier.example")
 
 let entry = history[0]
-entry.relyingParty   // RelyingParty(id, name, trusted, certificateChainDer)
+entry.relyingParty   // id, name, trusted, chain + registration: subject, purpose, entitlements, attested, statusValid, outOfScope
 entry.documents      // 크리덴셜별: format, type, 공개된 클레임 경로
 entry.status         // .success | .incomplete | .error
 ```

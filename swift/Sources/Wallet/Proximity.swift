@@ -27,7 +27,8 @@ public struct ProximityReaderInfo {
 public struct RequestedDocumentView {
     public let docType: String
     public let requestedElements: [String: [String]]
-    public let candidate: CredentialId?
+    /// Stored credentials that can answer this doctype; the holder chooses one when there is more than one.
+    public let candidates: [CredentialId]
 }
 
 /// The user's choice of which stored credential answers each requested doctype.
@@ -37,7 +38,7 @@ public struct ProximitySelection {
 
     public static func auto(_ request: ProximityRequest) -> ProximitySelection {
         var chosen: [String: CredentialId] = [:]
-        for doc in request.documents { if let candidate = doc.candidate { chosen[doc.docType] = candidate } }
+        for doc in request.documents { if let candidate = doc.candidates.first { chosen[doc.docType] = candidate } }
         return ProximitySelection(chosen: chosen)
     }
 }

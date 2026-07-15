@@ -83,6 +83,7 @@ public enum TransactionLogCodec {
         if let intermediarySub = rp.intermediarySub { o.append(("intermediarySub", .str(intermediarySub))) }
         if let attested = rp.attested { o.append(("attested", .bool(attested))) }
         if let statusValid = rp.statusValid { o.append(("statusValid", .bool(statusValid))) }
+        if let outOfScope = rp.outOfScope { o.append(("outOfScope", .bool(outOfScope))) }
         return .obj(o)
     }
 
@@ -102,10 +103,11 @@ public enum TransactionLogCodec {
         var intermediarySub: String?; if case let .str(s)? = json["intermediarySub"] { intermediarySub = s }
         var attested: Bool?; if case let .bool(b)? = json["attested"] { attested = b }
         var statusValid: Bool?; if case let .bool(b)? = json["statusValid"] { statusValid = b }
+        var outOfScope: Bool?; if case let .bool(b)? = json["outOfScope"] { outOfScope = b }
         return RelyingParty(id: id, name: name, trusted: trusted, certificateChainDer: chain,
                             clientIdScheme: clientIdScheme, subject: subject, entitlements: entitlements,
                             purpose: purpose, intermediaryName: intermediaryName, intermediarySub: intermediarySub,
-                            attested: attested, statusValid: statusValid)
+                            attested: attested, statusValid: statusValid, outOfScope: outOfScope)
     }
 
     private static func textJson(_ t: LocalizedText) -> JsonValue {

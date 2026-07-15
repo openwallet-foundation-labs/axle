@@ -104,8 +104,9 @@ for await state in session.states {
 ### 요청 검사
 
 `RequestReceived`는 `ProximityRequest`를 제공합니다. `documents`를 검사해 리더가 무엇을 요청했는지 확인하고,
-`reader`에서 인증 결과를 확인하며, `satisfiable`로 응답이 가능한지 판단하세요. `ProximitySelection.auto(request)`는
-저장된 매칭 크리덴셜로 응답을 구성하고, `decline()`은 거부합니다.
+`reader`에서 인증 결과를 확인하며, `satisfiable`로 응답이 가능한지 판단하세요. 각 문서의 `candidates`는 해당
+doctype에 답할 수 있는 저장 크리덴셜 목록이라 사용자가 하나를 고르게 할 수 있고, `ProximitySelection.auto(request)`는
+각 문서에서 첫 번째를 선택합니다. `decline()`은 거부합니다.
 
 <Tabs groupId="lang">
 <TabItem value="kotlin" label="Kotlin">
@@ -117,7 +118,7 @@ is ProximityState.RequestReceived -> {
     for (doc in request.documents) {
         doc.docType             // e.g. "org.iso.18013.5.1.mDL"
         doc.requestedElements   // Map<namespace, List<elementId>>
-        doc.candidate           // matching CredentialId, or null if nothing stored answers it
+        doc.candidates          // CredentialIds that answer it — let the User pick when there's >1
     }
 
     val reader = request.reader
@@ -141,7 +142,7 @@ case .requestReceived(let request):
     for doc in request.documents {
         doc.docType             // e.g. "org.iso.18013.5.1.mDL"
         doc.requestedElements   // [namespace: [elementId]]
-        doc.candidate           // matching CredentialId, or nil if nothing stored answers it
+        doc.candidates          // CredentialIds that answer it — let the User pick when there's >1
     }
 
     let reader = request.reader

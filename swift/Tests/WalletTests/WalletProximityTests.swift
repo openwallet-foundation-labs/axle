@@ -84,7 +84,7 @@ final class WalletProximityTests: XCTestCase {
                 await toDevice.send(try SessionMessages.encodeEstablishment(eReaderKey: eReader.publicKey, encryptedDeviceRequest: try rs.encrypt(deviceRequest)))
             case let .requestReceived(request):
                 XCTAssertTrue(request.satisfiable, "mDL request satisfiable")
-                XCTAssertEqual(CredentialId("mdl-1"), request.documents.first?.candidate)
+                XCTAssertEqual(CredentialId("mdl-1"), request.documents.first?.candidates.first)
                 session.respond(ProximitySelection.auto(request))
             default:
                 break

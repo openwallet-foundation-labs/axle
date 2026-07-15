@@ -41,15 +41,18 @@ public struct RelyingParty: Sendable {
     public let attested: Bool?
     /// Token Status List result for the WRPRC: true = valid, false = revoked, nil = not checked.
     public let statusValid: Bool?
+    /// RPRC_21 attribute-scope result decided at consent time: true = the request asked for attributes outside
+    /// the RP's registration; false = in scope; nil = no registration to check against.
+    public let outOfScope: Bool?
 
     public init(id: String, name: String? = nil, trusted: Bool = false, certificateChainDer: [[UInt8]] = [],
                 clientIdScheme: String? = nil, subject: String? = nil, entitlements: [String] = [],
                 purpose: [LocalizedText] = [], intermediaryName: String? = nil, intermediarySub: String? = nil,
-                attested: Bool? = nil, statusValid: Bool? = nil) {
+                attested: Bool? = nil, statusValid: Bool? = nil, outOfScope: Bool? = nil) {
         self.id = id; self.name = name; self.trusted = trusted; self.certificateChainDer = certificateChainDer
         self.clientIdScheme = clientIdScheme; self.subject = subject; self.entitlements = entitlements
         self.purpose = purpose; self.intermediaryName = intermediaryName; self.intermediarySub = intermediarySub
-        self.attested = attested; self.statusValid = statusValid
+        self.attested = attested; self.statusValid = statusValid; self.outOfScope = outOfScope
     }
 }
 

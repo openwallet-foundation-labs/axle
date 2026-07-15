@@ -102,10 +102,10 @@ public struct ProximityService {
         for dr in deviceRequest.docRequests {
             var requestedElements: [String: [String]] = [:]
             for (ns, elems) in dr.requested { requestedElements[ns] = elems.map { $0.identifier } }
-            documents.append(RequestedDocumentView(docType: dr.docType, requestedElements: requestedElements, candidate: try await findMdoc(dr.docType)))
+            documents.append(RequestedDocumentView(docType: dr.docType, requestedElements: requestedElements, candidates: try await findMdocs(dr.docType)))
         }
         let reader = await verifyReader(deviceRequest, transcript)
-        return ProximityRequest(documents: documents, satisfiable: documents.allSatisfy { $0.candidate != nil },
+        return ProximityRequest(documents: documents, satisfiable: documents.allSatisfy { !$0.candidates.isEmpty },
                                 reader: reader, deviceRequest: deviceRequest, transcript: transcript, session: session)
     }
 
@@ -128,7 +128,7 @@ public struct ProximityService {
         let transcript = try MdocSessionTranscript.dcApiIsoMdoc(encryptionInfoBase64: encryptionInfoBase64, origin: origin)
         var chosen: [String: CredentialId] = [:]
         for dr in deviceRequest.docRequests where chosen[dr.docType] == nil {
-            if let id = try await findMdoc(dr.docType) { chosen[dr.docType] = id }
+            if let id = try await findMdocs(dr.docType).first { chosen[dr.docType] = id }
         }
         guard !chosen.isEmpty else { throw ProximityError.noMatchingCredential("no stored mdoc for the DC API request") }
 
@@ -166,11 +166,11 @@ public struct ProximityService {
         }
     }
 
-    private func findMdoc(_ docType: String) async throws -> CredentialId? {
-        try await store.list().first(where: { envelope in
+    private func findMdocs(_ docType: String) async throws -> [CredentialId] {
+        try await store.list().filter { envelope in
             if case .issued = envelope.lifecycle, case let .msoMdoc(dt) = envelope.format, dt == docType { return true }
             return false
-        })?.id
+        }.map { $0.id }
     }
 
     /// Builds the DeviceResponse for the first requested document (single-document retrieval; multi-doc is a

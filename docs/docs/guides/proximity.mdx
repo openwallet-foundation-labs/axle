@@ -110,8 +110,9 @@ The terminal states are `Completed`, `Declined`, and `Failed`; every state expos
 
 `RequestReceived` gives you a `ProximityRequest`. Inspect `documents` to see what the reader asked
 for, check `reader` for the authentication result, and use `satisfiable` to decide whether you can
-answer at all. `ProximitySelection.auto(request)` builds a response from the matching stored
-credentials; `decline()` refuses.
+answer at all. Each document's `candidates` lists every stored credential that answers its doctype, so
+you can let the User choose one; `ProximitySelection.auto(request)` picks the first for each, and
+`decline()` refuses.
 
 <Tabs groupId="lang">
 <TabItem value="kotlin" label="Kotlin">
@@ -123,7 +124,7 @@ is ProximityState.RequestReceived -> {
     for (doc in request.documents) {
         doc.docType             // e.g. "org.iso.18013.5.1.mDL"
         doc.requestedElements   // Map<namespace, List<elementId>>
-        doc.candidate           // matching CredentialId, or null if nothing stored answers it
+        doc.candidates          // CredentialIds that answer it — let the User pick when there's >1
     }
 
     val reader = request.reader
@@ -147,7 +148,7 @@ case .requestReceived(let request):
     for doc in request.documents {
         doc.docType             // e.g. "org.iso.18013.5.1.mDL"
         doc.requestedElements   // [namespace: [elementId]]
-        doc.candidate           // matching CredentialId, or nil if nothing stored answers it
+        doc.candidates          // CredentialIds that answer it — let the User pick when there's >1
     }
 
     let reader = request.reader

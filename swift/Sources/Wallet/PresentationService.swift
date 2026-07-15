@@ -256,7 +256,9 @@ public struct PresentationService {
             intermediaryName: reg?.intermediaryName,
             intermediarySub: reg?.intermediarySub,
             attested: reg?.attested,
-            statusValid: statusValid)
+            statusValid: statusValid,
+            // RPRC_21 attribute-scope decision, the same one surfaced on the consent screen (nil = no registration).
+            outOfScope: reg.map { !RegistrationScope.unregistered(resolved.dcqlQuery, registered: $0.registeredCredentials).isEmpty })
     }
 
     private func loggedDocuments(_ selection: PresentationSelection, _ matches: DcqlMatchResult) -> [LoggedDocument] {

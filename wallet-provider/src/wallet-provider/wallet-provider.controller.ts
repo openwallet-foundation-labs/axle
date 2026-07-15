@@ -43,7 +43,10 @@ export class WalletProviderController {
   @Post('wallet-instances')
   async register(@Body() dto: RegisterInstanceDto): Promise<{ instanceId: string }> {
     if (!(await this.nonce.consume(dto.nonce))) throw new BadRequestException('invalid or expired nonce');
-    const verifier = this.verifiers.for(dto.platform ?? 'android');
+    // Prefer the client-declared platform; otherwise infer from the token shape (App Attest tokens are
+    // `appattest:…`) so an iOS token never falls through to the Android Play Integrity verifier.
+    const platform = dto.platform ?? (dto.integrityToken?.startsWith('appattest:') ? 'ios' : 'android');
+    const verifier = this.verifiers.for(platform);
     const integrity = await verifier.verifyIntegrity(dto.integrityToken, dto.nonce);
     if (!integrity.trusted) throw new UnauthorizedException(`device integrity failed: ${integrity.reason}`);
     const instance = await this.instances.create(dto.instanceKey, integrity.platform);

@@ -37,12 +37,17 @@ public actor WalletProviderAttestation: WalletAttestationProvider {
     private let secureArea: any SecureArea
     private let integrity: any IntegrityTokenProvider
     private let clientId: String
+    private let platform: String
     private let clock: @Sendable () -> Int64
     private let storage: (any StorageDriver)?
     private var instanceId: String?
 
+    /// `platform` selects the wallet-provider's device-integrity verifier ("ios" → App Attest, "android" →
+    /// Play Integrity); it is sent with registration and key-attestation so the backend does not have to guess.
+    /// Defaults to "ios" since this adapter wraps App Attest / DeviceCheck on Apple platforms.
     public init(baseUrl: String, http: any HttpTransport, secureArea: any SecureArea,
                 integrity: any IntegrityTokenProvider, clientId: String,
+                platform: String = "ios",
                 clock: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970) },
                 storage: (any StorageDriver)? = nil) {
         self.issuer = baseUrl.hasSuffix("/") ? String(baseUrl.dropLast()) : baseUrl
@@ -50,6 +55,7 @@ public actor WalletProviderAttestation: WalletAttestationProvider {
         self.secureArea = secureArea
         self.integrity = integrity
         self.clientId = clientId
+        self.platform = platform
         self.clock = clock
         self.storage = storage
     }
@@ -65,7 +71,10 @@ public actor WalletProviderAttestation: WalletAttestationProvider {
     }
 
     public func keyAttestation(keys: [KeyInfo], nonce: String?) async throws -> String {
-        var entries: [(String, JsonValue)] = [("attestedKeys", .arr(keys.map { JwkEc.toJson($0.publicKey) }))]
+        var entries: [(String, JsonValue)] = [
+            ("attestedKeys", .arr(keys.map { JwkEc.toJson($0.publicKey) })),
+            ("platform", .str(platform)),
+        ]
         if let nonce { entries.append(("nonce", .str(nonce))) }
         return try string(await postJson("\(issuer)/key-attestation", .obj(entries)), "key_attestation")
     }
@@ -87,6 +96,7 @@ public actor WalletProviderAttestation: WalletAttestationProvider {
             ("instanceKey", JwkEc.toJson(keyInfo.publicKey)),
             ("integrityToken", .str(try await integrity.integrityToken(nonce: nonce))),
             ("nonce", .str(nonce)),
+            ("platform", .str(platform)),
         ])
         let id = try string(await postJson("\(issuer)/wallet-instances", body), "instanceId")
         instanceId = id

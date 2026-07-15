@@ -19,7 +19,7 @@ All paths are under the global prefix.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| POST | `/presentations` | Create a request. Body: `mode: 'qr'\|'dc_api'`, `credentials` (`pid_sd_jwt`\|`pid_mdoc`\|`mdl`), `rp: 'plain'\|'intermediary'`, `same_device`, `origins`. Returns an `openid4vp://` QR URL (`qr` mode) or a DC-API request object (`dc_api` mode) |
+| POST | `/presentations` | Create a request. Body: `mode: 'qr'\|'dc_api'`, `credentials` (`pid_sd_jwt`\|`pid_mdoc`\|`mdl`), `rp: 'plain'\|'intermediary'`, `same_device`, `origins`, `dc_api_protocol: 'openid4vp'\|'org-iso-mdoc'` (dc_api only; default `openid4vp`). Returns an `openid4vp://` QR URL (`qr` mode) or a DC-API request object (`dc_api` mode) |
 | GET | `/request/:id` | The signed request object (compact JWS, `application/oauth-authz-req+jwt`) — the `request_uri` target for the QR channel |
 | POST | `/response/:id` | Wallet `direct_post` / `direct_post.jwt` — the encrypted JWE response is posted here |
 | POST | `/presentations/:id/dc-api-response` | The frontend posts the Digital Credentials API response back |
@@ -45,6 +45,21 @@ JAdES Trusted Lists (`src/trust/`, PID Issuer CA + Attestation CA, ETSI TS 119 6
 
 Responses are always encrypted: the wallet's compact JWE is decrypted with the session's per-transaction
 ECDH-ES key, with the JWE `apv` bound to the request nonce and `state` bound to the transaction.
+
+## DC-API protocols
+
+The Digital Credentials API channel offers **two** protocols; the frontend picks one via `dc_api_protocol`:
+
+- **`openid4vp`** (default) — **OpenID4VP-over-DC-API** (`protocol: openid4vp-v1-signed`): the same signed JAR
+  request object as the QR channel, returned inline; the response is an encrypted `dc_api.jwt` `vp_token`. Carries
+  **any** requested format (SD-JWT VC and mdoc).
+- **`org-iso-mdoc`** — the ISO/IEC **18013-7 Annex C** protocol (`protocol: org-iso-mdoc`): a raw CBOR
+  `DeviceRequest` + an `EncryptionInfo` (recipient HPKE P-256 key + nonce), with **no** OpenID4VP envelope,
+  `vp_token`, or JAR. The wallet returns an **HPKE-sealed** `DeviceResponse` (DHKEM-P256 + HKDF-SHA256 +
+  AES-128-GCM). Only **mso_mdoc** credentials (`pid_mdoc`, `mdl`) are presentable this way — SD-JWT VC has no ISO
+  DeviceResponse. Both the HPKE `info` and the mdoc device-auth `SessionTranscript` are
+  `[null, null, ["dcapi", SHA-256(CBOR([EncryptionInfo, origin]))]]`, binding the presentation to this verifier's
+  `EncryptionInfo` and the calling web origin. Handled by `src/vp/iso-mdoc.service.ts`.
 
 ## RP onboarding
 

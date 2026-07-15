@@ -15,14 +15,20 @@ export interface PresentationSession {
   requested: string[];
   /** Delivery channel: `qr` (request_uri + direct_post) or `dc_api` (Digital Credentials API). */
   mode: 'qr' | 'dc_api';
+  /** The DC-API protocol (dc_api mode): `openid4vp` (OpenID4VP-over-DC-API) or `org-iso-mdoc` (ISO 18013-7). */
+  dcApiProtocol?: 'openid4vp' | 'org-iso-mdoc';
   /** Same-device flow: only then does the verifier return a `redirect_uri` + one-time response_code (HAIP). */
   sameDevice: boolean;
   /** Which RP profile signed the request (its client_id binds the response / mdoc SessionTranscript). */
   rp: RpProfile;
-  /** The signed request object (compact JWS) served at `/request/:id` or embedded for the DC API. */
-  requestJwt: string;
+  /** The signed request object (compact JWS) served at `/request/:id` or embedded for the DC API. Absent for
+   *  the org-iso-mdoc DC-API protocol, which carries a raw CBOR DeviceRequest rather than a JAR. */
+  requestJwt?: string;
   /** Web origins the DC API response may come from (dc_api mode only). */
   expectedOrigins?: string[];
+  /** org-iso-mdoc DC-API state (ISO 18013-7): the EncryptionInfo bound into the SessionTranscript and the
+   *  per-transaction HPKE private key that decrypts the wallet's sealed DeviceResponse. */
+  isoMdoc?: { encryptionInfo: string; nonce: string; encPrivateJwk: Record<string, unknown> };
   /** Per-transaction ephemeral response-encryption key (ECDH-ES). The public JWK rode in client_metadata;
    *  the private JWK decrypts the wallet's JWE response. `encKid` is the key id echoed in the JWE header. */
   encPrivateJwk?: Record<string, unknown>;

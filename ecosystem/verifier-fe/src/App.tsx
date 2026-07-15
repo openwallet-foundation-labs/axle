@@ -31,6 +31,7 @@ function isMobile(): boolean {
 
 type CredKey = 'pid_sd_jwt' | 'pid_mdoc' | 'mdl';
 type RpMode = 'plain' | 'intermediary';
+type DcApiProtocol = 'openid4vp' | 'org-iso-mdoc';
 
 const CREDENTIALS: { key: CredKey; label: string; type: string; icon: typeof IdCard }[] = [
   { key: 'pid_sd_jwt', label: 'PID · SD-JWT VC', type: 'urn:eudi:pid:1', icon: IdCard },
@@ -110,14 +111,17 @@ export default function App() {
   };
 
   const create = useCallback(
-    async (mode: 'qr' | 'dc_api') => {
+    async (mode: 'qr' | 'dc_api', dcApiProtocol?: DcApiProtocol) => {
       const body = {
         credentials: [...selected],
         mode,
         rp,
         // Mobile ⇒ same-device (redirect back via response_code); desktop ⇒ cross-device (poll).
-        // DC API is inline — no redirect either way.
-        ...(mode === 'dc_api' ? { origins: [window.location.origin] } : { same_device: isMobile() }),
+        // DC API is inline — no redirect either way. `dc_api_protocol` selects OpenID4VP-over-DC-API vs the
+        // ISO 18013-7 org-iso-mdoc protocol (mdoc only).
+        ...(mode === 'dc_api'
+          ? { origins: [window.location.origin], dc_api_protocol: dcApiProtocol ?? 'openid4vp' }
+          : { same_device: isMobile() }),
       };
       const res = await fetch(`${BE}/presentations`, {
         method: 'POST',
@@ -181,11 +185,11 @@ export default function App() {
     }
   };
 
-  const startDcApi = async () => {
+  const startDcApi = async (protocol: DcApiProtocol) => {
     setBusy(true);
     setError(null);
     try {
-      const created: CreatedDcApi = await create('dc_api');
+      const created: CreatedDcApi = await create('dc_api', protocol);
       // Digital Credentials API (experimental; shape varies by browser).
       const anyNav = navigator as unknown as {
         credentials: { get: (o: unknown) => Promise<{ data?: unknown } | null> };
@@ -200,7 +204,8 @@ export default function App() {
       } as unknown);
       if (!resp) throw new Error('The wallet returned no response.');
 
-      // The wallet's OpenID4VP DC API response: dc_api.jwt -> { response: <JWE> }; plain -> { vp_token }.
+      // The wallet's DC-API response — OpenID4VP: dc_api.jwt → { response: <JWE> } (or { vp_token });
+      // org-iso-mdoc: { response: <HPKE-sealed DeviceResponse, base64url> }. Both post `response` back.
       const raw = (resp as { data?: unknown }).data;
       const data = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>;
 
@@ -264,9 +269,13 @@ function ConfigView(props: {
   busy: boolean;
   error: string | null;
   onQr: () => void;
-  onDcApi: () => void;
+  onDcApi: (protocol: DcApiProtocol) => void;
 }) {
   const { selected, toggle, rp, setRp, busy, error, onQr, onDcApi } = props;
+  // ISO 18013-7 org-iso-mdoc presents mdoc credentials only — available when the selection is mdoc-only.
+  const hasSdJwt = selected.has('pid_sd_jwt');
+  const hasMdoc = selected.has('pid_mdoc') || selected.has('mdl');
+  const isoMdocAvailable = hasMdoc && !hasSdJwt;
   return (
     <div className="flex flex-col gap-6">
       <Card>
@@ -335,15 +344,33 @@ function ConfigView(props: {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="flex flex-col gap-3">
         <Button size="lg" onClick={onQr} disabled={busy}>
           {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <QrCode className="h-5 w-5" />}
           Request via QR
         </Button>
-        <Button size="lg" variant="secondary" onClick={onDcApi} disabled={busy}>
-          <Smartphone className="h-5 w-5" />
-          Request via DC API
-        </Button>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Button size="lg" variant="secondary" onClick={() => onDcApi('openid4vp')} disabled={busy}>
+            <Smartphone className="h-5 w-5" />
+            DC API · OpenID4VP
+          </Button>
+          <Button
+            size="lg"
+            variant="secondary"
+            onClick={() => onDcApi('org-iso-mdoc')}
+            disabled={busy || !isoMdocAvailable}
+            title={isoMdocAvailable ? undefined : 'Select an mdoc credential only (deselect PID · SD-JWT VC)'}
+          >
+            <Fingerprint className="h-5 w-5" />
+            DC API · ISO mdoc
+          </Button>
+        </div>
+        {!isoMdocAvailable && (
+          <p className="text-xs text-muted-foreground">
+            ISO mdoc (18013-7) presents mdoc credentials only — pick PID · mdoc or mDL (and deselect PID · SD-JWT VC)
+            to enable it.
+          </p>
+        )}
       </div>
     </div>
   );

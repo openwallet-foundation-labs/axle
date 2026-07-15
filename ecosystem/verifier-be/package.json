@@ -12,6 +12,7 @@
     "start:prod": "node dist/main"
   },
   "dependencies": {
+    "@hpke/core": "^1.7.5",
     "@lukas.j.han/mdoc": "0.6.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",

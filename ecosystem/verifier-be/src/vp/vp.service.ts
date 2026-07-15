@@ -2,16 +2,19 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { type JWK } from 'jose';
-import { KeystoreService } from '../crypto/keystore.service';
+import { KeystoreService, type RpProfile } from '../crypto/keystore.service';
 import { SessionStore, type PresentationSession } from '../session/session.store';
 import { RequestBuilderService } from './request-builder.service';
 import { VpTokenVerifierService, type VpToken } from './vp-token-verifier.service';
 import { REQUESTABLE, parseRequestedKeys, type RequestableKey } from './dcql';
 import { generateEncKey, decryptResponse, encJwkThumbprintBytes } from './enc-key';
+import { IsoMdocService, buildIsoMdocSessionTranscript } from './iso-mdoc.service';
 
 export interface CreatePresentationInput {
   credentials?: unknown;
   mode?: 'qr' | 'dc_api';
+  /** DC-API protocol (dc_api mode only): `openid4vp` (default) or `org-iso-mdoc` (ISO 18013-7, mdoc only). */
+  dc_api_protocol?: 'openid4vp' | 'org-iso-mdoc';
   /** Which registrar-issued RP identity signs the request: `plain` (default) or `intermediary`. */
   rp?: string;
   /** Same-device flow: the verifier returns a `redirect_uri` + one-time response_code the wallet returns to. */
@@ -30,6 +33,7 @@ export class VpService {
     private readonly keystore: KeystoreService,
     private readonly requestBuilder: RequestBuilderService,
     private readonly verifier: VpTokenVerifierService,
+    private readonly isoMdoc: IsoMdocService,
     private readonly sessions: SessionStore,
     config: ConfigService,
   ) {
@@ -44,6 +48,13 @@ export class VpService {
     const rp = this.keystore.resolve(input.rp === 'intermediary' ? 'intermediary' : 'plain');
     const sameDevice = input.same_device === true;
     const id = randomUUID();
+
+    // The ISO 18013-7 org-iso-mdoc DC-API protocol is a distinct, self-contained path (raw CBOR DeviceRequest +
+    // HPKE, no JAR / OpenID4VP metadata / per-tx ECDH-ES enc key), handled separately.
+    if (mode === 'dc_api' && input.dc_api_protocol === 'org-iso-mdoc') {
+      return this.createIsoMdocPresentation(id, keys, rp, input.origins);
+    }
+
     const nonce = randomBytes(16).toString('base64url');
     // Per-transaction ephemeral response-encryption key (HAIP: responses are always encrypted).
     const enc = await generateEncKey();
@@ -58,7 +69,7 @@ export class VpService {
     if (mode === 'dc_api') {
       const origins = input.origins?.length ? input.origins : [this.baseUrl];
       const { jwt } = await this.requestBuilder.buildForDcApi(keys, nonce, origins, rp, encInput);
-      session = { id, nonce, requested: keys, mode, sameDevice, rp, requestJwt: jwt, expectedOrigins: origins, ...encFields, createdAt: Date.now() };
+      session = { id, nonce, requested: keys, mode, dcApiProtocol: 'openid4vp', sameDevice, rp, requestJwt: jwt, expectedOrigins: origins, ...encFields, createdAt: Date.now() };
     } else {
       const { jwt } = await this.requestBuilder.buildForQr(id, keys, nonce, rp, encInput);
       session = { id, nonce, requested: keys, mode, sameDevice, rp, requestJwt: jwt, ...encFields, createdAt: Date.now() };
@@ -88,9 +99,47 @@ export class VpService {
     };
   }
 
+  /**
+   * The ISO/IEC 18013-7 **org-iso-mdoc** DC-API protocol: hands the browser a raw CBOR `DeviceRequest` +
+   * `EncryptionInfo` (recipient HPKE key + nonce) instead of an OpenID4VP JAR. Only mso_mdoc credentials
+   * (pid_mdoc, mdl) are presentable this way — SD-JWT VC has no ISO DeviceResponse.
+   */
+  private async createIsoMdocPresentation(id: string, keys: RequestableKey[], rp: RpProfile, origins?: string[]) {
+    const mdocKeys = keys.filter((k) => IsoMdocService.isSupportedKey(k));
+    if (mdocKeys.length === 0) {
+      throw new Error('org-iso-mdoc requires at least one mso_mdoc credential (pid_mdoc, mdl); SD-JWT VC is not supported');
+    }
+    const expectedOrigins = origins?.length ? origins : [this.baseUrl];
+    const { deviceRequest, encryptionInfo, nonce, encPrivateJwk } = await this.isoMdoc.createSession(mdocKeys);
+
+    const session: PresentationSession = {
+      id,
+      nonce,
+      requested: mdocKeys,
+      mode: 'dc_api',
+      dcApiProtocol: 'org-iso-mdoc',
+      sameDevice: false,
+      rp,
+      expectedOrigins,
+      isoMdoc: { encryptionInfo, nonce, encPrivateJwk: encPrivateJwk as Record<string, unknown> },
+      createdAt: Date.now(),
+    };
+    await this.sessions.put(session);
+    this.logger.log(`presentation ${id} created (mode=dc_api, protocol=org-iso-mdoc, rp=${rp}, credentials=${mdocKeys.join(',')})`);
+
+    return {
+      transaction_id: id,
+      mode: 'dc_api' as const,
+      rp,
+      requested: mdocKeys.map((k) => ({ key: k, label: REQUESTABLE[k].label })),
+      // ISO 18013-7 Annex C: navigator.credentials.get({ digital: { requests: [{ protocol, data }] } }).
+      dc_api_request: { protocol: 'org-iso-mdoc', request: { deviceRequest, encryptionInfo } },
+    };
+  }
+
   async getRequestJwt(id: string): Promise<string> {
     const session = await this.sessions.get(id);
-    if (!session) throw new Error('unknown or expired transaction');
+    if (!session || !session.requestJwt) throw new Error('unknown or expired transaction');
     return session.requestJwt;
   }
 
@@ -124,6 +173,10 @@ export class VpService {
     if (session.expectedOrigins && !session.expectedOrigins.includes(origin)) {
       throw new Error(`origin '${origin}' is not in expected_origins`);
     }
+    if (session.dcApiProtocol === 'org-iso-mdoc') {
+      await this.finishIsoMdoc(session, body, origin);
+      return { status: 'ok' };
+    }
     const vpToken = await this.decryptVpToken(session, body as Record<string, unknown>);
     await this.finish(session, vpToken, {
       nonce: session.nonce,
@@ -135,6 +188,33 @@ export class VpService {
     return { status: 'ok' };
   }
 
+  /**
+   * Finishes an ISO 18013-7 org-iso-mdoc DC-API transaction: HPKE-decrypt the wallet's sealed DeviceResponse,
+   * rebuild the origin-/EncryptionInfo-bound DC-API SessionTranscript, and verify each requested mdoc credential.
+   */
+  private async finishIsoMdoc(
+    session: PresentationSession,
+    body: { response?: string },
+    origin: string,
+  ): Promise<void> {
+    try {
+      if (!session.isoMdoc) throw new Error('session is not an org-iso-mdoc transaction');
+      if (typeof body.response !== 'string') throw new Error('org-iso-mdoc DC-API response requires `response`');
+      const { encryptionInfo, encPrivateJwk } = session.isoMdoc;
+      const deviceResponse = await this.isoMdoc.decryptResponse(body.response, origin, encryptionInfo, encPrivateJwk as JWK);
+      session.submittedVpToken = { device_response: deviceResponse };
+      const sessionTranscript = buildIsoMdocSessionTranscript(origin, encryptionInfo);
+      const credentials = await this.verifier.verifyIsoMdoc(deviceResponse, session.requested, sessionTranscript);
+      session.result = { status: 'verified', credentials, verifiedAt: Date.now() };
+      this.logger.log(`presentation ${session.id} VERIFIED via org-iso-mdoc (${credentials.map((c) => c.type).join(', ')})`);
+    } catch (e) {
+      session.result = { status: 'failed', error: (e as Error).message, verifiedAt: Date.now() };
+      this.logger.warn(`presentation ${session.id} FAILED (org-iso-mdoc): ${(e as Error).message}`);
+    } finally {
+      await this.sessions.put(session);
+    }
+  }
+
   async getResult(id: string) {
     const session = await this.sessions.get(id);
     if (!session) throw new Error('unknown or expired transaction');
@@ -143,13 +223,19 @@ export class VpService {
       status: session.result ? session.result.status : 'pending',
       credentials: session.result?.credentials,
       error: session.result?.error,
-      // Raw debug info for the inspector: the full request object (decoded JAR), the compact request JWS,
-      // and the raw vp_token the wallet submitted (base64url per-credential presentations).
-      debug: {
-        request: this.decodeJwtPayload(session.requestJwt),
-        request_jwt: session.requestJwt,
-        vp_token: session.submittedVpToken ?? null,
-      },
+      // Raw debug info for the inspector. OpenID4VP: the decoded JAR + compact request JWS + the submitted
+      // vp_token. org-iso-mdoc: the CBOR DeviceRequest + EncryptionInfo + the decrypted DeviceResponse.
+      debug:
+        session.dcApiProtocol === 'org-iso-mdoc'
+          ? {
+              request: session.isoMdoc ? { protocol: 'org-iso-mdoc', encryptionInfo: session.isoMdoc.encryptionInfo } : null,
+              vp_token: session.submittedVpToken ?? null,
+            }
+          : {
+              request: session.requestJwt ? this.decodeJwtPayload(session.requestJwt) : null,
+              request_jwt: session.requestJwt,
+              vp_token: session.submittedVpToken ?? null,
+            },
     };
   }
 

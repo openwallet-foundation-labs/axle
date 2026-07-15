@@ -179,6 +179,48 @@ export class VpTokenVerifierService {
       mdocVerifyContext,
     );
 
+    return this.mdocDocClaims(deviceResponse, cred, anchors);
+  }
+
+  /**
+   * Verifies an ISO/IEC 18013-7 **org-iso-mdoc** DC-API `DeviceResponse`: the DeviceResponse is checked against
+   * the pre-built DC-API `SessionTranscript` (origin- + EncryptionInfo-bound, ISO 18013-7 Annex C) — no OpenID4VP
+   * envelope — then each requested mdoc credential's document is extracted (issuer MSO + device signature already
+   * verified, plus a Token Status List check). The trust anchors are the same JAdES Trusted List PID/Attestation
+   * DSCs as the OpenID4VP path.
+   */
+  async verifyIsoMdoc(
+    deviceResponseB64url: string,
+    requestedKeys: string[],
+    sessionTranscript: Uint8Array,
+  ): Promise<VerifiedCredential[]> {
+    const anchors = await this.trust.getIssuerAnchors();
+    const allAnchors = [...anchors.pid, ...anchors.attestation];
+    const anchorsDer = allAnchors.map((c) => new Uint8Array(c.rawData));
+
+    const deviceResponse = DeviceResponse.decode(new Uint8Array(Buffer.from(deviceResponseB64url, 'base64url')));
+    await deviceResponse.verify(
+      { sessionTranscript, trustedCertificates: anchorsDer, disableCertificateChainValidation: false },
+      mdocVerifyContext,
+    );
+
+    const out: VerifiedCredential[] = [];
+    for (const key of requestedKeys) {
+      const cred = REQUESTABLE[key as keyof typeof REQUESTABLE];
+      if (!cred || cred.format !== 'mso_mdoc') continue;
+      const claims = await this.mdocDocClaims(deviceResponse, cred, allAnchors);
+      out.push({ queryId: cred.queryId, format: cred.format, type: cred.type, claims });
+    }
+    if (out.length === 0) throw new Error('org-iso-mdoc DeviceResponse yielded no requested credential');
+    return out;
+  }
+
+  /** Finds the requested credential's document, runs the Token Status List check, and extracts its claims. */
+  private async mdocDocClaims(
+    deviceResponse: DeviceResponse,
+    cred: RequestableCredential,
+    anchors: x509.X509Certificate[],
+  ): Promise<Record<string, unknown>> {
     const doc = deviceResponse.documents?.find((d) => d.docType === cred.type) ?? deviceResponse.documents?.[0];
     if (!doc) throw new Error(`mdoc DeviceResponse has no document for docType '${cred.type}'`);
 

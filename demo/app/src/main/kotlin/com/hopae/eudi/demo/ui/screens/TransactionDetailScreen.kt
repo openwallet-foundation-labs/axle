@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.hopae.eudi.demo.ui.components.InfoRow
 import com.hopae.eudi.demo.ui.components.Pill
 import com.hopae.eudi.demo.ui.components.SectionLabel
+import com.hopae.eudi.demo.ui.components.TrustBadge
 import com.hopae.eudi.demo.ui.components.TrustRow
 import com.hopae.eudi.demo.ui.components.WalletCard
 import com.hopae.eudi.demo.ui.components.absorbTouches
@@ -104,16 +105,22 @@ fun TransactionDetailScreen(e: TransactionLogEntry, onBack: () -> Unit) {
                 rp.statusValid?.let { InfoRow("Registration status", if (it) "Valid" else "Revoked", if (it) null else c.danger) }
                 rp.intermediaryName?.let { InfoRow("Via intermediary", it) }
             }
-            val purpose = purposeText(rp.purpose)
-            if (purpose.isNotBlank()) {
+            // Purpose with the same compact in-scope / out-of-scope (RPRC_21) badge as the consent screen.
+            if (purposeText(rp.purpose).isNotBlank() || rp.outOfScope != null) {
                 SectionLabel("Purpose")
-                WalletCard { Text(purpose, style = MaterialTheme.typography.bodyMedium, color = c.ink) }
+                WalletCard {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(purposeText(rp.purpose).ifBlank { "Attribute request" }, style = MaterialTheme.typography.bodyMedium, color = c.ink, modifier = Modifier.weight(1f))
+                        rp.outOfScope?.let { TrustBadge(!it, trustedText = "In scope", untrustedText = "Out of scope") }
+                    }
+                }
             }
             if (rp.entitlements.isNotEmpty()) {
                 SectionLabel("Entitlements")
-                WalletCard {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        rp.entitlements.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium, color = c.inkBody) }
+                WalletCard(padding = PaddingValues(0.dp)) {
+                    rp.entitlements.forEachIndexed { i, ent ->
+                        if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
+                        Text(ent, style = MaterialTheme.typography.bodyMedium, color = c.inkBody, modifier = Modifier.padding(16.dp, 13.dp))
                     }
                 }
             }
@@ -144,9 +151,8 @@ fun TransactionDetailScreen(e: TransactionLogEntry, onBack: () -> Unit) {
 }
 
 private fun transportLabel(t: TransactionTransport): String = when (t) {
-    TransactionTransport.REMOTE -> "Online · QR"
     TransactionTransport.PROXIMITY -> "In person"
-    TransactionTransport.DC_API -> "In-app"
+    else -> "Online" // REMOTE (QR) and DC_API (browser) are both online channels
 }
 
 /** Pick the purpose text in the device language, falling back to the first entry. */

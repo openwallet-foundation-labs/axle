@@ -40,6 +40,9 @@ class RelyingParty(
     val attested: Boolean? = null,
     /** Token Status List result for the WRPRC: true = valid, false = revoked, null = not checked. */
     val statusValid: Boolean? = null,
+    /** RPRC_21 attribute-scope result decided at consent time: true ⇒ the request asked for attributes outside
+     *  the RP's registration; false ⇒ everything was in scope; null ⇒ no registration to check against. */
+    val outOfScope: Boolean? = null,
 )
 
 /** One disclosed claim: its path and (optionally) the value that was shared. */

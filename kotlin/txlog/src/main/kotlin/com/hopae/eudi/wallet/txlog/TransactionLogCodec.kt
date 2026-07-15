@@ -65,6 +65,7 @@ object TransactionLogCodec {
             rp.intermediarySub?.let { add("intermediarySub" to JsonValue.Str(it)) }
             rp.attested?.let { add("attested" to JsonValue.Bool(it)) }
             rp.statusValid?.let { add("statusValid" to JsonValue.Bool(it)) }
+            rp.outOfScope?.let { add("outOfScope" to JsonValue.Bool(it)) }
         }
     )
 
@@ -81,6 +82,7 @@ object TransactionLogCodec {
         intermediarySub = o.str("intermediarySub"),
         attested = (o["attested"] as? JsonValue.Bool)?.value,
         statusValid = (o["statusValid"] as? JsonValue.Bool)?.value,
+        outOfScope = (o["outOfScope"] as? JsonValue.Bool)?.value,
     )
 
     private fun textJson(t: LocalizedText) = JsonValue.Obj(listOf("lang" to JsonValue.Str(t.lang), "value" to JsonValue.Str(t.value)))

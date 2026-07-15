@@ -293,6 +293,9 @@ class PresentationService internal constructor(
             intermediarySub = reg?.intermediarySub,
             attested = reg?.attested,
             statusValid = statusValid,
+            // RPRC_21 attribute-scope decision, the same one surfaced on the consent screen: true = the request
+            // asked for attributes outside the RP's registration, false = in scope, null = no registration.
+            outOfScope = reg?.let { RegistrationScope.unregistered(resolved.dcqlQuery, it.registeredCredentials).isNotEmpty() },
         )
     }
 

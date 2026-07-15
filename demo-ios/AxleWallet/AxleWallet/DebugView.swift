@@ -1,18 +1,13 @@
-import AppleCore
 import SwiftUI
 import UIKit
-import Wallet
-import WalletTestKit
 
-/// The Debug log screen — a dark console over the in-app `LogStore`, with level filtering, copy/clear, and
-/// the on-device adapter qualification (Secure Enclave + Keychain against the SDK contract suites). Mirrors
-/// android `DebugScreen`. Pushed from Settings; uses a custom dark top bar.
+/// The Debug log screen — a dark console over the in-app `LogStore`, with level filtering and copy/clear.
+/// Mirrors android `DebugScreen`. Pushed from Settings; uses a custom dark top bar.
 struct DebugView: View {
     @Environment(\.dismiss) private var dismiss
     // The @Observable singleton; reads of `log.lines` in body are tracked by Observation.
     private let log = LogStore.shared
     @State private var filter: Level?
-    @State private var testing = false
 
     enum Level: String, CaseIterable { case all, info, warn, error }
 
@@ -52,7 +47,6 @@ struct DebugView: View {
                 .font(.system(.subheadline, design: .monospaced))
                 .foregroundStyle(WalletTheme.Console.text)
             Spacer()
-            consoleAction("Test", disabled: testing) { Task { await runContractTests() } }
             consoleAction("Copy") { UIPasteboard.general.string = log.asText() }
             consoleAction("Clear") { log.clear() }
         }
@@ -105,7 +99,7 @@ struct DebugView: View {
         }
     }
 
-    private func consoleAction(_ text: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+    private func consoleAction(_ text: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(text)
                 .font(.system(.caption, design: .monospaced))
@@ -114,20 +108,5 @@ struct DebugView: View {
                 .background(WalletTheme.Console.panel, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .disabled(disabled)
-    }
-
-    /// On-device adapter qualification: "adapter qualification = passing the shared contract suite."
-    private func runContractTests() async {
-        testing = true
-        defer { testing = false }
-        log.log("Running adapter contract suites…")
-        do {
-            try await SecureAreaContract.verify(SecureEnclaveSecureArea())
-            try await StorageDriverContract.verify(KeychainStorageDriver())
-            log.log("✅ Secure Enclave + Keychain adapters pass the SDK contract suites.")
-        } catch {
-            log.log("❌ adapter contract: \(error)")
-        }
     }
 }

@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AA30000000000000000000C1 /* Wallet in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000B1 /* Wallet */; };
+		AA30000000000000000000C2 /* WalletTestKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000B2 /* WalletTestKit */; };
+		AA30000000000000000000C3 /* AppleCore in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000B3 /* AppleCore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		8024B77A3007647900996FD8 /* AxleWallet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AxleWallet.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +29,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA30000000000000000000C1 /* Wallet in Frameworks */,
+				AA30000000000000000000C2 /* WalletTestKit in Frameworks */,
+				AA30000000000000000000C3 /* AppleCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +74,9 @@
 			);
 			name = AxleWallet;
 			packageProductDependencies = (
+				AA20000000000000000000B1 /* Wallet */,
+				AA20000000000000000000B2 /* WalletTestKit */,
+				AA20000000000000000000B3 /* AppleCore */,
 			);
 			productName = AxleWallet;
 			productReference = 8024B77A3007647900996FD8 /* AxleWallet.app */;
@@ -94,6 +106,10 @@
 			);
 			mainGroup = 8024B7713007647900996FD8;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AA10000000000000000000A1 /* XCLocalSwiftPackageReference "../../swift" */,
+				AA10000000000000000000A2 /* XCLocalSwiftPackageReference "../../apple" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8024B77B3007647900996FD8 /* Products */;
 			projectDirPath = "";
@@ -336,6 +352,35 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		AA10000000000000000000A1 /* XCLocalSwiftPackageReference "../../swift" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../swift;
+		};
+		AA10000000000000000000A2 /* XCLocalSwiftPackageReference "../../apple" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../apple;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA20000000000000000000B1 /* Wallet */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA10000000000000000000A1 /* XCLocalSwiftPackageReference "../../swift" */;
+			productName = Wallet;
+		};
+		AA20000000000000000000B2 /* WalletTestKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA10000000000000000000A1 /* XCLocalSwiftPackageReference "../../swift" */;
+			productName = WalletTestKit;
+		};
+		AA20000000000000000000B3 /* AppleCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA10000000000000000000A2 /* XCLocalSwiftPackageReference "../../apple" */;
+			productName = AppleCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 8024B7723007647900996FD8 /* Project object */;
 }

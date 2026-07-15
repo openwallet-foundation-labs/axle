@@ -6,6 +6,8 @@ build/
 .DS_Store
 swift/.build/
 swift/.swiftpm/
+apple/.build/
+apple/.swiftpm/
 local.properties
 node_modules/
 tools/headless-interop/package-lock.json

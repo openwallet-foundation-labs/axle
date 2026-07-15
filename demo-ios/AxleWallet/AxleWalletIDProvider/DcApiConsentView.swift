@@ -132,15 +132,24 @@ struct DcApiConsentView: View {
 
     private func share() {
         phase = .sharing
+        // Hoist to locals so the @Sendable response closure captures Sendable values, not the MainActor view.
         let context = self.context
         let wallet = ExtensionWallet.shared
+        // What we displayed: docType → namespace → element identifiers. The response path refuses to sign a raw
+        // request that asks for anything outside this (Apple's two-phase API — displayed vs signed are separate).
+        let shown = documents.reduce(into: [String: [String: Set<String>]]()) { acc, doc in
+            var namespaces = acc[doc.docType] ?? [:]
+            for claim in doc.claims { namespaces[claim.namespace, default: []].insert(claim.element) }
+            acc[doc.docType] = namespaces
+        }
         Task {
             do {
                 try await context.sendResponse { rawRequest in
                     let data = try await DcApiResponder.responseData(
                         rawRequestData: rawRequest.requestData,
                         origin: context.requestingWebsiteOrigin,
-                        wallet: wallet)
+                        wallet: wallet,
+                        shown: shown)
                     return ISO18013MobileDocumentResponse(responseData: data)
                 }
                 // The platform dismisses the extension on success.

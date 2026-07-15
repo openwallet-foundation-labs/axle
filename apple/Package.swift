@@ -63,6 +63,8 @@ let package = Package(
                 .product(name: "Wallet", package: "swift"),
                 // Credential / CredentialFormat / CredentialId the registrar reads.
                 .product(name: "WalletAPI", package: "swift"),
+                // DeviceRequest decode — the consent-consistency check reads the raw request we are about to sign.
+                .product(name: "MDoc", package: "swift"),
             ]
             // Imports IdentityDocumentServices (iOS 26); the system framework autolinks from the SDK.
         ),

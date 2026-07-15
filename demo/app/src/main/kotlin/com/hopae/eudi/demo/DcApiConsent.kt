@@ -52,8 +52,16 @@ import com.hopae.eudi.demo.ui.components.WalletCard
 import com.hopae.eudi.demo.ui.screens.GroupHeader
 import com.hopae.eudi.demo.ui.theme.WalletTheme
 
-/** One requested credential in a DC API consent: a label (vct / docType) and the elements to disclose. */
-class ConsentItem(val label: String, val elements: List<String>)
+/** One requested credential in a DC API consent: a title and the claim rows (label + value) to disclose. */
+class ClaimRow(val label: String, val value: String)
+class ConsentItem(val label: String, val rows: List<ClaimRow>)
+
+/**
+ * The RP registration (WRPRC) verdict for a DC API consent: one line folding the WRPRC signature and its
+ * revocation status, plus the purpose and whether every requested attribute stays within the registration
+ * scope (RPRC_21). Null when the request carries no registration (raw-mdoc / unsigned origin-only).
+ */
+class DcApiRegInfo(val text: String, val ok: Boolean, val purpose: String?, val overAsking: Boolean)
 
 /**
  * The consent for a Digital Credentials API request, shown as a bottom sheet over the calling app: the
@@ -67,8 +75,8 @@ class DcApiVerifier(
     val subtitle: String,
     /** Whether the signed request verified to a trust anchor (false for an unsigned/origin-only request). */
     val signedRequestVerified: Boolean,
-    /** WRPRC registrar-verified, or null when the request carries no registration (e.g. raw-mdoc). */
-    val wrprcVerified: Boolean?,
+    /** The RP's registration verdict, or null when the request carries none (e.g. raw-mdoc). */
+    val registration: DcApiRegInfo?,
 )
 
 @Composable
@@ -110,41 +118,48 @@ fun DcApiConsentSheet(
             Text("Sharing request", style = MaterialTheme.typography.titleMedium, color = c.ink)
             Spacer(Modifier.height(14.dp))
 
-            // Requester
-            WalletCard {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(c.ink), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.Public, null, tint = Color.White, modifier = Modifier.size(22.dp))
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(verifier.name, style = MaterialTheme.typography.titleSmall, color = c.ink, maxLines = 2)
-                        Text(verifier.subtitle, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, maxLines = 1)
-                    }
-                    TrustBadge(verifier.signedRequestVerified, trustedText = "Verified", untrustedText = "Unverified")
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            WalletCard(padding = PaddingValues(0.dp)) {
-                TrustRow("Signed request", if (verifier.signedRequestVerified) "Verified" else "Not verified", verifier.signedRequestVerified)
-                verifier.wrprcVerified?.let { ok ->
-                    TrustRow("Registration (WRPRC)", if (ok) "Verified by registrar" else "Self-declared", ok)
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-            SectionLabel("You'll share")
-            Spacer(Modifier.height(8.dp))
+            // Everything between the title and the action buttons scrolls, so the consent stays a compact
+            // bottom sheet no matter how many attributes are requested.
             Column(
-                Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                // Requester
+                WalletCard {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(c.ink), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.Public, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(verifier.name, style = MaterialTheme.typography.titleSmall, color = c.ink, maxLines = 2)
+                            Text(verifier.subtitle, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, maxLines = 1)
+                        }
+                        TrustBadge(verifier.signedRequestVerified, trustedText = "Verified", untrustedText = "Unverified")
+                    }
+                }
+                WalletCard(padding = PaddingValues(0.dp)) {
+                    TrustRow("Signed request", if (verifier.signedRequestVerified) "Verified" else "Not verified", verifier.signedRequestVerified)
+                    verifier.registration?.let { TrustRow("Registration (WRPRC)", it.text, it.ok) }
+                }
+                // Purpose with a compact in-scope / out-of-scope (RPRC_21) badge on the same line.
+                verifier.registration?.let { reg ->
+                    SectionLabel("Purpose")
+                    WalletCard {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(reg.purpose ?: "Attribute request", style = MaterialTheme.typography.bodyMedium, color = c.ink, modifier = Modifier.weight(1f))
+                            TrustBadge(!reg.overAsking, trustedText = "In scope", untrustedText = "Out of scope")
+                        }
+                    }
+                }
+                SectionLabel("You'll share")
                 items.forEach { item ->
                     WalletCard(padding = PaddingValues(0.dp)) {
                         Text(item.label, style = MaterialTheme.typography.titleSmall, color = c.ink, modifier = Modifier.padding(16.dp, 12.dp))
                         Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
-                        if (item.elements.isEmpty()) InfoRow("Attributes", "—")
+                        if (item.rows.isEmpty()) InfoRow("Attributes", "—")
                         else {
                             GroupHeader("Shared")
-                            item.elements.forEach { InfoRow(elementLabel(it), "Shared", c.trust) }
+                            item.rows.forEach { InfoRow(it.label, it.value) }
                         }
                     }
                 }
@@ -165,5 +180,3 @@ fun DcApiConsentSheet(
         }
     }
 }
-
-private fun elementLabel(id: String): String = id.replace('_', ' ').replaceFirstChar { it.uppercase() }

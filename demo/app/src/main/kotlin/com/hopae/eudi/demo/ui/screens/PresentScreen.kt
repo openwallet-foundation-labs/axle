@@ -48,12 +48,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import com.hopae.eudi.demo.LogStore
 import com.hopae.eudi.demo.security.AppLock
 import com.hopae.eudi.demo.security.BiometricAuth
 import com.hopae.eudi.demo.security.WalletSecurity
+import com.hopae.eudi.demo.ui.components.DocTile
 import com.hopae.eudi.demo.ui.components.InfoRow
 import com.hopae.eudi.demo.ui.components.PrimaryButton
 import com.hopae.eudi.demo.ui.components.SecondaryButton
@@ -62,6 +64,8 @@ import com.hopae.eudi.demo.ui.components.TrustBadge
 import com.hopae.eudi.demo.ui.components.TrustRow
 import com.hopae.eudi.demo.ui.components.WalletCard
 import com.hopae.eudi.demo.ui.components.absorbTouches
+import com.hopae.eudi.demo.ui.credGlyph
+import com.hopae.eudi.demo.ui.credGradient
 import com.hopae.eudi.demo.ui.credTitle
 import com.hopae.eudi.demo.ui.theme.WalletTheme
 import com.hopae.eudi.wallet.ClaimCategory
@@ -239,28 +243,29 @@ private fun ReviewRequest(
             SectionLabel("Trust")
             WalletCard(padding = PaddingValues(0.dp)) {
                 TrustRow("Signed request", if (v.trusted) "Verified" else "Not verified", v.trusted)
+                // One registration verdict folding the WRPRC signature and its revocation status together:
+                // signature + status ok → verified; a revoked status → revoked; no valid WRPRC → self-declared.
                 if (reg != null) {
-                    val wrprcOk = reg.attested || reg.registrarVerified
-                    val wrprcText = when {
-                        reg.attested -> "Verified by registrar"
-                        reg.registrarVerified -> "Confirmed online"
-                        else -> "Self-declared"
+                    val sigOk = reg.attested || reg.registrarVerified
+                    val (regText, regOk) = when {
+                        !sigOk -> "Self-declared" to false
+                        reg.statusValid == false -> "Revoked" to false
+                        else -> "Verified by registrar" to true
                     }
-                    TrustRow("Registration (WRPRC)", wrprcText, wrprcOk)
-                    reg.statusValid?.let { TrustRow("Registration status", if (it) "Valid" else "Revoked", it) }
+                    TrustRow("Registration (WRPRC)", regText, regOk)
                 } else {
                     TrustRow("Registration (WRPRC)", "None", false)
                 }
             }
-            // Purpose
-            purposeText(reg?.purpose)?.let {
+            // Purpose with a compact in-scope / out-of-scope (RPRC_21) badge on the same line.
+            if (reg != null) {
+                val overAsking = reg.unregisteredClaims.isNotEmpty()
                 SectionLabel("Purpose")
-                WalletCard { Text(it, style = MaterialTheme.typography.bodyMedium, color = c.ink) }
-            }
-            // Over-asking warning (RPRC_21)
-            reg?.unregisteredClaims?.takeIf { it.isNotEmpty() }?.let {
                 WalletCard {
-                    Text("⚠ This verifier is requesting attributes it isn't registered for.", style = MaterialTheme.typography.bodyMedium, color = c.danger)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(purposeText(reg.purpose) ?: "Attribute request", style = MaterialTheme.typography.bodyMedium, color = c.ink, modifier = Modifier.weight(1f))
+                        TrustBadge(!overAsking, trustedText = "In scope", untrustedText = "Out of scope")
+                    }
                 }
             }
 
@@ -295,12 +300,10 @@ private fun QueryCard(
 
     // Split the chosen credential's Subject claims into requested (shared/optional) vs. the rest (private).
     val allClaims = (primaryCred?.lifecycle as? Lifecycle.Issued)?.claims.orEmpty()
-    val metadataPaths = allClaims.filter { it.category == ClaimCategory.Metadata }.map { it.path }.toSet()
     val disclosedSet = primaryCand?.disclosedPaths?.toSet().orEmpty()
-    val disclosedSubject = disclosedSet.filter { it !in metadataPaths }
     // A leaf is disclosed if a requested path equals it or is a prefix of it (an object request covers its leaves).
     fun disclosed(path: List<String>) = disclosedSet.any { d -> d.size <= path.size && path.subList(0, d.size) == d }
-    val notShared = allClaims.filter { it.category == ClaimCategory.Subject && !disclosed(it.path) }.map { it.path }
+    val sharedLeaves = allClaims.filter { it.category == ClaimCategory.Subject && disclosed(it.path) }
 
     WalletCard(padding = PaddingValues(0.dp)) {
         // header: document + optional toggle
@@ -324,60 +327,69 @@ private fun QueryCard(
             return@WalletCard
         }
 
-        // Credential picker when the query matches more than one stored credential:
-        // radio for a single-pick query, checkboxes for a multiple:true query.
+        // Credential picker when the query matches more than one stored credential: colored, selectable cards
+        // (radio for single-pick, checkbox for multiple:true) each showing a distinguishing value so two
+        // documents of the same type are easy to tell apart.
         if (q.candidates.size > 1) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
+            Spacer(Modifier.height(8.dp))
+            GroupHeader("Choose a document")
             q.candidates.forEach { cand ->
+                val cred = credsById[cand.credentialId.value]
                 val checked = cand.credentialId in selectedIds
-                val onPick: () -> Unit = {
+                val disc = cand.disclosedPaths.toSet()
+                val subtitle = (cred?.lifecycle as? Lifecycle.Issued)?.claims.orEmpty()
+                    .filter { it.category == ClaimCategory.Subject && disc.any { d -> d.size <= it.path.size && it.path.subList(0, d.size) == d } }
+                    .map { it.value.display() }.filter { it.isNotBlank() }.take(2).joinToString(" · ")
+                CandidateCard(cred, checked, q.multiple, subtitle) {
                     chosen[q.queryId] = if (q.multiple) {
-                        if (checked) (selectedIds - cand.credentialId).ifEmpty { selectedIds } // keep ≥1
-                        else selectedIds + cand.credentialId
+                        if (checked) (selectedIds - cand.credentialId).ifEmpty { selectedIds } else selectedIds + cand.credentialId
                     } else listOf(cand.credentialId)
                 }
-                CandidateRow(
-                    label = credsById[cand.credentialId.value]?.let { credTitle(it) } ?: cand.credentialId.value,
-                    checked = checked, multiple = q.multiple, onClick = onPick,
-                )
             }
+            Spacer(Modifier.height(6.dp))
         }
 
-        // Requested attributes — "Shared" (required) or the optional group's disclosure.
+        // Requested attributes — with their actual values, so it's clear exactly what will be shared.
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
         GroupHeader(if (q.required) "Shared" else "Optional")
-        if (disclosedSubject.isEmpty()) {
+        if (sharedLeaves.isEmpty()) {
             Text("No personal attributes.", style = MaterialTheme.typography.bodySmall, color = c.inkMuted, modifier = Modifier.padding(16.dp, 6.dp, 16.dp, 12.dp))
         } else {
-            disclosedSubject.forEach { path ->
-                InfoRow(claimPathLabel(path), if (willShare) "Shared" else "Off", if (willShare) c.trust else c.inkFaint)
+            sharedLeaves.forEach { claim ->
+                InfoRow(claimPathLabel(claim.path), if (willShare) claim.value.display() else "Off", if (willShare) c.ink else c.inkFaint)
             }
-        }
-
-        // The chosen credential's remaining attributes — shown for transparency, never sent.
-        if (notShared.isNotEmpty()) {
-            GroupHeader("Not shared")
-            notShared.forEach { path -> InfoRow(claimPathLabel(path), "Private", c.inkFaint) }
         }
     }
 }
 
-/** A radio (single-pick) or checkbox (multiple) credential-selection row. */
+/** A colored, selectable credential card for the picker: a gradient doc tile, the title, a distinguishing
+ *  value (e.g. the name), and a radio (single-pick) or checkbox (multiple) indicator. */
 @Composable
-private fun CandidateRow(label: String, checked: Boolean, multiple: Boolean, onClick: () -> Unit) {
+private fun CandidateCard(cred: Credential?, checked: Boolean, multiple: Boolean, subtitle: String, onClick: () -> Unit) {
     val c = WalletTheme.colors
-    val shape = if (multiple) RoundedCornerShape(5.dp) else RoundedCornerShape(99.dp)
+    val shape = RoundedCornerShape(12.dp)
+    val selShape = if (multiple) RoundedCornerShape(6.dp) else RoundedCornerShape(99.dp)
     Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(16.dp, 10.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp).clip(shape)
+            .background(if (checked) c.brand.copy(alpha = 0.06f) else c.card)
+            .border(if (checked) 1.5.dp else 1.dp, if (checked) c.brand else c.cardBorder, shape)
+            .clickable { onClick() }.padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (cred != null) DocTile(credGlyph(cred), credGradient(cred), size = 40)
+        Column(Modifier.weight(1f)) {
+            Text(cred?.let { credTitle(it) } ?: "Credential", style = MaterialTheme.typography.titleSmall, color = c.ink)
+            if (subtitle.isNotBlank()) {
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
         Box(
-            Modifier.size(18.dp).clip(shape)
-                .border(2.dp, if (checked) c.brand else c.cardBorderStrong, shape)
+            Modifier.size(20.dp).clip(selShape)
+                .border(2.dp, if (checked) c.brand else c.cardBorderStrong, selShape)
                 .background(if (checked) c.brand else Color.Transparent),
             contentAlignment = Alignment.Center,
-        ) { if (checked) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(11.dp)) }
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = c.ink, modifier = Modifier.weight(1f))
+        ) { if (checked) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(12.dp)) }
     }
 }
 

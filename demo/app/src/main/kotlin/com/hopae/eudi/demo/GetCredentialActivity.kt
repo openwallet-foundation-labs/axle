@@ -10,7 +10,11 @@ import androidx.credentials.GetDigitalCredentialOption
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import com.hopae.eudi.demo.ui.credTitle
+import com.hopae.eudi.demo.ui.screens.claimPathLabel
 import com.hopae.eudi.demo.ui.theme.WalletTheme
+import com.hopae.eudi.wallet.ClaimCategory
+import com.hopae.eudi.wallet.Lifecycle
 import com.hopae.eudi.wallet.PresentationSelection
 import com.hopae.eudi.wallet.PresentationState
 import com.hopae.eudi.wallet.android.dcapi.DcApiRequest
@@ -18,6 +22,7 @@ import com.hopae.eudi.wallet.android.dcapi.DcApiResult
 import com.hopae.eudi.wallet.mdoc.DeviceRequest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 /**
  * Handles a Digital Credentials API (OpenID4VP / org-iso-mdoc) request routed to this wallet by the
@@ -47,10 +52,10 @@ class GetCredentialActivity : FragmentActivity() {
                 val (proto, data) = mdoc
                 val items = runCatching {
                     DeviceRequest.decode(Base64.decode(data.getString("deviceRequest"), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)).docRequests.map { dr ->
-                        ConsentItem(dr.docType, dr.requested.flatMap { (_, els) -> els.map { it.identifier } })
+                        ConsentItem(dr.docType, dr.requested.flatMap { (_, els) -> els.map { ClaimRow(claimPathLabel(listOf(it.identifier)), "Shared") } })
                     }
                 }.getOrDefault(emptyList())
-                showConsent(DcApiVerifier(origin, "In-app request", signedRequestVerified = false, wrprcVerified = null), items,
+                showConsent(DcApiVerifier(origin, "In-app request", signedRequestVerified = false, registration = null), items,
                     onApprove = {
                         lifecycleScope.launch {
                             runCatching {
@@ -80,15 +85,34 @@ class GetCredentialActivity : FragmentActivity() {
                 if (resolved is PresentationState.Failed) throw resolved.error
                 val presentation = (resolved as PresentationState.RequestResolved).request
                 LogStore.log("DC API verifier=${presentation.verifier.clientId} · satisfiable=${presentation.satisfiable}")
+                val creds = runCatching { wallet.credentials.list().associateBy { it.id.value } }.getOrDefault(emptyMap())
                 val items = presentation.queries.map { q ->
-                    ConsentItem(q.queryId, q.candidates.firstOrNull()?.disclosedPaths?.map { it.last() } ?: listOf("no matching credential"))
+                    val cand = q.candidates.firstOrNull()
+                    val cred = cand?.let { creds[it.credentialId.value] }
+                    val disc = cand?.disclosedPaths?.toSet().orEmpty()
+                    val rows = (cred?.lifecycle as? Lifecycle.Issued)?.claims.orEmpty()
+                        .filter { it.category == ClaimCategory.Subject && disc.any { d -> d.size <= it.path.size && it.path.subList(0, d.size) == d } }
+                        .map { ClaimRow(claimPathLabel(it.path), it.value.display()) }
+                    ConsentItem(cred?.let { credTitle(it) } ?: q.queryId, rows)
                 }
                 val v = presentation.verifier
                 val reg = v.registration
                 val rpName = reg?.subjectName ?: reg?.subject?.takeIf { it.isNotBlank() } ?: v.commonName ?: v.clientId
                 val subtitle = reg?.intermediaryName?.let { "via $it" } ?: "In-app request"
-                val wrprc = reg?.let { it.attested || it.registrarVerified }
-                showConsent(DcApiVerifier(rpName, subtitle, v.trusted, wrprc), items,
+                val regInfo = reg?.let { r ->
+                    val sigOk = r.attested || r.registrarVerified
+                    val (text, ok) = when {
+                        !sigOk -> "Self-declared" to false
+                        r.statusValid == false -> "Revoked" to false
+                        else -> "Verified by registrar" to true
+                    }
+                    val purpose = r.purpose.takeIf { it.isNotEmpty() }?.let { p ->
+                        val lang = Locale.getDefault().language
+                        (p.firstOrNull { it.lang.startsWith(lang, true) } ?: p.first()).value
+                    }
+                    DcApiRegInfo(text, ok, purpose, r.unregisteredClaims.isNotEmpty())
+                }
+                showConsent(DcApiVerifier(rpName, subtitle, v.trusted, regInfo), items,
                     onApprove = {
                         lifecycleScope.launch {
                             runCatching {

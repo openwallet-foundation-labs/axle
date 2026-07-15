@@ -2,6 +2,7 @@ import AppleAttestation
 import AppleCore
 import AppleDcApi
 import Foundation
+import MDoc // ReaderAuthSigner (WalletConfig.readerAuth)
 import Wallet
 
 /// Assembles the EUDI Wallet SDK on iOS — the iOS counterpart of android `DemoWallet`.
@@ -67,7 +68,10 @@ enum DemoWallet {
                     readerAnchorsDer: trust.reader,
                     registrarAnchorsDer: trust.registrar
                 ),
-                transactionLog: TransactionLogConfig(recordFailures: true)
+                transactionLog: TransactionLogConfig(recordFailures: true),
+                // Read-mDL reader-auth identity (WRPAC) — the app signs its proximity requests so the other wallet
+                // can show us as a verified reader. Loaded from a gitignored bundle asset; nil when absent.
+                readerAuth: ReaderAuthLoader.load()
             ),
             ports: WalletPorts(
                 secureAreas: [secureArea],

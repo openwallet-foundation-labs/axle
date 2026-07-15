@@ -24,3 +24,6 @@ demo/app/src/main/assets/reader_wrpac.json
 xcuserdata/
 *.xcuserstate
 DerivedData/
+
+# iOS demo reader-auth WRPAC (local secret, mirrors android assets/reader_wrpac.json)
+demo-ios/AxleWallet/AxleWallet/reader_wrpac.json

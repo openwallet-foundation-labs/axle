@@ -502,7 +502,7 @@ export class VciService {
         cnf: { jwk: holderJwk },
         status: { status_list: { idx: status.idx, uri: status.uri } },
       };
-      return this.sdJwt.issue(payload, { _sd: c.sdJwtDisclose ?? [] } as never, c.signer);
+      return this.sdJwt.issue(payload, (c.sdJwtDisclose ?? { _sd: [] }) as never, c.signer);
     }
     // mso_mdoc — embed the Token Status List reference in the MSO `status.status_list = { idx, uri }`
     // (ISO/IEC 18013-5 2nd edition, @lukas.j.han/mdoc >= 0.6.0) so the credential is revocable like SD-JWT VC.

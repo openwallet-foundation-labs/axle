@@ -39,7 +39,12 @@ export interface CredentialConfig {
   /** SD-JWT VC */
   vct?: string;
   sdJwtClaims?: Record<string, unknown>;
-  sdJwtDisclose?: string[];
+  /**
+   * SD-JWT VC selective-disclosure frame (`@sd-jwt` `DisclosureFrame`): the top-level `_sd` lists the claim
+   * names to make selectively disclosable; a nested object (e.g. `address`) carries its own `_sd` so each of
+   * its members is individually disclosable — per the PID Rulebook §4.1.1 hierarchical claim names.
+   */
+  sdJwtDisclose?: Record<string, unknown>;
   /** ISO mdoc */
   doctype?: string;
   mdocNamespaces?: MdocNamespaceClaims[];
@@ -74,26 +79,37 @@ export const CREDENTIAL_CONFIGS: CredentialConfig[] = [
       given_name: PERSON.given_name,
       family_name: PERSON.family_name,
       birthdate: PERSON.birth_date,
-      place_of_birth: PERSON.birth_place,
+      // PID Rulebook §4.1.1: birth_place → `place_of_birth`, a JSON object (≥1 of country/region/locality),
+      // not a bare string.
+      place_of_birth: { locality: PERSON.birth_place },
+      // §4.1.1: nationality → `nationalities`, an array of ISO 3166-1 alpha-2 codes.
       nationalities: [PERSON.nationality],
-      resident_address: `${PERSON.resident_address}, ${PERSON.resident_postal_code} ${PERSON.resident_city}`,
-      resident_country: PERSON.resident_country,
-      age_over_18: true,
+      // §4.1.1: resident_* map to the OIDC `address` object (address.formatted / .street_address /
+      // .postal_code / .locality / .country) — flat resident_* claims are the mdoc encoding (§3.1.2), not SD-JWT VC.
+      address: {
+        formatted: `${PERSON.resident_address}, ${PERSON.resident_postal_code} ${PERSON.resident_city}`,
+        street_address: PERSON.resident_address,
+        postal_code: PERSON.resident_postal_code,
+        locality: PERSON.resident_city,
+        country: PERSON.resident_country,
+      },
       issuing_country: 'LU',
       issuing_authority: PID_ISSUING_AUTHORITY,
     },
-    sdJwtDisclose: [
-      'given_name',
-      'family_name',
-      'birthdate',
-      'place_of_birth',
-      'nationalities',
-      'resident_address',
-      'resident_country',
-      'age_over_18',
-      'issuing_country',
-      'issuing_authority',
-    ],
+    sdJwtDisclose: {
+      _sd: [
+        'given_name',
+        'family_name',
+        'birthdate',
+        'place_of_birth',
+        'nationalities',
+        'issuing_country',
+        'issuing_authority',
+      ],
+      // The `address` object is present, but each member is individually selectively-disclosable so a
+      // Relying Party can, e.g., request only address.locality without the full address (§4.1.1).
+      address: { _sd: ['formatted', 'street_address', 'postal_code', 'locality', 'country'] },
+    },
     displayFields: [
       { label: 'Given name', value: PERSON.given_name },
       { label: 'Family name', value: PERSON.family_name },
@@ -123,12 +139,15 @@ export const CREDENTIAL_CONFIGS: CredentialConfig[] = [
           given_name: PERSON.given_name,
           family_name: PERSON.family_name,
           birth_date: PERSON.birth_date,
-          nationality: PERSON.nationality,
+          // PID Rulebook §3.1.4: birth_place → `place_of_birth` element, a map (≥1 of country/region/locality).
+          place_of_birth: { locality: PERSON.birth_place },
+          // §3.1.2/§3.1.3: the `nationality` element is encoded as the `nationalities` type — an ARRAY of
+          // ISO 3166-1 alpha-2 codes, not a single string.
+          nationality: [PERSON.nationality],
           resident_address: PERSON.resident_address,
           resident_city: PERSON.resident_city,
           resident_postal_code: PERSON.resident_postal_code,
           resident_country: PERSON.resident_country,
-          age_over_18: true,
           issuing_country: 'LU',
           issuing_authority: PID_ISSUING_AUTHORITY,
           expiry_date: '2035-05-14',

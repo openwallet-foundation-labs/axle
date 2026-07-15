@@ -25,7 +25,9 @@ const PID_NAMESPACE = 'eu.europa.ec.eudi.pid.1';
 const MDL_DOCTYPE = 'org.iso.18013.5.1.mDL';
 const MDL_NAMESPACE = 'org.iso.18013.5.1';
 
-/** The default claim set — an "age verification + identity" request (matches the demo WRPRC purpose). */
+// The default claim set — an identity request (given name, family name, date of birth). Age-verification
+// attributes were removed from the PID Rulebook (v1.1, following CIR 2024/2977), so we request `birthdate`
+// (SD-JWT VC, §4.1.1) / `birth_date` (mdoc, §3.1.2) instead of the former `age_over_18`.
 export const REQUESTABLE: Record<RequestableKey, RequestableCredential> = {
   pid_sd_jwt: {
     key: 'pid_sd_jwt',
@@ -33,7 +35,7 @@ export const REQUESTABLE: Record<RequestableKey, RequestableCredential> = {
     format: 'dc+sd-jwt',
     label: 'Personal ID (SD-JWT VC)',
     type: PID_VCT,
-    claimNames: ['given_name', 'family_name', 'age_over_18'],
+    claimNames: ['given_name', 'family_name', 'birthdate'],
   },
   pid_mdoc: {
     key: 'pid_mdoc',
@@ -42,7 +44,7 @@ export const REQUESTABLE: Record<RequestableKey, RequestableCredential> = {
     label: 'Personal ID (mdoc)',
     type: PID_DOCTYPE,
     namespace: PID_NAMESPACE,
-    claimNames: ['given_name', 'family_name', 'age_over_18'],
+    claimNames: ['given_name', 'family_name', 'birth_date'],
   },
   mdl: {
     key: 'mdl',

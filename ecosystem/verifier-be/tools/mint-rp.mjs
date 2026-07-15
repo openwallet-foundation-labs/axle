@@ -182,7 +182,7 @@ async function createRelyingParty(token) {
     // against this registration via TS5 GET {registryURI}/wrp/check-intended-use (ETSI TS 119 475 B.2.7).
     intendedUse: [
       {
-        purpose: [{ lang: 'en', content: 'Age verification' }],
+        purpose: [{ lang: 'en', content: 'Identity verification' }],
         privacyPolicy: [{ type: 'http://data.europa.eu/eudi/policy/privacy-policy', policyURI: PRIVACY_URI }],
         credential: [
           {
@@ -193,7 +193,7 @@ async function createRelyingParty(token) {
           {
             format: 'dc+sd-jwt',
             meta: { vct_values: ['urn:eudi:pid:1'] },
-            claim: [['given_name'], ['family_name'], ['age_over_18']].map((path) => ({ path })),
+            claim: [['given_name'], ['family_name'], ['birthdate']].map((path) => ({ path })),
           },
         ],
       },

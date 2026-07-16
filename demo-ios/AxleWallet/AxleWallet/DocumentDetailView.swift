@@ -11,7 +11,6 @@ struct DocumentDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var reveal = false
     @State private var confirmDelete = false
-    @State private var showProximity = false
 
     var body: some View {
         ScrollView {
@@ -21,19 +20,8 @@ struct DocumentDetailView: View {
                 SectionLabel("Trust")
                 CredentialTrustCard(cred: cred)
                 CredentialClaimSections(cred: cred, reveal: reveal)
-
-                // Proximity is the one genuinely holder-initiated present action — show *this* mDL in person
-                // over BLE. Cross-device / QR presentation is request-driven (scan a verifier from Home).
-                if credIsMdoc(cred) {
-                    Button { showProximity = true } label: {
-                        Label("Present via proximity", systemImage: "dot.radiowaves.left.and.right")
-                            .font(WalletFont.labelLarge)
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity).padding(.vertical, 15)
-                            .background(WalletTheme.brand, in: RoundedRectangle(cornerRadius: 14))
-                    }
-                    .buttonStyle(.plain).padding(.top, 4)
-                }
+                // All presenting is request-driven: cross-device/QR and proximity both start from Home
+                // (the Proximity quick action / scanning the verifier).
             }
             .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 28)
         }
@@ -44,9 +32,6 @@ struct DocumentDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This removes the credential from this device. You can be issued a new one later.")
-        }
-        .fullScreenCover(isPresented: $showProximity) {
-            ProximityHolderView { showProximity = false }
         }
     }
 

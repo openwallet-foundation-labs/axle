@@ -64,13 +64,8 @@ struct ReaderView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("DOCUMENT TO REQUEST")
                     .font(WalletFont.labelSmall).tracking(0.6).foregroundStyle(WalletTheme.inkFaint)
-                let kinds = Array(ReaderDocKind.allCases)
-                ForEach(0 ..< kinds.count / 2, id: \.self) { row in
-                    HStack(spacing: 8) {
-                        ForEach(kinds[(row * 2) ..< min(row * 2 + 2, kinds.count)], id: \.self) { k in
-                            docKindChip(k)
-                        }
-                    }
+                ForEach(ReaderDocKind.allCases, id: \.self) { k in
+                    docKindChip(k)
                 }
             }
             PrimaryButton(title: "Scan holder QR") { showScanner = true }
@@ -85,7 +80,10 @@ struct ReaderView: View {
                     ForEach(Array(results.enumerated()), id: \.offset) { _, doc in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Text(prettyConfig(doc.docType)).font(WalletFont.titleSmall).foregroundStyle(WalletTheme.ink)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(prettyConfig(doc.docType)).font(WalletFont.titleSmall).foregroundStyle(WalletTheme.ink)
+                                    Text(doc.docType).font(WalletFont.bodySmall).foregroundStyle(WalletTheme.inkMuted).lineLimit(1)
+                                }
                                 Spacer()
                                 TrustPill(trusted: doc.deviceAuthenticated, trustedText: "Verified", untrustedText: "Unverified")
                             }
@@ -116,18 +114,24 @@ struct ReaderView: View {
         return spaced.prefix(1).uppercased() + spaced.dropFirst()
     }
 
-    /// A selectable pill for the document-type picker (mirrors android `DocKindChip`).
+    /// A selectable row for the document-type picker: friendly name + the exact DocType it requests.
     private func docKindChip(_ k: ReaderDocKind) -> some View {
         let selected = k == kind
         let shape = RoundedRectangle(cornerRadius: 10)
         return Button { kind = k } label: {
-            Text(k.rawValue)
-                .font(WalletFont.labelLarge)
-                .foregroundStyle(selected ? WalletTheme.brand : WalletTheme.inkBody)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(selected ? WalletTheme.brand.opacity(0.08) : WalletTheme.card, in: shape)
-                .overlay(shape.strokeBorder(selected ? WalletTheme.brand : WalletTheme.cardBorder, lineWidth: selected ? 1.5 : 1))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(k.rawValue)
+                    .font(WalletFont.labelLarge)
+                    .foregroundStyle(selected ? WalletTheme.brand : WalletTheme.ink)
+                Text(k.doctype)
+                    .font(WalletFont.bodySmall)
+                    .foregroundStyle(WalletTheme.inkMuted)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .background(selected ? WalletTheme.brand.opacity(0.08) : WalletTheme.card, in: shape)
+            .overlay(shape.strokeBorder(selected ? WalletTheme.brand : WalletTheme.cardBorder, lineWidth: selected ? 1.5 : 1))
         }
         .buttonStyle(.plain)
     }

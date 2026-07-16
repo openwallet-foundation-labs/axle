@@ -135,6 +135,8 @@ struct ProximityHolderView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(cred.map { credTitle($0) } ?? docTypeLabel(doc.docType))
                         .font(WalletFont.titleSmall).foregroundStyle(cred != nil ? WalletTheme.ink : WalletTheme.inkFaint)
+                    Text(doc.docType)
+                        .font(WalletFont.bodySmall).foregroundStyle(WalletTheme.inkMuted).lineLimit(1)
                     Text(cred != nil ? "Required" : "No matching document")
                         .font(WalletFont.bodySmall).foregroundStyle(cred != nil ? WalletTheme.inkMuted : WalletTheme.danger)
                 }

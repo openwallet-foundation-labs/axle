@@ -1,5 +1,7 @@
 package com.hopae.eudi.demo.ui
 
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CreditCard
@@ -18,13 +21,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import java.util.Base64
 import com.hopae.eudi.demo.ui.components.InfoRow
 import com.hopae.eudi.demo.ui.components.Pill
 import com.hopae.eudi.demo.ui.components.PrimaryButton
@@ -116,9 +124,51 @@ private fun ClaimsCard(cred: Credential, items: List<Claim>, reveal: Boolean) {
     WalletCard(padding = PaddingValues(0.dp)) {
         items.forEach { claim ->
             val raw = claim.value.display()
-            val value = if (isSensitive(claim.path) && !reveal) mask(raw) else raw
-            InfoRow(claimLabel(cred, claim.path), value)
+            val image = if (isImageClaim(claim.path)) rememberClaimImage(raw) else null
+            if (image != null) {
+                ImageRow(claimLabel(cred, claim.path), image)
+            } else {
+                val value = if (isSensitive(claim.path) && !reveal) mask(raw) else raw
+                InfoRow(claimLabel(cred, claim.path), value)
+            }
         }
+    }
+}
+
+/**
+ * mdoc image-carrying elements (ISO 23220-2 / 18013-5: portrait, signature) arrive as base64url text —
+ * the SDK projects CBOR bstr that way for DCQL matching — so decode and render them as an image.
+ */
+private val IMAGE_ELEMENTS = setOf("portrait", "enrolment_portrait_image", "signature_usual_mark")
+
+private fun isImageClaim(path: List<String>): Boolean {
+    val key = path.lastOrNull()?.lowercase() ?: return false
+    return key in IMAGE_ELEMENTS
+}
+
+@Composable
+private fun rememberClaimImage(base64url: String): ImageBitmap? = remember(base64url) {
+    runCatching {
+        val bytes = Base64.getUrlDecoder().decode(base64url)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    }.getOrNull()
+}
+
+@Composable
+private fun ImageRow(label: String, image: ImageBitmap) {
+    val c = WalletTheme.colors
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(12.dp))
+        Image(
+            image,
+            contentDescription = label,
+            modifier = Modifier.size(width = 64.dp, height = 84.dp).clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop,
+        )
     }
 }
 

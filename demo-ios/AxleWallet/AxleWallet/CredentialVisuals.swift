@@ -98,14 +98,9 @@ func credFormatLabel(_ c: Credential) -> String {
     }
 }
 
-/// True for a Mobile Driving Licence — the one credential kind that also presents over proximity (Phase 4).
+/// True for a Mobile Driving Licence — the one credential kind whose detail offers proximity sharing.
+/// (Other mdocs still answer a proximity reader's request once an mDL-initiated engagement is running.)
 func credIsMdl(_ c: Credential) -> Bool { kindOf(c) == .mdl }
-
-/// True for any ISO mdoc — the format that presents over proximity (ISO 18013-5 / 23220-4).
-func credIsMdoc(_ c: Credential) -> Bool {
-    if case .msoMdoc = c.format { return true }
-    return false
-}
 
 /// True for a Personal ID (PID) — the wallet's primary identity credential, featured as the home hero.
 func credIsPid(_ c: Credential) -> Bool { kindOf(c) == .pid }

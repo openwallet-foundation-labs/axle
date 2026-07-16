@@ -27,36 +27,36 @@ public enum ReaderDocKind: String, CaseIterable, Sendable {
     case mdl = "Driving Licence"
     case age = "Proof of Age"
     case photoID = "Photo ID"
+
+    /// The exact mdoc DocType this kind requests — shown under the friendly name in the picker.
+    public var doctype: String {
+        switch self {
+        case .pid: return "eu.europa.ec.eudi.pid.1"
+        case .mdl: return "org.iso.18013.5.1.mDL"
+        case .age: return "eu.europa.ec.av.1"
+        case .photoID: return "org.iso.23220.photoid.1"
+        }
+    }
 }
 
 public enum MdocReaderRequests {
     /// The request for one document kind (android demo `readerRequest(kind)`).
     public static func request(_ kind: ReaderDocKind) -> [RequestedDocument] {
+        let elements: [(String, [String])]
         switch kind {
         case .pid:
-            return [RequestedDocument(
-                docType: "eu.europa.ec.eudi.pid.1",
-                elements: [("eu.europa.ec.eudi.pid.1", ["family_name", "given_name", "birth_date", "nationality"])]
-            )]
+            elements = [("eu.europa.ec.eudi.pid.1", ["family_name", "given_name", "birth_date", "nationality"])]
         // portrait is an ISO 18013-5 mandatory element — the reader verifies the holder's photo.
         case .mdl:
-            return [RequestedDocument(
-                docType: "org.iso.18013.5.1.mDL",
-                elements: [("org.iso.18013.5.1", ["family_name", "given_name", "portrait", "driving_privileges"])]
-            )]
+            elements = [("org.iso.18013.5.1", ["family_name", "given_name", "portrait", "driving_privileges"])]
         // AV Profile §A.4: age_over_18 is the only attribute a Proof of Age attestation carries.
         case .age:
-            return [RequestedDocument(
-                docType: "eu.europa.ec.av.1",
-                elements: [("eu.europa.ec.av.1", ["age_over_18"])]
-            )]
+            elements = [("eu.europa.ec.av.1", ["age_over_18"])]
         // ISO 23220-4 Annex C: identity claims live in the generic 23220-2 namespace.
         case .photoID:
-            return [RequestedDocument(
-                docType: "org.iso.23220.photoid.1",
-                elements: [("org.iso.23220.1", ["family_name", "given_name", "birth_date", "portrait", "age_over_18"])]
-            )]
+            elements = [("org.iso.23220.1", ["family_name", "given_name", "birth_date", "portrait", "age_over_18"])]
         }
+        return [RequestedDocument(docType: kind.doctype, elements: elements)]
     }
 
     /// Flattens verified documents into display rows, rendering each CBOR element value to a readable string.

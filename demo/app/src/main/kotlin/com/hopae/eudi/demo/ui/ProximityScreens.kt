@@ -136,35 +136,26 @@ else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
 
 /** What the reader requests — the PID (mdoc); the holder answers if it holds a matching mdoc credential. */
 /** The document types this demo reader can request — picked one at a time on the reader screen. */
-enum class ReaderDocKind(val label: String) {
-    PID("Personal ID"),
-    MDL("Driving Licence"),
-    AGE("Proof of Age"),
-    PHOTOID("Photo ID"),
+enum class ReaderDocKind(val label: String, val doctype: String) {
+    PID("Personal ID", "eu.europa.ec.eudi.pid.1"),
+    MDL("Driving Licence", "org.iso.18013.5.1.mDL"),
+    AGE("Proof of Age", "eu.europa.ec.av.1"),
+    PHOTOID("Photo ID", "org.iso.23220.photoid.1"),
 }
 
 private fun readerRequest(kind: ReaderDocKind) = listOf(
-    when (kind) {
-        ReaderDocKind.PID -> RequestedDocument(
-            "eu.europa.ec.eudi.pid.1",
-            mapOf("eu.europa.ec.eudi.pid.1" to listOf("family_name", "given_name", "birth_date", "nationality")),
-        )
-        // portrait is an ISO 18013-5 mandatory element — the reader verifies the holder's photo.
-        ReaderDocKind.MDL -> RequestedDocument(
-            "org.iso.18013.5.1.mDL",
-            mapOf("org.iso.18013.5.1" to listOf("family_name", "given_name", "portrait", "driving_privileges")),
-        )
-        // AV Profile §A.4: age_over_18 is the only attribute a Proof of Age attestation carries.
-        ReaderDocKind.AGE -> RequestedDocument(
-            "eu.europa.ec.av.1",
-            mapOf("eu.europa.ec.av.1" to listOf("age_over_18")),
-        )
-        // ISO 23220-4 Annex C: identity claims live in the generic 23220-2 namespace.
-        ReaderDocKind.PHOTOID -> RequestedDocument(
-            "org.iso.23220.photoid.1",
-            mapOf("org.iso.23220.1" to listOf("family_name", "given_name", "birth_date", "portrait", "age_over_18")),
-        )
-    },
+    RequestedDocument(
+        kind.doctype,
+        when (kind) {
+            ReaderDocKind.PID -> mapOf("eu.europa.ec.eudi.pid.1" to listOf("family_name", "given_name", "birth_date", "nationality"))
+            // portrait is an ISO 18013-5 mandatory element — the reader verifies the holder's photo.
+            ReaderDocKind.MDL -> mapOf("org.iso.18013.5.1" to listOf("family_name", "given_name", "portrait", "driving_privileges"))
+            // AV Profile §A.4: age_over_18 is the only attribute a Proof of Age attestation carries.
+            ReaderDocKind.AGE -> mapOf("eu.europa.ec.av.1" to listOf("age_over_18"))
+            // ISO 23220-4 Annex C: identity claims live in the generic 23220-2 namespace.
+            ReaderDocKind.PHOTOID -> mapOf("org.iso.23220.1" to listOf("family_name", "given_name", "birth_date", "portrait", "age_over_18"))
+        },
+    ),
 )
 
 /** Holder present flow phases: waiting for a reader → reviewing its request → sending → terminal. */
@@ -473,6 +464,7 @@ private fun ProximityDocCard(doc: RequestedDocumentView, credsById: Map<String, 
         Row(Modifier.fillMaxWidth().padding(16.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleSmall, color = if (cred != null) c.ink else c.inkFaint)
+                Text(doc.docType, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(if (cred != null) "Required" else "No matching document", style = MaterialTheme.typography.bodySmall, color = if (cred != null) c.inkMuted else c.danger)
             }
         }
@@ -662,10 +654,8 @@ fun ProximityReaderScreen(wallet: Wallet) {
             )
         }
         SectionLabel("Document to request")
-        ReaderDocKind.entries.chunked(2).forEach { rowKinds ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                rowKinds.forEach { k -> DocKindChip(k, k == kind, Modifier.weight(1f)) { kind = k } }
-            }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ReaderDocKind.entries.forEach { k -> DocKindChip(k, k == kind) { kind = k } }
         }
 
         PrimaryButton("Scan holder's QR", onClick = {
@@ -694,20 +684,20 @@ fun ProximityReaderScreen(wallet: Wallet) {
     }
 }
 
-/** A selectable pill for the reader's document-type picker. */
+/** A selectable row for the reader's document-type picker: friendly name + the exact DocType it requests. */
 @Composable
-private fun DocKindChip(kind: ReaderDocKind, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun DocKindChip(kind: ReaderDocKind, selected: Boolean, onClick: () -> Unit) {
     val c = WalletTheme.colors
     val shape = RoundedCornerShape(10.dp)
-    Box(
-        modifier.clip(shape)
+    Column(
+        Modifier.fillMaxWidth().clip(shape)
             .background(if (selected) c.brand.copy(alpha = 0.08f) else c.card)
             .border(if (selected) 1.5.dp else 1.dp, if (selected) c.brand else c.cardBorder, shape)
             .clickable { onClick() }
-            .padding(vertical = 10.dp),
-        contentAlignment = Alignment.Center,
+            .padding(horizontal = 14.dp, vertical = 9.dp),
     ) {
-        Text(kind.label, style = MaterialTheme.typography.labelLarge, color = if (selected) c.brand else c.inkBody)
+        Text(kind.label, style = MaterialTheme.typography.labelLarge, color = if (selected) c.brand else c.ink)
+        Text(kind.doctype, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -716,7 +706,10 @@ private fun ReaderResultCard(doc: VerifiedDocument) {
     val c = WalletTheme.colors
     WalletCard(padding = PaddingValues(0.dp)) {
         Row(Modifier.fillMaxWidth().padding(16.dp, 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(docTypeLabel(doc.docType), style = MaterialTheme.typography.titleSmall, color = c.ink, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text(docTypeLabel(doc.docType), style = MaterialTheme.typography.titleSmall, color = c.ink)
+                Text(doc.docType, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             TrustBadge(doc.deviceAuthenticated, trustedText = "Verified", untrustedText = "Unverified")
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))

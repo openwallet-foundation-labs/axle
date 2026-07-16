@@ -24,7 +24,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -49,7 +48,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hopae.eudi.demo.ui.ClaimImageRow
 import com.hopae.eudi.demo.ui.credFormatLabel
-import com.hopae.eudi.demo.ui.credIsMdl
 import com.hopae.eudi.demo.ui.credKicker
 import com.hopae.eudi.demo.ui.credTitle
 import com.hopae.eudi.demo.ui.isImageClaim
@@ -71,7 +69,6 @@ import com.hopae.eudi.wallet.spi.CredentialFormat
 fun DocumentDetailScreen(
     cred: Credential,
     onBack: () -> Unit,
-    onPresentProximity: (() -> Unit)?,
     onDelete: () -> Unit,
 ) {
     val c = WalletTheme.colors
@@ -143,22 +140,8 @@ fun DocumentDetailScreen(
             SectionLabel("Metadata")
             ClaimsCard(cred, metadata, reveal)
         }
-
-        // Proximity is the one genuinely holder-initiated present action (show *this* mDL over BLE/NFC).
-        // Cross-device / QR presentation is request-driven — it starts by scanning the verifier from Home.
-        // (Delete lives in the top-right overflow menu.)
-        onPresentProximity?.let {
-            Spacer(Modifier.height(4.dp))
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.brand)
-                    .clickable { it() }.padding(vertical = 15.dp),
-                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.Sensors, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(9.dp))
-                Text("Present via proximity", style = MaterialTheme.typography.labelLarge, color = Color.White)
-            }
-        }
+        // All presenting is request-driven: cross-device/QR and proximity both start from Home (the
+        // Proximity quick action / scanning the verifier). Delete lives in the top-right overflow menu.
     }
 
     if (confirmDelete) {

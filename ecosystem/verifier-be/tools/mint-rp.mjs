@@ -200,6 +200,18 @@ async function createRelyingParty(token) {
             meta: { vct_values: ['urn:eudi:pid:1'] },
             claim: [['given_name'], ['family_name'], ['birthdate']].map((path) => ({ path })),
           },
+          {
+            // Proof of Age (EU Age Verification Profile): DocType == namespace; age_over_18 is the only attribute.
+            format: 'mso_mdoc',
+            meta: { doctype_value: 'eu.europa.ec.av.1' },
+            claim: [['eu.europa.ec.av.1', 'age_over_18']].map((path) => ({ path })),
+          },
+          {
+            // Photo ID (ISO/IEC TS 23220-4 Annex C): identity claims live in the generic 23220-2 namespace.
+            format: 'mso_mdoc',
+            meta: { doctype_value: 'org.iso.23220.photoid.1' },
+            claim: [['org.iso.23220.1', 'family_name'], ['org.iso.23220.1', 'given_name'], ['org.iso.23220.1', 'birth_date'], ['org.iso.23220.1', 'age_over_18']].map((path) => ({ path })),
+          },
         ],
       },
     ],

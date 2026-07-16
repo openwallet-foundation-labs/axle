@@ -14,8 +14,9 @@ core that builds and tests on plain Linux. New to EUDI? Start with **[Concepts](
 - **Dependency-injected, no framework.** The core is pure and platform-agnostic. Every platform capability
   — secure-key hardware, storage, HTTP, Bluetooth/NFC — is a small **port** you supply an **adapter** for
   (plain constructor injection). Swap any piece; test the core on Linux.
-- **Batteries included, not required.** Production **Android adapters** live in `android/` — use them as-is,
-  or as a reference for your own. A full **Android demo wallet** (Jetpack Compose) is in `demo/`.
+- **Batteries included, not required.** Production **Android adapters** (`android/`) and **iOS adapters**
+  (`ios/`) implement every port — use them as-is or as a reference for your own. Full demo wallets ship for
+  both: **Android** (Jetpack Compose) in `demo/`, **iOS** (SwiftUI, *Axle Wallet*) in `demo-ios/`.
 - **Full scratch, standards-first.** The EU reference wallet is an *interop target, not a dependency*. Every
   layer — CBOR/COSE, SD-JWT VC, ISO mdoc, OpenID4VCI/VP, X.509 trust, Token Status List — is implemented
   in-house against the source specifications (see **[SPEC-MATRIX.md](SPEC-MATRIX.md)** and the
@@ -36,8 +37,9 @@ against real trusted-list-anchored trust:
 | **RP Registrar** | https://demo-registrar.vercel.app/ | Registers relying parties; issues WRPAC/WRPRC (ETSI TS 119 475) |
 | **Trusted List** | https://trusted-list.vercel.app/ | Scheme Operator — JAdES-signed trust lists (ETSI TS 119 602) |
 
-The demo wallet in `demo/` is pre-wired to these. Build it (`cd demo && ./gradlew :app:assembleDebug`) or
-see **[demo/RELEASE.md](demo/RELEASE.md)** for signed AAB + Play internal-testing distribution.
+Both demo wallets are pre-wired to these — Android in `demo/` (`cd demo && ./gradlew :app:assembleDebug`; see
+**[demo/RELEASE.md](demo/RELEASE.md)** for signed AAB + Play distribution) and iOS in `demo-ios/` (open
+`demo-ios/AxleWallet/AxleWallet.xcodeproj` in Xcode 26+ and run on an iOS 26 device).
 
 ## Repository layout
 
@@ -47,7 +49,8 @@ see **[demo/RELEASE.md](demo/RELEASE.md)** for signed AAB + Play internal-testin
 | `swift/` | Swift package mirroring the Kotlin modules 1:1 (no Apple-framework imports; Linux-buildable) |
 | `android/` | Android platform-adapter presets (`com.hopae.eudi.android:core`/`proximity`/`dcapi`/`attestation`) — Keystore/StrongBox SecureArea, file storage, OkHttp, BLE + NFC transports, DC API glue, Play Integrity attestation |
 | `demo/` | Android wallet app (Compose) consuming `kotlin/` + `android/` — the reference assembly; release guide in [`demo/RELEASE.md`](demo/RELEASE.md) |
-| `ios/` | iOS platform plan (SecureEnclave adapter + DC API) — not yet implemented |
+| `ios/` | iOS platform-adapter package (SwiftPM: `AppleCore` / `AppleProximity` / `AppleDcApi` / `AppleAttestation`) — Secure Enclave `SecureArea`, Keychain storage, URLSession, ISO 18013-5 BLE transports, Digital Credentials API provider extension, App Attest attestation |
+| `demo-ios/` | iOS wallet app (SwiftUI, *Axle Wallet*) consuming `swift/` + `ios/` — the reference iOS assembly |
 | `docs/` | Docusaurus developer docs (English + 한국어) — [see below](#documentation) |
 | `ecosystem/` | The reference sandbox services (issuer, verifier, trusted list) — [see below](#the-reference-ecosystem) |
 | `wallet-provider/` | NestJS Wallet Provider backend — Wallet Unit Attestation (WUA) + key attestation + Play Integrity |
@@ -73,12 +76,15 @@ The core is pure; the host injects capabilities. Assembling a wallet is: pick ad
         │   Ports (SPI)                │  SecureArea · StorageDriver · HttpTransport
         │                              │  ProximityTransport · WalletAttestationProvider
         └────┬─────────────────────────┘
-   adapters  │  ← android/ presets (or your own)
-        Keystore · files · OkHttp · BLE/NFC · Play Integrity
+   adapters  │  ← android/ or ios/ presets (or your own)
+    android:  Keystore · files · OkHttp · BLE/NFC · Play Integrity
+    ios:      Secure Enclave · Keychain · URLSession · BLE · DC API ext · App Attest
 ```
 
-The [`android/`](android/) adapters are a ready-made preset; [`demo/app/.../DemoWallet.kt`](demo/app/src/main/kotlin/com/hopae/eudi/demo/DemoWallet.kt)
-is the canonical "assemble from adapters + config" example. Full walkthrough in
+The [`android/`](android/) and [`ios/`](ios/) adapters are ready-made presets;
+[`demo/app/.../DemoWallet.kt`](demo/app/src/main/kotlin/com/hopae/eudi/demo/DemoWallet.kt) and
+[`demo-ios/.../DemoWallet.swift`](demo-ios/AxleWallet/AxleWallet/DemoWallet.swift) are the canonical
+"assemble from adapters + config" examples. Full walkthrough in
 [`docs/` → Getting Started](docs/docs/getting-started.mdx) and [Architecture](docs/docs/architecture.md).
 
 ## Quick start
@@ -149,7 +155,8 @@ Full developer documentation (guides + API reference, Kotlin + Swift examples, E
 
 - **[Concepts](docs/docs/concepts.mdx)** — EUDI/eIDAS vocabulary for developers new to the domain
 - **[Architecture](docs/docs/architecture.md)** · **[Getting Started](docs/docs/getting-started.mdx)** — assemble the SDK from ports & adapters
-- **Guides** — [Issuance](docs/docs/guides/issuance.mdx) · [Presentation](docs/docs/guides/presentation.mdx) · [Digital Credentials API](docs/docs/guides/dc-api.md) · [Proximity](docs/docs/guides/proximity.mdx) · [Trust & Audit](docs/docs/guides/trust-and-audit.mdx)
+- **Guides** — [Issuance](docs/docs/guides/issuance.mdx) · [Presentation](docs/docs/guides/presentation.mdx) · [Digital Credentials API — Android](docs/docs/guides/dc-api.md) · [Digital Credentials API — iOS](docs/docs/guides/dc-api-ios.md) · [Proximity](docs/docs/guides/proximity.mdx) · [Trust & Audit](docs/docs/guides/trust-and-audit.mdx)
+- **Platform adapters** — [Android adapter modules](docs/docs/guides/android-adapters.mdx) · [iOS adapter modules](docs/docs/guides/ios-adapters.mdx) — and the demo assemblies: [Android](docs/docs/android-demo.md) · [iOS](docs/docs/ios-demo.md)
 - **Reference** — [Facade](docs/docs/reference/facade.md) · [Ports](docs/docs/reference/ports.mdx) · [Specifications](docs/docs/reference/specs.md)
 
 ```bash
@@ -178,8 +185,9 @@ See [`ecosystem/README.md`](ecosystem/README.md) for the trust model overview.
 
 ## Status
 
-Reference / sandbox implementation for eIDAS 2.0 EUDI interoperability. The Kotlin and Swift cores and the
-Android adapters are functional and tested (CI runs both suites); iOS adapters are planned. The hosted
+Reference / sandbox implementation for eIDAS 2.0 EUDI interoperability. The Kotlin and Swift cores, the
+Android adapters + demo, and the iOS adapters + demo (*Axle Wallet*) are functional and device-tested. CI
+runs both core suites on Linux; the Apple / Android adapter layers build under Xcode / Gradle. The hosted
 services above are a **non-production sandbox**.
 
 ## License

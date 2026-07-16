@@ -21,6 +21,13 @@ The wallet answers three DC API protocols, all verified on-device against `verif
 Both entry points are cross-platform (identical in Kotlin and Swift). Everything else on this page is
 Android provider plumbing.
 
+:::note iOS is different
+On iOS the wallet is a **provider app extension** (Apple's IdentityDocumentServices), the OS owns matching
+(no WASM matcher), and the platform routes **only `org-iso-mdoc`** to third-party wallets — OpenID4VP over
+the browser DC API is Apple-unsupported. See the dedicated **[Digital Credentials API — iOS](./dc-api-ios)**
+guide.
+:::
+
 :::tip This plumbing is packaged
 The `android/dcapi` adapter module ships this end to end — `DcApiRegistrar` (Credential Manager
 registration + matcher), `DcApiRequest` / `DcApiResult` (envelope parsing + marshalling), and

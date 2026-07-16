@@ -1,0 +1,188 @@
+---
+title: iOS 어댑터 모듈
+---
+
+# iOS 어댑터 모듈
+
+Axle SDK는 **헤드리스이며 이식 가능**합니다. 크리덴셜·키·발급·제시 로직 전부를 순수 Kotlin/Swift 코어가
+처리하고 플랫폼 의존성이 없습니다. 플랫폼 종속적인 것은 모두 호스트가 구현해 `Wallet.create(config:ports:)`로
+주입하는 **포트**(SPI)입니다 — [Ports](../reference/ports)와 [Architecture](../architecture)를 참고하세요.
+
+iOS에서는 이 포트들의 실제 구현을 제공해야 합니다: Secure Enclave 키, 바이트 저장소, HTTP, 그리고
+(사용한다면) 근접 제시·Digital Credentials API·Wallet Provider 연동입니다. 저장소는 이를 처음부터 작성할
+필요가 없도록 `ios/` 아래에 **미리 만들어 둔 프리셋**을 제공합니다.
+
+:::note 이것은 SDK가 아니라 프리셋입니다
+`ios/` 모듈은 **재사용 가능한 어댑터 레이어**로, 이식 가능한 Swift 코어(`swift/`, 패키지 `EudiWalletSDK`)에
+의존하고 그 포트를 Apple 프레임워크에 대해 구현하는 SwiftPM 패키지(`EudiWalletApple`)입니다. 이 패키지는
+**분리**되어 있어 코어의 Linux CI가 `Security` / `CoreBluetooth` / `IdentityDocumentServices`를 절대
+임포트하지 않습니다. 제품을 그대로 의존하거나, 포크하거나, 참조 구현으로 읽고 같은 SPI에 대해 직접 작성하세요.
+SPI 타입은 **`WalletAPI`** 모듈에 있습니다.
+:::
+
+전체 엔드투엔드 조립(트러스트 앵커, attestation, DC API 익스텐션, 빌드)은 [iOS demo](../ios-demo) 페이지를
+참고하세요. 이 페이지는 모듈별 레퍼런스로, 각 모듈에 대해 iOS가 요구하는 것, 채우는 포트, 프리셋이 구현한 것,
+그리고 그대로 쓸지 커스터마이즈할지의 기준을 다룹니다.
+
+플랫폼 최소 버전: `.iOS(.v26)`(DC API가 iOS 26을 요구). 패키지는 `android/`를 1:1로 미러링합니다.
+
+## 모듈 개요
+
+| 모듈 (SwiftPM 제품) | 채우는 SPI 포트 | 사용하는 Apple 기능 | 핵심 타입 | Android 대응 |
+|---|---|---|---|---|
+| `AppleCore` | `SecureArea`, `StorageDriver`, `HttpTransport`, `TransactionLogStore`, `WalletLogger` | Secure Enclave, Keychain, URLSession, App Group 컨테이너 | `SecureEnclaveSecureArea`, `KeychainStorageDriver`, `URLSessionTransport`, `FileTransactionLogStore`, `OSLogWalletLogger`, `AppleTrust` | `core` |
+| `AppleProximity` | `ProximityTransport` | Core Bluetooth (central + peripheral) | `BlePeripheralTransport`, `BleCentralTransport`, `Ble` | `proximity` |
+| `AppleDcApi` | *(없음 — 파사드 위 프로바이더 글루)* | IdentityDocumentServices | `DcApiRegistrar`, `DcApiResponder`, `DcApiReaderTrust` | `dcapi` |
+| `AppleAttestation` | `WalletAttestationProvider` | App Attest (`DCAppAttestService`) | `WalletProviderAttestation`(재익스포트), `AppAttestIntegrityTokenProvider` | `attestation` |
+
+모든 것은 `WalletPorts`를 통해 호스트가 주입합니다 — DI 프레임워크는 없습니다. `WalletClock`과 `Rng`는
+SDK 기본값을 쓰고, `WalletLogger`는 앱이 제공합니다(`OSLogWalletLogger`는 바로 쓸 수 있는 `os.Logger`
+어댑터이며, 자체 온스크린/파일 로거로 라우팅해도 됩니다).
+
+## `AppleCore`
+
+**요구되는 동작.** 모든 iOS 지갑은 필수 포트 3개와, 영속 감사 로그를 위한 `TransactionLogStore`를
+제공해야 합니다:
+
+- `SecureArea` — 개인키 보관. 키는 시큐어 경계를 절대 벗어나지 않습니다.
+- `StorageDriver` — collection + key로 키잉된 바이트 영속, 트랜잭션 스코프 포함.
+- `HttpTransport` — **`followRedirects`를 준수**하는 HTTP 실행(OpenID4VCI/VP 플로우가 리다이렉트를
+  가로챕니다).
+- `TransactionLogStore` — 추가 전용 감사 영속.
+
+**프리셋이 구현한 것.**
+
+- **`SecureEnclaveSecureArea(accessGroup:)`** → `SecureArea`. Secure Enclave 내의 하드웨어 바인딩
+  **P-256** 키입니다(`SecKey`, 하나의 키가 ECDSA 서명과 ECDH 양쪽에 쓰임). Android 대비 한 가지 유의점:
+  SE는 P-256만 지원하므로 `capabilities.algorithms = [.es256]`입니다. DC API 익스텐션이 같은 키로 서명할
+  수 있도록 **공유 keychain access group**을 넘기세요(생성 시 고정 — [DC API 가이드](./dc-api-ios#2-shared-key-custody-prerequisite) 참고).
+- **`KeychainStorageDriver(accessGroup:)`** → `StorageDriver`. 공유 access group 아래의 generic-password
+  Keychain 항목입니다. Keychain에는 트랜잭션이 없으므로 트랜잭션 스코프는 에뮬레이트됩니다.
+- **`URLSessionTransport`** → `HttpTransport`. `URLSession` 기반으로, 요청별 리다이렉트 정책을 적용합니다.
+- **`FileTransactionLogStore(appGroup:)`** → `TransactionLogStore`. **App Group** 컨테이너에 NDJSON으로
+  저장하므로, 활동 기록이 재실행 후에도 유지되고 익스텐션에서 이뤄진 DC API 제시가 앱에 나타납니다.
+- **`AppleTrust.resolve(...)`** — JAdES 신뢰 목록에서 CA 앵커를 가져와 `TrustConfig`로 만들어(디스크 캐시,
+  stale 폴백), 지갑이 발급자 / 검증자 / 레지스트라를 검증할 수 있게 합니다.
+
+```swift
+let secureArea = SecureEnclaveSecureArea(accessGroup: AppleSharedGroups.keychainAccessGroup)
+let storage    = KeychainStorageDriver(accessGroup: AppleSharedGroups.keychainAccessGroup)
+let trust      = await AppleTrust.resolve(http: URLSessionTransport(), cacheDir: cacheDir)
+
+let wallet = Wallet.create(
+  config: WalletConfig(trust: TrustConfig(issuerAnchorsDer: trust.issuer,
+                                          readerAnchorsDer: trust.reader,
+                                          registrarAnchorsDer: trust.registrar)),
+  ports: WalletPorts(secureAreas: [secureArea], storage: storage,
+                     http: URLSessionTransport(), transactionLogStore: FileTransactionLogStore()))
+```
+
+**그대로 쓸지 vs 커스터마이즈.** 표준 하드웨어 보관이면 `SecureEnclaveSecureArea`를 사용하세요. 외부 시큐어
+엘리먼트, 원격 WSCD, 또는 서명마다 생체 인증 게이팅이 필요하면 **커스터마이즈**(직접 `SecureArea` 작성)하세요.
+`KeychainStorageDriver`는 그대로 사용하고, 암호화된 앱 컨테이너 저장소가 필요하면 **커스터마이즈**하세요. 커스텀
+어댑터는 테스트 킷의 `SecureAreaContract.verify(_:)` / `StorageDriverContract.verify(_:)`로 자격을
+검증하세요.
+
+## `AppleProximity`
+
+**요구되는 동작.** ISO/IEC 18013-5 대면 retrieval에는 무선 위의 양방향 프레임 메시지 채널이 필요합니다 —
+`ProximityTransport` 포트(`send` / `receive` / `close`, 그리고 transport가 QR engagement에 BLE carrier를
+광고할 수 있도록 `retrievalMethods()`)입니다. 이 포트는 **세션마다** 새로 만듭니다: 각
+`wallet.proximity.present(_:)` / `wallet.reader.read(...)` 호출에 새 transport를 넘기세요.
+
+**프리셋이 구현한 것.** Core Bluetooth ISO 18013-5 BLE 스택으로, 두 역할과 두 모드를 모두 지원합니다(Android
+데모를 상대로 폰-투-폰 device-verified 검증됨):
+
+- **`BlePeripheralTransport`** → **peripheral-server** 모드의 holder(`.holder`), 또는 **central-client**
+  모드의 reader(`.reader`, §8.3.3.1.1.4 Ident 특성을 노출).
+- **`BleCentralTransport`** → **peripheral-server** 모드의 reader(`.reader`), 또는 **central-client** 모드의
+  holder(`.holder`, Ident 검증).
+- **`Ble`** — ISO 18013-5 특성 UUID, 청킹, 페이싱.
+
+```swift
+// BLE peripheral-server 위의 Holder:
+let transport = BlePeripheralTransport.holder(logger: log)
+try await transport.start()
+let session = wallet.proximity.present(transport)   // engagement이 BLE UUID를 담음
+
+// Reader:
+let documents = try await wallet.reader.read(BleCentralTransport.reader(engagement: engagement), ...)
+```
+
+:::note Write-Without-Response 페이싱
+BLE Write-Without-Response에는 ATT 흐름 제어가 없어서, 여러 청크를 몰아서 쓰면 컨트롤러 버퍼가 조용히 넘쳐
+유실됩니다. 두 transport 모두 각 청크가 자기 연결 이벤트에 안착하도록 청크를 페이싱합니다(~40 ms) — 잘
+알려진 ISO 18013-5 BLE 위험입니다. NFC HCE engagement은 범위 밖입니다(지역 제한).
+:::
+
+**그대로 쓸지 vs 커스터마이즈.** Core Bluetooth 위 ISO 18013-5 BLE면 프리셋을 사용하세요. 다른 transport
+전략이면 **커스터마이즈**(직접 `ProximityTransport` 구현)하세요 — 최소 transport는 `send` / `receive` /
+`close`만 있으면 됩니다.
+
+## `AppleDcApi`
+
+**요구되는 동작.** [W3C Digital Credentials API](https://w3c-fedid.github.io/digital-credentials/)는
+브라우저가 iOS의 **IdentityDocumentServices**를 통해 지갑을 호출하게 해줍니다. Android의 `dcapi`처럼, 이
+모듈도 **`WalletPorts` 포트를 채우지 않습니다** — 크리덴셜 로직은 이미 파사드에 있고
+(`wallet.proximity.respondDcApiMdoc`), 이 모듈은 iOS **프로바이더 글루**입니다.
+
+**프리셋이 구현한 것.**
+
+- **`DcApiRegistrar`** — 지갑의 mdoc 크리덴셜을 `IdentityDocumentProviderRegistrationStore`에 등록하고
+  오래된 것을 정리합니다(iOS는 **matcher가 필요 없음** — 매칭은 OS가 소유).
+- **`DcApiResponder`** — Apple의 원시 web-presentment 요청을 `respondDcApiMdoc`을 통해 HPKE로 봉인된
+  `DeviceResponse` `Data`로 변환하며, origin 정규화와 동의 일관성 검사를 수행합니다.
+- **`DcApiReaderTrust`** — reader 앵커를 익스텐션과 공유하고, 동의 화면의 *Verified* 배지를 위해 reader
+  체인(`SecTrust`)을 검증합니다.
+
+```swift
+if #available(iOS 26.0, *) { await DcApiRegistrar.sync(wallet: wallet) }   // 크리덴셜 변경 시
+```
+
+프로바이더 **익스텐션 타깃**(`@main IdentityDocumentProvider` + 동의 뷰)과 엔타이틀먼트는 여전히 앱이
+소유합니다. iOS는 여기로 `org-iso-mdoc`만 라우팅합니다. 전체 워크스루는
+**[Digital Credentials API — iOS](./dc-api-ios)** 가이드에 있습니다.
+
+## `AppleAttestation`
+
+**요구되는 동작.** 발급 중 attestation 기반 클라이언트 인증(HAIP)을 위해 SDK는 `WalletAttestationProvider`
+포트를 통해 Wallet Provider 백엔드와의 연동이 필요합니다 — 클라이언트 인증용 Wallet Unit Attestation(WUA)과
+발급별 key attestation입니다. **선택 사항**: 공개 `client_id`를 받는 발급자에 대한 발급은 이것 없이도
+동작합니다.
+
+**프리셋이 구현한 것.**
+
+- **`WalletProviderAttestation`**(코어 `WalletProvider` 모듈에서 재익스포트) → `wallet-provider/` 백엔드
+  형태(`GET /nonce`, `POST /wallet-instances`, …)와 통신하며, 인스턴스를 한 번 등록하고 인스턴스 키의 소유
+  증명을 주입된 `SecureArea`로 서명합니다.
+- **`AppAttestIntegrityTokenProvider`** → 기기 무결성 소스로, Apple **App Attest**(`DCAppAttestService`)를
+  사용합니다 — 실제 하드웨어에서 동작하는 정품·미변조 앱 인스턴스 — 그리고 시뮬레이터용 / App Attest를 사용할
+  수 없을 때를 위한 `DevIntegrityTokenProvider` 폴백을 제공합니다.
+
+```swift
+let walletAttestation = WalletProviderAttestation(
+  baseUrl: "https://your-wallet-provider.example/wp",
+  http: http, secureArea: secureArea,
+  integrity: AppAttestIntegrityTokenProvider(),   // App Attest, dev 폴백
+  clientId: "wallet-dev",                          // IssuanceConfig.clientId와 동일해야 함
+  storage: storage)
+// → WalletPorts(..., walletAttestation: walletAttestation)
+```
+
+:::note App Attest vs. Play Integrity
+`wallet-provider/` 백엔드는 플랫폼 토큰을 플랫폼별로 검증합니다: Android는 Play Integrity, iOS는
+**App Attest**(Apple의 App Attest CA에 뿌리를 둔 로컬 인증서 체인 검사로, Apple 왕복 없음)입니다. 백엔드가
+올바른 검증기로 라우팅하도록 `platform: "ios"`를 보내세요(어댑터가 그렇게 합니다).
+:::
+
+**그대로 쓸지 vs 커스터마이즈.** 백엔드가 참조 `wallet-provider/` API와 일치하면
+`WalletProviderAttestation`을 사용하세요. 다른 attestation 방식이면 **`IntegrityTokenProvider`를
+교체**하세요.
+
+## 직접 어댑터 작성하기
+
+이 어댑터들은 모두 같은 SPI의 자체 구현으로 대체할 수 있습니다 — SDK 코어는 바뀌지 않습니다. `WalletAPI`의
+프로토콜을 구현하고, `WalletPorts`로 주입한 뒤, 테스트 킷의 공유 **계약 테스트 스위트**(`SecureAreaContract.verify(_:)`,
+`StorageDriverContract.verify(_:)`)로 자격을 검증하세요 — 소프트웨어 참조 어댑터에 대해 Linux CI에서 도는
+것과 동일한 검사입니다. [Ports](../reference/ports), [Architecture](../architecture), 그리고
+[Getting started](../getting-started#your-own-adapters)를 참고하세요.

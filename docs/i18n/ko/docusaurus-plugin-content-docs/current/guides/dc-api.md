@@ -20,6 +20,12 @@ title: Digital Credentials API (Android)
 
 두 진입점 모두 크로스플랫폼입니다 (Kotlin·Swift 동일). 이 페이지의 나머지는 Android 프로바이더 배선입니다.
 
+:::note iOS는 다릅니다
+iOS에서는 지갑이 **프로바이더 앱 익스텐션**(Apple IdentityDocumentServices)이고, 매칭은 OS가 담당하며(WASM 매처 없음),
+플랫폼은 서드파티 지갑에 **`org-iso-mdoc`만** 라우팅합니다 — 브라우저 DC API를 통한 OpenID4VP는 Apple이 지원하지 않습니다.
+전용 **[Digital Credentials API — iOS](./dc-api-ios)** 가이드를 참고하세요.
+:::
+
 :::note 왜 커스텀 matcher인가
 Credential Manager는 선택창을 띄우기 전에 **matcher**(작은 WASM 프로그램)를 실행해 들어온 요청에 대해
 크리덴셜을 필터링합니다. androidx `OpenId4VpRegistry`가 번들하는 matcher는 (`registry:1.0.0-alpha04`

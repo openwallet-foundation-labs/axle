@@ -78,16 +78,29 @@ reference implementation for your own platform:
 | `WalletProviderAttestation`   | `WalletAttestationProvider` | `attestation` |
 
 `WalletClock` / `Rng` use the SDK defaults; `WalletLogger` is intentionally app-supplied (real logging
-is app-specific). For iOS the same ports are implemented against the Secure Enclave / URLSession.
+is app-specific).
+
+The `ios/` package (SwiftPM `EudiWalletApple`) is the 1:1 twin, implementing the same ports against Apple
+frameworks:
+
+| Adapter (`ios/`)                                  | Implements                  | Module           |
+| ------------------------------------------------- | --------------------------- | ---------------- |
+| `SecureEnclaveSecureArea`                         | `SecureArea`                | `AppleCore`      |
+| `KeychainStorageDriver`                           | `StorageDriver`             | `AppleCore`      |
+| `URLSessionTransport`                             | `HttpTransport`             | `AppleCore`      |
+| `FileTransactionLogStore`                         | `TransactionLogStore`       | `AppleCore`      |
+| `BlePeripheralTransport` / `BleCentralTransport`  | `ProximityTransport`        | `AppleProximity` |
+| `WalletProviderAttestation`                       | `WalletAttestationProvider` | `AppleAttestation` |
 
 **Rolling your own.** An adapter qualifies by passing the shared **contract test suites** shipped in the
 test kit (`SecureAreaContract.verify(area)`, `StorageDriverContract.verify(driver)`) — the same checks
 run on Linux CI against `SoftwareSecureArea` / `InMemoryStorageDriver` and in the device lab against the
 real adapters. See [Getting started](./getting-started#your-own-adapters).
 
-**Presets vs. demo.** `android/` is the reusable adapter layer your app ships against;
-`demo/` is a full debug wallet (Jetpack Compose) that assembles those adapters end to end — see
-[Android adapters & demo](./android-demo).
+**Presets vs. demo.** `android/` and `ios/` are the reusable adapter layers your app ships against;
+`demo/` (Jetpack Compose) and `demo-ios/` (SwiftUI, *Axle Wallet*) are full debug wallets that assemble
+those adapters end to end — see [Android adapters & demo](./android-demo) and
+[iOS adapters & demo](./ios-demo).
 
 ## Modules
 

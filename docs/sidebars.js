@@ -15,7 +15,9 @@ const sidebars = {
         'guides/issuance',
         'guides/presentation',
         'guides/dc-api',
+        'guides/dc-api-ios',
         'guides/android-adapters',
+        'guides/ios-adapters',
         'guides/proximity',
         'guides/trust-and-audit',
       ],
@@ -26,6 +28,7 @@ const sidebars = {
       items: ['reference/facade', 'reference/ports', 'reference/specs'],
     },
     'android-demo',
+    'ios-demo',
   ],
 };
 

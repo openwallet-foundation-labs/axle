@@ -1,0 +1,186 @@
+---
+title: iOS adapter modules
+---
+
+# iOS adapter modules
+
+The Axle SDK is **headless and portable**: the core does all credential, key, issuance, and presentation
+logic in pure Kotlin/Swift and has no platform dependencies. Everything platform-specific is a **port**
+(SPI) the host implements and injects at `Wallet.create(config:ports:)` — see
+[Ports](../reference/ports) and [Architecture](../architecture).
+
+On iOS that means supplying real implementations of those ports: Secure Enclave keys, byte storage, HTTP,
+and (when you use them) proximity, the Digital Credentials API, and a Wallet Provider link. The repository
+ships **ready-made presets** under `ios/` so you don't write them from scratch.
+
+:::note These are presets, not the SDK
+The `ios/` modules are the **reusable adapter layer** — a SwiftPM package (`EudiWalletApple`) that depends
+on the portable Swift core (`swift/`, package `EudiWalletSDK`) and implements its ports against Apple
+frameworks. The package is kept **separate** so the core's Linux CI never imports `Security` /
+`CoreBluetooth` / `IdentityDocumentServices`. Depend on the products as-is, fork them, or read them as a
+reference and write your own against the same SPI. The SPI types live in the **`WalletAPI`** module.
+:::
+
+For a full end-to-end assembly (trust anchors, attestation, the DC API extension, build) see the
+[iOS demo](../ios-demo) page; this page is the per-module reference — for each module: what iOS requires,
+which port it fills, what the preset implements, and when to use it as-is vs. customize.
+
+Platform floor: `.iOS(.v26)` (the DC API needs iOS 26). The package mirrors `android/` 1:1.
+
+## Module overview
+
+| Module (SwiftPM product) | SPI port(s) filled | Apple capability used | Key types | Android twin |
+|---|---|---|---|---|
+| `AppleCore` | `SecureArea`, `StorageDriver`, `HttpTransport`, `TransactionLogStore`, `WalletLogger` | Secure Enclave, Keychain, URLSession, App Group container | `SecureEnclaveSecureArea`, `KeychainStorageDriver`, `URLSessionTransport`, `FileTransactionLogStore`, `OSLogWalletLogger`, `AppleTrust` | `core` |
+| `AppleProximity` | `ProximityTransport` | Core Bluetooth (central + peripheral) | `BlePeripheralTransport`, `BleCentralTransport`, `Ble` | `proximity` |
+| `AppleDcApi` | *(none — provider glue on the facade)* | IdentityDocumentServices | `DcApiRegistrar`, `DcApiResponder`, `DcApiReaderTrust` | `dcapi` |
+| `AppleAttestation` | `WalletAttestationProvider` | App Attest (`DCAppAttestService`) | `WalletProviderAttestation` (re-exported), `AppAttestIntegrityTokenProvider` | `attestation` |
+
+Everything is host-injected through `WalletPorts` — no DI framework. `WalletClock` and `Rng` use the SDK
+defaults; `WalletLogger` is app-supplied (`OSLogWalletLogger` is a ready `os.Logger` adapter, or route to
+your own on-screen/file logger).
+
+## `AppleCore`
+
+**Required behavior.** Every iOS wallet must supply the three required ports plus, for a persistent audit
+log, `TransactionLogStore`:
+
+- `SecureArea` — private-key custody; keys never leave the secure boundary.
+- `StorageDriver` — byte persistence keyed by collection + key, with a transaction scope.
+- `HttpTransport` — HTTP execution that **honours `followRedirects`** (the OpenID4VCI/VP flows intercept redirects).
+- `TransactionLogStore` — append-only audit persistence.
+
+**What the preset implements.**
+
+- **`SecureEnclaveSecureArea(accessGroup:)`** → `SecureArea`. Hardware-bound **P-256** keys in the Secure
+  Enclave (`SecKey`, one key serves both ECDSA signing and ECDH). One caveat vs. Android: the SE is P-256
+  only, so `capabilities.algorithms = [.es256]`. Pass the **shared keychain access group** so the DC API
+  extension can sign with the same keys (fixed at creation — see the [DC API guide](./dc-api-ios#2-shared-key-custody-prerequisite)).
+- **`KeychainStorageDriver(accessGroup:)`** → `StorageDriver`. Generic-password Keychain items under a
+  shared access group; a Keychain has no transactions, so the transaction scope is emulated.
+- **`URLSessionTransport`** → `HttpTransport`. `URLSession`-backed; applies the per-request redirect policy.
+- **`FileTransactionLogStore(appGroup:)`** → `TransactionLogStore`. NDJSON in the **App Group** container,
+  so activity survives relaunch and a DC API presentation made in the extension shows up in the app.
+- **`AppleTrust.resolve(...)`** — fetches the CA anchors from the JAdES trusted lists into a `TrustConfig`
+  (disk-cached, stale-fallback), so the wallet can verify issuers / verifiers / the registrar.
+
+```swift
+let secureArea = SecureEnclaveSecureArea(accessGroup: AppleSharedGroups.keychainAccessGroup)
+let storage    = KeychainStorageDriver(accessGroup: AppleSharedGroups.keychainAccessGroup)
+let trust      = await AppleTrust.resolve(http: URLSessionTransport(), cacheDir: cacheDir)
+
+let wallet = Wallet.create(
+  config: WalletConfig(trust: TrustConfig(issuerAnchorsDer: trust.issuer,
+                                          readerAnchorsDer: trust.reader,
+                                          registrarAnchorsDer: trust.registrar)),
+  ports: WalletPorts(secureAreas: [secureArea], storage: storage,
+                     http: URLSessionTransport(), transactionLogStore: FileTransactionLogStore()))
+```
+
+**Use as-is vs. customize.** Use `SecureEnclaveSecureArea` for standard hardware custody; **customize**
+(write your own `SecureArea`) for an external secure element, a remote WSCD, or per-signature biometric
+gating. Use `KeychainStorageDriver` as-is; **customize** for an encrypted app-container store. Qualify any
+custom adapter with `SecureAreaContract.verify(_:)` / `StorageDriverContract.verify(_:)` from the test kit.
+
+## `AppleProximity`
+
+**Required behavior.** ISO/IEC 18013-5 in-person retrieval needs a duplex framed-message channel over a
+radio — the `ProximityTransport` port (`send` / `receive` / `close`, plus `retrievalMethods()` so the
+transport can advertise its BLE carrier into the QR engagement). This port is **per-session**: pass a fresh
+transport to each `wallet.proximity.present(_:)` / `wallet.reader.read(...)` call.
+
+**What the preset implements.** A Core Bluetooth ISO 18013-5 BLE stack, both roles and both modes
+(phone-to-phone device-verified against the Android demo):
+
+- **`BlePeripheralTransport`** → holder in **peripheral-server** mode (`.holder`) or reader in
+  **central-client** mode (`.reader`, exposes the §8.3.3.1.1.4 Ident characteristic).
+- **`BleCentralTransport`** → reader in **peripheral-server** mode (`.reader`) or holder in
+  **central-client** mode (`.holder`, verifies Ident).
+- **`Ble`** — the ISO 18013-5 characteristic UUIDs, chunking, and pacing.
+
+```swift
+// Holder over BLE peripheral-server:
+let transport = BlePeripheralTransport.holder(logger: log)
+try await transport.start()
+let session = wallet.proximity.present(transport)   // engagement carries the BLE UUID
+
+// Reader:
+let documents = try await wallet.reader.read(BleCentralTransport.reader(engagement: engagement), ...)
+```
+
+:::note Write-without-response pacing
+BLE Write-Without-Response has no ATT flow control, so a bursted multi-chunk write silently overflows the
+controller buffer and drops. Both transports pace chunks (~40 ms) so each lands in its own connection
+event — a well-known ISO 18013-5 BLE hazard. NFC HCE engagement is out of scope (region-restricted).
+:::
+
+**Use as-is vs. customize.** Use the presets for ISO 18013-5 BLE on Core Bluetooth. **Customize**
+(implement `ProximityTransport`) for a different transport strategy — a minimal transport only needs
+`send` / `receive` / `close`.
+
+## `AppleDcApi`
+
+**Required behavior.** The [W3C Digital Credentials API](https://w3c-fedid.github.io/digital-credentials/)
+lets a browser invoke your wallet through iOS's **IdentityDocumentServices**. Like Android's `dcapi`, this
+fills **no `WalletPorts` port** — the credential logic is already in the facade
+(`wallet.proximity.respondDcApiMdoc`); this module is the iOS provider glue.
+
+**What the preset implements.**
+
+- **`DcApiRegistrar`** — registers the wallet's mdoc credentials with `IdentityDocumentProviderRegistrationStore`
+  and prunes stale ones (iOS needs **no matcher** — the OS owns matching).
+- **`DcApiResponder`** — turns Apple's raw web-presentment request into the HPKE-sealed `DeviceResponse`
+  `Data`, via `respondDcApiMdoc`, with origin normalization and the consent-consistency check.
+- **`DcApiReaderTrust`** — shares the reader anchors with the extension and validates the reader chain
+  (`SecTrust`) for the consent screen's *Verified* badge.
+
+```swift
+if #available(iOS 26.0, *) { await DcApiRegistrar.sync(wallet: wallet) }   // on credential change
+```
+
+You still own the provider **extension target** (`@main IdentityDocumentProvider` + your consent view) and
+the entitlements. iOS routes only `org-iso-mdoc` here. Full walkthrough in the
+**[Digital Credentials API — iOS](./dc-api-ios)** guide.
+
+## `AppleAttestation`
+
+**Required behavior.** For attestation-based client authentication during issuance (HAIP), the SDK needs a
+link to your Wallet Provider backend via the `WalletAttestationProvider` port — a Wallet Unit Attestation
+(WUA) for client auth and a per-issuance key attestation. **Optional**: issuance against issuers that
+accept a public `client_id` works without it.
+
+**What the preset implements.**
+
+- **`WalletProviderAttestation`** (re-exported from the core `WalletProvider` module) → talks to the
+  `wallet-provider/` backend shape (`GET /nonce`, `POST /wallet-instances`, …), registering the instance
+  once and signing the instance-key proof of possession with the injected `SecureArea`.
+- **`AppAttestIntegrityTokenProvider`** → the device-integrity source, using Apple **App Attest**
+  (`DCAppAttestService`) — a genuine, unmodified instance of your app on real hardware — with a
+  `DevIntegrityTokenProvider` fallback for the Simulator / when App Attest is unavailable.
+
+```swift
+let walletAttestation = WalletProviderAttestation(
+  baseUrl: "https://your-wallet-provider.example/wp",
+  http: http, secureArea: secureArea,
+  integrity: AppAttestIntegrityTokenProvider(),   // App Attest, dev fallback
+  clientId: "wallet-dev",                          // must equal IssuanceConfig.clientId
+  storage: storage)
+// → WalletPorts(..., walletAttestation: walletAttestation)
+```
+
+:::note App Attest vs. Play Integrity
+The `wallet-provider/` backend verifies the platform token per-platform: Play Integrity for Android,
+**App Attest** (a local certificate-chain check rooted in Apple's App Attest CA, no Apple round-trip) for
+iOS. Send `platform: "ios"` (the adapter does) so the backend routes to the right verifier.
+:::
+
+**Use as-is vs. customize.** Use `WalletProviderAttestation` when your backend matches the reference
+`wallet-provider/` API; **swap the `IntegrityTokenProvider`** for a different attestation scheme.
+
+## Writing your own adapter
+
+Any of these can be replaced with your own implementation of the same SPI — the SDK core doesn't change.
+Implement the protocol from `WalletAPI`, inject it through `WalletPorts`, and qualify it against the shared
+**contract test suites** in the test kit (`SecureAreaContract.verify(_:)`, `StorageDriverContract.verify(_:)`)
+— the same checks that run on Linux CI against the software reference adapters. See [Ports](../reference/ports),
+[Architecture](../architecture), and [Getting started](../getting-started#your-own-adapters).

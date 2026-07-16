@@ -68,7 +68,11 @@ struct CredentialClaimSections: View {
     private func claimsCard(_ items: [Claim]) -> some View {
         WalletCard(padding: .flush) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, claim in
-                WalletInfoRow(label: credClaimLabel(cred, claim.path), value: displayValue(claim))
+                if isImageClaim(claim.path), let image = claimImage(claim) {
+                    ClaimImageRow(label: credClaimLabel(cred, claim.path), image: image)
+                } else {
+                    WalletInfoRow(label: credClaimLabel(cred, claim.path), value: displayValue(claim))
+                }
             }
         }
     }
@@ -76,6 +80,46 @@ struct CredentialClaimSections: View {
     private func displayValue(_ claim: Claim) -> String {
         let raw = claim.value.display()
         return (isSensitiveClaim(claim.path) && !reveal) ? maskSensitive(raw) : raw
+    }
+}
+
+/// mdoc image-carrying elements (ISO 23220-2 / 18013-5: portrait, signature) arrive as base64url text —
+/// the SDK projects CBOR bstr that way for DCQL matching — so decode and render them as an image.
+private let imageElements: Set<String> = ["portrait", "enrolment_portrait_image", "signature_usual_mark"]
+
+private func isImageClaim(_ path: [String]) -> Bool {
+    guard let key = path.last?.lowercased() else { return false }
+    return imageElements.contains(key)
+}
+
+private func claimImage(_ claim: Claim) -> UIImage? {
+    var b64 = claim.value.display()
+        .replacingOccurrences(of: "-", with: "+")
+        .replacingOccurrences(of: "_", with: "/")
+    while b64.count % 4 != 0 { b64 += "=" }
+    guard let data = Data(base64Encoded: b64) else { return nil }
+    return UIImage(data: data)
+}
+
+/// A WalletInfoRow variant whose value is an image (mirrors android `ImageRow`).
+private struct ClaimImageRow: View {
+    let label: String
+    let image: UIImage
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 12) {
+                Text(label).font(WalletFont.bodySmall).foregroundStyle(WalletTheme.inkMuted)
+                Spacer(minLength: 12)
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 64, height: 84)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .padding(.horizontal, 16).padding(.vertical, 13)
+            Rectangle().fill(WalletTheme.divider).frame(height: 1)
+        }
     }
 }
 

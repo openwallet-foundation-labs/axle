@@ -181,7 +181,11 @@ enum MsoCodec {
             case let .text(t): text = t
             default: text = nil
             }
-            guard let s = text, let date = isoFormatter.date(from: s) else { throw MdocError("\(name) must be a tdate") }
+            // Accept tdate with OR without fractional seconds — issuers commonly emit `…​.SSSZ` (JS
+            // `Date().toISOString()`), which `ISO8601DateFormatter([.withInternetDateTime])` alone rejects.
+            guard let s = text, let date = isoFormatter.date(from: s) ?? isoFractionalFormatter.date(from: s) else {
+                throw MdocError("\(name) must be a tdate")
+            }
             return date
         }
 
@@ -200,6 +204,14 @@ enum MsoCodec {
     static let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    /// Fallback for tdates carrying fractional seconds (`…​.SSSZ`); `.withFractionalSeconds` *requires* them, so
+    /// it can't be merged into `isoFormatter` (which must still parse whole-second tdates).
+    static let isoFractionalFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 }

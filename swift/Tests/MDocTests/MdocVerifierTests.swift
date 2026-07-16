@@ -122,6 +122,31 @@ final class MdocVerifierTests: XCTestCase {
         do { _ = try await verifier.verify(try IssuerSigned.decode(bytes)); XCTFail("should reject expired") } catch is MdocError {}
     }
 
+    func testParsesFractionalSecondValidityDates() async throws {
+        // Issuers commonly emit MSO validityInfo tdates with fractional seconds (JS `Date().toISOString()` →
+        // `…​.SSSZ`). The MSO must still parse — regression: iOS mdoc showed every credential "not verified"
+        // because `ISO8601DateFormatter([.withInternetDateTime])` rejects fractional seconds (Android accepted them).
+        let area = SoftwareSecureArea()
+        let deviceKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256)).publicKey
+        func tdate(_ s: String) -> Cbor { .tagged(TAG_TDATE, .text(s)) }
+        let mso = Cbor.map([
+            (.text("version"), .text("1.0")),
+            (.text("digestAlgorithm"), .text("SHA-256")),
+            (.text("valueDigests"), .map([(.text(namespace), .map([]))])),
+            (.text("deviceKeyInfo"), .map([(.text("deviceKey"), CoseKey.encode(deviceKey))])),
+            (.text("docType"), .text(docType)),
+            (.text("validityInfo"), .map([
+                (.text("signed"), tdate("2026-01-01T00:06:11.123Z")),
+                (.text("validFrom"), tdate("2026-01-01T00:06:11.123Z")),
+                (.text("validUntil"), tdate("2035-12-31T23:59:59.999Z")),
+            ])),
+        ])
+        let parsed = try MsoCodec.parse(try CborEncoder.encode(mso))
+        XCTAssertEqual(MsoCodec.isoFractionalFormatter.date(from: "2035-12-31T23:59:59.999Z"), parsed.validUntil)
+        // whole-second tdates must still parse (the fallback must not have replaced the base formatter)
+        XCTAssertNotNil(MsoCodec.isoFormatter.date(from: "2026-01-01T00:00:00Z"))
+    }
+
     private func indexOf(_ haystack: [UInt8], _ needle: [UInt8]) -> Int? {
         guard needle.count <= haystack.count else { return nil }
         for i in 0...(haystack.count - needle.count) where Array(haystack[i..<i + needle.count]) == needle { return i }

@@ -193,6 +193,8 @@ export const CREDENTIAL_CONFIGS: CredentialConfig[] = [
           given_name: PERSON.given_name,
           family_name: PERSON.family_name,
           birth_date: PERSON.birth_date,
+          // ISO/IEC 18013-5 §7.2.1 Table 5: `portrait` is a mandatory mDL element (bstr facial image).
+          portrait: PORTRAIT_JPEG,
           issue_date: '2024-03-01',
           expiry_date: '2034-03-01',
           issuing_country: 'LU',

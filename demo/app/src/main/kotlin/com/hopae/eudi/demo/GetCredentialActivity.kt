@@ -10,6 +10,8 @@ import androidx.credentials.provider.PendingIntentHandler
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.hopae.eudi.demo.ui.credTitle
+import com.hopae.eudi.demo.ui.isImageClaim
+import com.hopae.eudi.demo.ui.isImageElement
 import com.hopae.eudi.demo.ui.screens.claimPathLabel
 import com.hopae.eudi.demo.ui.theme.WalletTheme
 import com.hopae.eudi.wallet.ClaimCategory
@@ -58,7 +60,8 @@ class GetCredentialActivity : FragmentActivity() {
                         val cred = doc.candidates.firstOrNull()?.let { creds[it.value] }
                         val byId = (cred?.lifecycle as? Lifecycle.Issued)?.claims.orEmpty().associateBy { it.path.lastOrNull() }
                         val rows = doc.requestedElements.values.flatten().map { id ->
-                            ClaimRow(claimPathLabel(listOf(id)), byId[id]?.value?.display() ?: "Shared")
+                            val v = byId[id]?.value?.display()
+                            ClaimRow(claimPathLabel(listOf(id)), v ?: "Shared", imageBase64 = v?.takeIf { isImageElement(id) })
                         }
                         ConsentItem(cred?.let { credTitle(it) } ?: doc.docType, rows)
                     }
@@ -102,7 +105,7 @@ class GetCredentialActivity : FragmentActivity() {
                     val disc = cand?.disclosedPaths?.toSet().orEmpty()
                     val rows = (cred?.lifecycle as? Lifecycle.Issued)?.claims.orEmpty()
                         .filter { it.category == ClaimCategory.Subject && disc.any { d -> d.size <= it.path.size && it.path.subList(0, d.size) == d } }
-                        .map { ClaimRow(claimPathLabel(it.path), it.value.display()) }
+                        .map { ClaimRow(claimPathLabel(it.path), it.value.display(), imageBase64 = it.value.display().takeIf { _ -> isImageClaim(it.path) }) }
                     ConsentItem(cred?.let { credTitle(it) } ?: q.queryId, rows)
                 }
                 val v = presentation.verifier

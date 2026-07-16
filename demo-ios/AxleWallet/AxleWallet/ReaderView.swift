@@ -16,6 +16,7 @@ struct ReaderView: View {
     @State private var results: [ReaderResultDoc] = []
     @State private var errorMessage: String?
     @State private var transport: (any ProximityTransport)?
+    @State private var kind: ReaderDocKind = .pid
 
     enum Phase { case idle, connecting, reading, results, failed }
 
@@ -60,6 +61,18 @@ struct ReaderView: View {
             Text("Ask the holder to show their in-person sharing QR, then scan it to read and verify their document.")
                 .font(WalletFont.bodyMedium).foregroundStyle(WalletTheme.inkMuted).multilineTextAlignment(.center)
             Spacer()
+            VStack(alignment: .leading, spacing: 8) {
+                Text("DOCUMENT TO REQUEST")
+                    .font(WalletFont.labelSmall).tracking(0.6).foregroundStyle(WalletTheme.inkFaint)
+                let kinds = Array(ReaderDocKind.allCases)
+                ForEach(0 ..< kinds.count / 2, id: \.self) { row in
+                    HStack(spacing: 8) {
+                        ForEach(kinds[(row * 2) ..< min(row * 2 + 2, kinds.count)], id: \.self) { k in
+                            docKindChip(k)
+                        }
+                    }
+                }
+            }
             PrimaryButton(title: "Scan holder QR") { showScanner = true }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -81,7 +94,11 @@ struct ReaderView: View {
                                     WalletInfoRow(label: "Claims", value: "—")
                                 } else {
                                     ForEach(Array(doc.claims.enumerated()), id: \.offset) { _, claim in
-                                        WalletInfoRow(label: label(claim.element), value: claim.value)
+                                        if let b64 = claim.imageBase64, let image = claimImage(base64: b64) {
+                                            ClaimImageRow(label: label(claim.element), image: image)
+                                        } else {
+                                            WalletInfoRow(label: label(claim.element), value: claim.value)
+                                        }
                                     }
                                 }
                             }
@@ -99,6 +116,22 @@ struct ReaderView: View {
         return spaced.prefix(1).uppercased() + spaced.dropFirst()
     }
 
+    /// A selectable pill for the document-type picker (mirrors android `DocKindChip`).
+    private func docKindChip(_ k: ReaderDocKind) -> some View {
+        let selected = k == kind
+        let shape = RoundedRectangle(cornerRadius: 10)
+        return Button { kind = k } label: {
+            Text(k.rawValue)
+                .font(WalletFont.labelLarge)
+                .foregroundStyle(selected ? WalletTheme.brand : WalletTheme.inkBody)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(selected ? WalletTheme.brand.opacity(0.08) : WalletTheme.card, in: shape)
+                .overlay(shape.strokeBorder(selected ? WalletTheme.brand : WalletTheme.cardBorder, lineWidth: selected ? 1.5 : 1))
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: - Behavior
 
     private func read(_ scanned: String) async {
@@ -112,7 +145,7 @@ struct ReaderView: View {
             let t = try await makeReaderTransport(engagement)
             transport = t
             phase = .reading
-            let verified = try await wallet.reader.read(transport: t, engagement: engagement, documents: MdocReaderRequests.pid())
+            let verified = try await wallet.reader.read(transport: t, engagement: engagement, documents: MdocReaderRequests.request(kind))
             results = MdocReaderRequests.flatten(verified)
             phase = .results
         } catch {

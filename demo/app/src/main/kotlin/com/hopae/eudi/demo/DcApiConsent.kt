@@ -48,12 +48,15 @@ import com.hopae.eudi.demo.ui.components.SecondaryButton
 import com.hopae.eudi.demo.ui.components.SectionLabel
 import com.hopae.eudi.demo.ui.components.TrustBadge
 import com.hopae.eudi.demo.ui.components.TrustRow
+import com.hopae.eudi.demo.ui.ClaimImageRow
 import com.hopae.eudi.demo.ui.components.WalletCard
+import com.hopae.eudi.demo.ui.rememberClaimImage
 import com.hopae.eudi.demo.ui.screens.GroupHeader
 import com.hopae.eudi.demo.ui.theme.WalletTheme
 
-/** One requested credential in a DC API consent: a title and the claim rows (label + value) to disclose. */
-class ClaimRow(val label: String, val value: String)
+/** One requested credential in a DC API consent: a title and the claim rows (label + value) to disclose.
+ *  [imageBase64] carries an image element's base64url bytes (portrait etc.) — rendered as a thumbnail. */
+class ClaimRow(val label: String, val value: String, val imageBase64: String? = null)
 class ConsentItem(val label: String, val rows: List<ClaimRow>)
 
 /**
@@ -159,7 +162,10 @@ fun DcApiConsentSheet(
                         if (item.rows.isEmpty()) InfoRow("Attributes", "—")
                         else {
                             GroupHeader("Shared")
-                            item.rows.forEach { InfoRow(it.label, it.value) }
+                            item.rows.forEach { row ->
+                                val image = rememberClaimImage(row.imageBase64)
+                                if (image != null) ClaimImageRow(row.label, image) else InfoRow(row.label, row.value)
+                            }
                         }
                     }
                 }

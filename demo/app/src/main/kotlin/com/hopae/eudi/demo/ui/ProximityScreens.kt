@@ -135,11 +135,36 @@ private val BLE_PERMISSIONS: Array<String> = if (Build.VERSION.SDK_INT >= Build.
 else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
 
 /** What the reader requests — the PID (mdoc); the holder answers if it holds a matching mdoc credential. */
-private fun readerRequest() = listOf(
-    RequestedDocument(
-        "eu.europa.ec.eudi.pid.1",
-        mapOf("eu.europa.ec.eudi.pid.1" to listOf("family_name", "given_name", "birth_date", "nationality")),
-    ),
+/** The document types this demo reader can request — picked one at a time on the reader screen. */
+enum class ReaderDocKind(val label: String) {
+    PID("Personal ID"),
+    MDL("Driving Licence"),
+    AGE("Proof of Age"),
+    PHOTOID("Photo ID"),
+}
+
+private fun readerRequest(kind: ReaderDocKind) = listOf(
+    when (kind) {
+        ReaderDocKind.PID -> RequestedDocument(
+            "eu.europa.ec.eudi.pid.1",
+            mapOf("eu.europa.ec.eudi.pid.1" to listOf("family_name", "given_name", "birth_date", "nationality")),
+        )
+        // portrait is an ISO 18013-5 mandatory element — the reader verifies the holder's photo.
+        ReaderDocKind.MDL -> RequestedDocument(
+            "org.iso.18013.5.1.mDL",
+            mapOf("org.iso.18013.5.1" to listOf("family_name", "given_name", "portrait", "driving_privileges")),
+        )
+        // AV Profile §A.4: age_over_18 is the only attribute a Proof of Age attestation carries.
+        ReaderDocKind.AGE -> RequestedDocument(
+            "eu.europa.ec.av.1",
+            mapOf("eu.europa.ec.av.1" to listOf("age_over_18")),
+        )
+        // ISO 23220-4 Annex C: identity claims live in the generic 23220-2 namespace.
+        ReaderDocKind.PHOTOID -> RequestedDocument(
+            "org.iso.23220.photoid.1",
+            mapOf("org.iso.23220.1" to listOf("family_name", "given_name", "birth_date", "portrait", "age_over_18")),
+        )
+    },
 )
 
 /** Holder present flow phases: waiting for a reader → reviewing its request → sending → terminal. */
@@ -460,7 +485,7 @@ private fun ProximityDocCard(doc: RequestedDocumentView, credsById: Map<String, 
             doc.candidates.forEach { candId ->
                 val candCred = credsById[candId.value]
                 val candValues = (candCred?.lifecycle as? Lifecycle.Issued)?.claims.orEmpty().associate { it.path to it.value }
-                val subtitle = requested.mapNotNull { candValues[it]?.display() }.filter { it.isNotBlank() }.take(2).joinToString(" · ")
+                val subtitle = requested.filterNot { isImageClaim(it) }.mapNotNull { candValues[it]?.display() }.filter { it.isNotBlank() }.take(2).joinToString(" · ")
                 ProxCandidateCard(candCred, candId == selectedId, subtitle) { chosen[doc.docType] = candId }
             }
             Spacer(Modifier.height(6.dp))
@@ -475,7 +500,12 @@ private fun ProximityDocCard(doc: RequestedDocumentView, credsById: Map<String, 
         if (shared.isEmpty()) {
             Text("No matching attributes in this document.", style = MaterialTheme.typography.bodySmall, color = c.inkMuted, modifier = Modifier.padding(16.dp, 6.dp, 16.dp, 12.dp))
         } else {
-            shared.forEach { path -> InfoRow(claimPathLabel(path), valueByPath.getValue(path).display()) }
+            shared.forEach { path ->
+                val value = valueByPath.getValue(path)
+                val image = if (isImageClaim(path)) rememberClaimImage(value.display()) else null
+                if (image != null) ClaimImageRow(claimPathLabel(path), image)
+                else InfoRow(claimPathLabel(path), value.display())
+            }
         }
     }
 }
@@ -510,6 +540,8 @@ private fun ProxCandidateCard(cred: Credential?, checked: Boolean, subtitle: Str
 
 /** Friendly label for a bare mdoc doctype when no matching credential is held to name it. */
 private fun docTypeLabel(docType: String): String = when {
+    docType.contains(".av.") -> "Proof of Age"
+    docType.contains("photoid", true) -> "Photo ID"
     docType.contains("pid", true) -> "Personal ID"
     docType.contains("mdl", true) || docType.contains("18013.5.1", true) -> "Mobile Driving Licence"
     else -> docType.substringAfterLast('.').replace('_', ' ').replaceFirstChar { it.uppercase() }
@@ -523,6 +555,7 @@ fun ProximityReaderScreen(wallet: Wallet) {
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf("Scan a wallet's QR or tap it over NFC to read its mdoc.") }
     var results by remember { mutableStateOf<List<VerifiedDocument>>(emptyList()) }
+    var kind by remember { mutableStateOf(ReaderDocKind.PID) }
     var nfcWaiting by remember { mutableStateOf(false) } // waiting for the NFC tap → show the pulse
     var nfcJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var granted by remember { mutableStateOf(BLE_PERMISSIONS.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }) }
@@ -549,7 +582,7 @@ fun ProximityReaderScreen(wallet: Wallet) {
                     else -> { status = "❌ Engagement carries no BLE UUID"; return@launch }
                 }
                 status = "Requesting documents…"
-                val docs = wallet.reader.read(transport, engagement, readerRequest())
+                val docs = wallet.reader.read(transport, engagement, readerRequest(kind))
                 results = docs
                 status = if (docs.isEmpty()) "No documents returned" else "✅ Read ${docs.size} document(s)"
                 LogStore.log("Reader read ${docs.size} document(s) over BLE")
@@ -590,7 +623,7 @@ fun ProximityReaderScreen(wallet: Wallet) {
                 val uuids = if (eng.peripheralServerMode) Ble.PERIPHERAL_SERVER else Ble.CENTRAL_CLIENT
                 val transport = BleGattClientTransport(context, Ble.bytesToUuid(eng.serviceUuid), uuids, logger = LogWalletLogger()).also { it.connect() }
                 status = "Requesting documents…"
-                val docs = wallet.reader.read(transport, eng.deviceEngagement, readerRequest(), handoverNdef = handover.handoverSelect, handoverRequestNdef = handover.handoverRequest)
+                val docs = wallet.reader.read(transport, eng.deviceEngagement, readerRequest(kind), handoverNdef = handover.handoverSelect, handoverRequestNdef = handover.handoverRequest)
                 results = docs
                 status = if (docs.isEmpty()) "No documents returned" else "✅ Read ${docs.size} document(s)"
                 LogStore.log("Reader read ${docs.size} document(s) over NFC+BLE")
@@ -628,6 +661,13 @@ fun ProximityReaderScreen(wallet: Wallet) {
                 style = MaterialTheme.typography.bodyMedium, color = c.inkMuted,
             )
         }
+        SectionLabel("Document to request")
+        ReaderDocKind.entries.chunked(2).forEach { rowKinds ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowKinds.forEach { k -> DocKindChip(k, k == kind, Modifier.weight(1f)) { kind = k } }
+            }
+        }
+
         PrimaryButton("Scan holder's QR", onClick = {
             ensureReady {
                 AppLock.suppressResumeLock() // returning from the scanner shouldn't demand a re-unlock
@@ -654,6 +694,23 @@ fun ProximityReaderScreen(wallet: Wallet) {
     }
 }
 
+/** A selectable pill for the reader's document-type picker. */
+@Composable
+private fun DocKindChip(kind: ReaderDocKind, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val c = WalletTheme.colors
+    val shape = RoundedCornerShape(10.dp)
+    Box(
+        modifier.clip(shape)
+            .background(if (selected) c.brand.copy(alpha = 0.08f) else c.card)
+            .border(if (selected) 1.5.dp else 1.dp, if (selected) c.brand else c.cardBorder, shape)
+            .clickable { onClick() }
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(kind.label, style = MaterialTheme.typography.labelLarge, color = if (selected) c.brand else c.inkBody)
+    }
+}
+
 @Composable
 private fun ReaderResultCard(doc: VerifiedDocument) {
     val c = WalletTheme.colors
@@ -665,7 +722,12 @@ private fun ReaderResultCard(doc: VerifiedDocument) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
         val flat = doc.elements.flatMap { (_, els) -> els.entries }
         if (flat.isEmpty()) InfoRow("Elements", "—")
-        else flat.forEach { (k, v) -> InfoRow(claimPathLabel(listOf(k)), cborText(v)) }
+        else flat.forEach { (k, v) ->
+            // Image elements come off the wire as raw CBOR bstr — render the received photo, not "0x…(nB)".
+            val image = if (isImageElement(k) && v is Cbor.Bytes) rememberClaimImage(v.value) else null
+            if (image != null) ClaimImageRow(claimPathLabel(listOf(k)), image)
+            else InfoRow(claimPathLabel(listOf(k)), cborText(v))
+        }
     }
 }
 

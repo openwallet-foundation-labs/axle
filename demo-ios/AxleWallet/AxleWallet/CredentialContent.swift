@@ -84,16 +84,20 @@ struct CredentialClaimSections: View {
 }
 
 /// mdoc image-carrying elements (ISO 23220-2 / 18013-5: portrait, signature) arrive as base64url text —
-/// the SDK projects CBOR bstr that way for DCQL matching — so decode and render them as an image.
+/// the SDK projects CBOR bstr that way for DCQL matching — so every claim-listing surface (detail, consents,
+/// proximity, reader) decodes them by element name and renders an image row instead of text.
 private let imageElements: Set<String> = ["portrait", "enrolment_portrait_image", "signature_usual_mark"]
 
-private func isImageClaim(_ path: [String]) -> Bool {
-    guard let key = path.last?.lowercased() else { return false }
-    return imageElements.contains(key)
+func isImageElement(_ key: String?) -> Bool {
+    guard let k = key?.lowercased() else { return false }
+    return imageElements.contains(k)
 }
 
-private func claimImage(_ claim: Claim) -> UIImage? {
-    var b64 = claim.value.display()
+func isImageClaim(_ path: [String]) -> Bool { isImageElement(path.last) }
+
+/// Decodes an image from base64 in either alphabet (base64url claim text or standard base64), padded or not.
+func claimImage(base64 raw: String) -> UIImage? {
+    var b64 = raw
         .replacingOccurrences(of: "-", with: "+")
         .replacingOccurrences(of: "_", with: "/")
     while b64.count % 4 != 0 { b64 += "=" }
@@ -101,8 +105,10 @@ private func claimImage(_ claim: Claim) -> UIImage? {
     return UIImage(data: data)
 }
 
-/// A WalletInfoRow variant whose value is an image (mirrors android `ImageRow`).
-private struct ClaimImageRow: View {
+func claimImage(_ claim: Claim) -> UIImage? { claimImage(base64: claim.value.display()) }
+
+/// A WalletInfoRow variant whose value is an image (mirrors android `ClaimImageRow`).
+struct ClaimImageRow: View {
     let label: String
     let image: UIImage
 

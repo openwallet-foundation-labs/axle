@@ -228,7 +228,7 @@ fun WalletRoot(wallet: Wallet) {
         DocumentDetailScreen(
             cred = cred,
             onBack = { detail = null },
-            onPresentProximity = if (credIsMdl(cred)) ({ detail = null; showProximity = true }) else null,
+            onPresentProximity = if (credIsMdoc(cred)) ({ detail = null; showProximity = true }) else null,
             onDelete = {
                 detail = null
                 scope.launch {

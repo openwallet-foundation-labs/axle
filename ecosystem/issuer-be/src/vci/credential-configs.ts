@@ -1,4 +1,5 @@
 import type { SignerType } from '../crypto/keystore.service';
+import { PORTRAIT_JPEG } from './portrait';
 
 // Hardcoded demo subject — a Luxembourg citizen (matches the C=LU issuer identity). The same person is used
 // across PID (SD-JWT VC + mdoc); the mDL adds driving data. All claims are fixed (sandbox demo, no real IdP).
@@ -59,6 +60,12 @@ export interface CredentialConfig {
    * demo credentials only; NEVER for PID or an eIDAS LoA-High EAA.
    */
   keyAttestationRequired?: boolean;
+  /**
+   * MSO ValidityInfo lifetime in days (mso_mdoc only). Omitted ⇒ the sandbox default (validUntil 2035-12-31).
+   * When set, the timestamps are truncated to UTC midnight — the AV Profile (Annex A §3.4.1) / ISO 18013-5
+   * reduced-precision recommendation so attestations issued in the same batch stay unlinkable by timestamp.
+   */
+  validityDays?: number;
 }
 
 const PID_ISSUING_AUTHORITY = "Centre des technologies de l'information de l'État (CTIE)";
@@ -211,6 +218,90 @@ export const CREDENTIAL_CONFIGS: CredentialConfig[] = [
       { label: 'Issue date', value: '2024-03-01' },
       { label: 'Expiry date', value: '2034-03-01' },
       { label: 'Issuing authority', value: MDL_ISSUING_AUTHORITY },
+    ],
+  },
+
+  // 4) Proof of Age attestation — EU Age Verification Profile (av-doc-technical-specification, Annex A).
+  {
+    id: 'proof_of_age',
+    // The AV Profile keeps device binding out of scope: unlinkability comes from batch issuance + single use,
+    // not from a WSCD-bound key — accept a bare jwt proof (PoP only).
+    keyAttestationRequired: false,
+    format: 'mso_mdoc',
+    // AV Profile §A.5: both the credential_configuration_id and the scope are the literal `proof_of_age`.
+    scope: 'proof_of_age',
+    // Signed with the sandbox attestation DS so it chains to the published Trusted List. A production AV
+    // Attestation Provider uses a dedicated DS under the Commission's AV trusted list (ETSI TS 119 612).
+    signer: 'mdl',
+    flow: 'pre-authorized_code',
+    display: { name: 'Proof of Age (18+)', locale: 'en', background_color: '#4a1140', text_color: '#ffffff' },
+    // §A.4: DocType and namespace are the same string, and `age_over_18` is the ONLY mandatory attribute —
+    // the attestation SHALL NOT carry any other attribute (no name, no date of birth: unlinkable by content).
+    doctype: 'eu.europa.ec.av.1',
+    mdocNamespaces: [{ namespace: 'eu.europa.ec.av.1', claims: { age_over_18: true } }],
+    // §3.4.3: short-lived (3 months max), designed for single use, no revocation.
+    validityDays: 90,
+    displayFields: [{ label: 'Age over 18', value: 'Yes' }],
+  },
+
+  // 5) Photo ID as mdoc — ISO/IEC TS 23220-4:2026 Annex C profile.
+  {
+    // The published TS prints the DocType/namespace with lowercase `photoid` (C.2.1 [DT_dual]); some
+    // pre-release ecosystems used `photoID` — keep the TS spelling.
+    id: 'org.iso.23220.photoid.1',
+    keyAttestationRequired: true, // a government photo identity document — WSCD-bound like the PID
+    format: 'mso_mdoc',
+    scope: 'org.iso.23220.photoid.1',
+    signer: 'mdl',
+    flow: 'authorization_code',
+    display: { name: 'Photo ID', locale: 'en', background_color: '#0c3c4e', text_color: '#ffffff' },
+    doctype: 'org.iso.23220.photoid.1',
+    mdocNamespaces: [
+      {
+        // Generic ISO/IEC TS 23220-2 elements (Table C.1): every Mandatory member, the Recommended age_*
+        // set, and a residence/document subset of the Optionals. The third profile namespace
+        // (`org.iso.23220.datagroups.1`, ICAO 9303 LDS blobs) is omitted — it requires byte-identical eMRTD
+        // data groups the sandbox subject does not have.
+        namespace: 'org.iso.23220.1',
+        claims: {
+          family_name: PERSON.family_name,
+          given_name: PERSON.given_name,
+          birth_date: PERSON.birth_date,
+          portrait: PORTRAIT_JPEG,
+          issue_date: '2026-07-01',
+          expiry_date: '2031-07-01',
+          issuing_authority: PID_ISSUING_AUTHORITY,
+          issuing_country: 'LU',
+          age_over_18: true,
+          age_in_years: 36,
+          age_birth_year: 1990,
+          nationality: PERSON.nationality,
+          document_number: PERSON.document_number,
+          resident_address: PERSON.resident_address,
+          resident_city: PERSON.resident_city,
+          resident_postal_code: PERSON.resident_postal_code,
+          resident_country: PERSON.resident_country,
+        },
+      },
+      {
+        // PhotoID-specific elements (Table C.2) — an optional subset; exercises the second namespace.
+        namespace: 'org.iso.23220.photoid.1',
+        claims: {
+          person_id: '1990051412345',
+          birth_country: PERSON.nationality,
+          birth_city: PERSON.birth_place,
+        },
+      },
+    ],
+    displayFields: [
+      { label: 'Given name', value: PERSON.given_name },
+      { label: 'Family name', value: PERSON.family_name },
+      { label: 'Date of birth', value: PERSON.birth_date },
+      { label: 'Portrait', value: 'Facial image (JPEG)' },
+      { label: 'Document number', value: PERSON.document_number },
+      { label: 'Issue date', value: '2026-07-01' },
+      { label: 'Expiry date', value: '2031-07-01' },
+      { label: 'Issuing authority', value: PID_ISSUING_AUTHORITY },
     ],
   },
 ];

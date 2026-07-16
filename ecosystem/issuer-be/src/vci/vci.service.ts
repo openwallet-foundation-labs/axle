@@ -506,7 +506,7 @@ export class VciService {
     }
     // mso_mdoc — embed the Token Status List reference in the MSO `status.status_list = { idx, uri }`
     // (ISO/IEC 18013-5 2nd edition, @lukas.j.han/mdoc >= 0.6.0) so the credential is revocable like SD-JWT VC.
-    return this.mdoc.issue(c.doctype!, c.mdocNamespaces!, holderJwk, c.signer, { idx: status.idx, uri: status.uri });
+    return this.mdoc.issue(c.doctype!, c.mdocNamespaces!, holderJwk, c.signer, { idx: status.idx, uri: status.uri }, c.validityDays);
   }
 
   listConfigs() {

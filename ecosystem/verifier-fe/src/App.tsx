@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   BadgeCheck,
+  Cake,
   CheckCircle2,
+  Contact,
   Fingerprint,
   IdCard,
   Loader2,
@@ -43,7 +45,7 @@ function supportsOpenId4VpDcApi(): boolean {
 }
 const OPENID4VP_DC_API_SUPPORTED = supportsOpenId4VpDcApi();
 
-type CredKey = 'pid_sd_jwt' | 'pid_mdoc' | 'mdl';
+type CredKey = 'pid_sd_jwt' | 'pid_mdoc' | 'mdl' | 'proof_of_age' | 'photoid';
 type RpMode = 'plain' | 'intermediary';
 type DcApiProtocol = 'openid4vp' | 'org-iso-mdoc';
 
@@ -51,6 +53,8 @@ const CREDENTIALS: { key: CredKey; label: string; type: string; icon: typeof IdC
   { key: 'pid_sd_jwt', label: 'PID · SD-JWT VC', type: 'urn:eudi:pid:1', icon: IdCard },
   { key: 'pid_mdoc', label: 'PID · mdoc', type: 'eu.europa.ec.eudi.pid.1', icon: Fingerprint },
   { key: 'mdl', label: 'mDL · mdoc', type: 'org.iso.18013.5.1.mDL', icon: IdCard },
+  { key: 'proof_of_age', label: 'Proof of Age · mdoc', type: 'eu.europa.ec.av.1', icon: Cake },
+  { key: 'photoid', label: 'Photo ID · mdoc', type: 'org.iso.23220.photoid.1', icon: Contact },
 ];
 
 interface CreatedQr {
@@ -288,7 +292,7 @@ function ConfigView(props: {
   const { selected, toggle, rp, setRp, busy, error, onQr, onDcApi } = props;
   // ISO 18013-7 org-iso-mdoc presents mdoc credentials only — available when the selection is mdoc-only.
   const hasSdJwt = selected.has('pid_sd_jwt');
-  const hasMdoc = selected.has('pid_mdoc') || selected.has('mdl');
+  const hasMdoc = ['pid_mdoc', 'mdl', 'proof_of_age', 'photoid'].some((k) => selected.has(k as CredKey));
   const isoMdocAvailable = hasMdoc && !hasSdJwt;
   return (
     <div className="flex flex-col gap-6">

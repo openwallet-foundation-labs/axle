@@ -57,6 +57,8 @@ enum WalletTheme {
 enum DocGradients {
     static let pid = [Color(hex: 0x101F52), Color(hex: 0x1D3FA8), Color(hex: 0x2E63E7)]
     static let mdl = [Color(hex: 0x0B3B35), Color(hex: 0x116A5C), Color(hex: 0x1B9A82)]
+    static let age = [Color(hex: 0x4A1140), Color(hex: 0x7E1E5F), Color(hex: 0xB03A80)]
+    static let photoId = [Color(hex: 0x0C3C4E), Color(hex: 0x156579), Color(hex: 0x2492A8)]
     static let health = [Color(hex: 0x0E4E8F), Color(hex: 0x1B74C9), Color(hex: 0x3D97E8)]
     static let education = [Color(hex: 0x3A1F63), Color(hex: 0x5B35A8), Color(hex: 0x8557E0)]
     static let residence = [Color(hex: 0x5F2D0C), Color(hex: 0x9A4E17), Color(hex: 0xD0742B)]

@@ -7,7 +7,7 @@ import WalletAPI // CredentialFormat cases
 /// "kind" (derived from the type string) picks a friendly title, kicker, glyph, and card gradient.
 
 /// Stable kind of a credential, derived from its type identifier.
-private enum DocKind { case pid, mdl, health, education, residence, finance, other }
+private enum DocKind { case pid, mdl, age, photoID, health, education, residence, finance, other }
 
 /// The credential's type identifier (SD-JWT `vct` or mdoc `docType`) — used to match transaction-log entries.
 func credType(_ c: Credential) -> String {
@@ -19,6 +19,8 @@ func credType(_ c: Credential) -> String {
 
 private func kindOf(_ c: Credential) -> DocKind {
     let t = credType(c).lowercased()
+    if t.contains(".av.") || t.contains("proof_of_age") || t.contains("age_verification") { return .age }
+    if t.contains("photoid") || t.contains("photo_id") { return .photoID }
     if t.contains("pid") || t.contains("eudi.pid") || t.contains("identity") { return .pid }
     if t.contains("mdl") || (t.contains("mdoc") && t.contains("18013")) || t.contains("18013.5.1.mdl") || t.contains("driving") { return .mdl }
     if t.contains("ehic") || t.contains("health") || t.contains("insurance") { return .health }
@@ -33,6 +35,8 @@ func credTitle(_ c: Credential) -> String {
     switch kindOf(c) {
     case .pid: return "Personal ID"
     case .mdl: return "Mobile Driving Licence"
+    case .age: return "Proof of Age"
+    case .photoID: return "Photo ID"
     case .health: return "Health Insurance Card"
     case .education: return "Education Credential"
     case .residence: return "Residence Certificate"
@@ -46,6 +50,8 @@ func credKicker(_ c: Credential) -> String {
     switch kindOf(c) {
     case .pid: return "Personal ID · PID"
     case .mdl: return "Driving Licence · mDL"
+    case .age: return "Age Verification · 18+"
+    case .photoID: return "Photo ID · ISO 23220"
     case .health: return "Health · EHIC"
     case .education: return "Education"
     case .residence: return "Residence"
@@ -59,6 +65,8 @@ func credGlyph(_ c: Credential) -> String {
     switch kindOf(c) {
     case .pid: return "ID"
     case .mdl: return "DL"
+    case .age: return "18"
+    case .photoID: return "PH"
     case .health: return "HC"
     case .education: return "ED"
     case .residence: return "RC"
@@ -72,6 +80,8 @@ func credGradient(_ c: Credential) -> [Color] {
     switch kindOf(c) {
     case .pid: return DocGradients.pid
     case .mdl: return DocGradients.mdl
+    case .age: return DocGradients.age
+    case .photoID: return DocGradients.photoId
     case .health: return DocGradients.health
     case .education: return DocGradients.education
     case .residence: return DocGradients.residence

@@ -19,6 +19,8 @@ const DESCRIPTIONS: Record<string, string> = {
     'Person Identification Data as an IETF SD-JWT VC — selective disclosure, cryptographically holder-bound.',
   'eu.europa.ec.eudi.pid.mdoc': 'Person Identification Data as an ISO/IEC 18013-5 mdoc.',
   'org.iso.18013.5.1.mDL': 'Mobile Driving Licence (ISO/IEC 18013-5 mdoc).',
+  proof_of_age: 'Proof of Age attestation (EU Age Verification Profile) — a single age_over_18 boolean, nothing else.',
+  'org.iso.23220.photoid.1': 'Photo ID (ISO/IEC TS 23220-4 mdoc) — a portrait-bearing identity document.',
 };
 
 // A stylised ring — evokes an EU-official identity document without reproducing the actual EU emblem.

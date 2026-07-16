@@ -200,6 +200,7 @@ struct DcApiConsentView: View {
 
     private func docTitle(_ docType: String) -> String {
         let d = docType.lowercased()
+        if d.contains("photoid") { return "Photo ID" }
         if d.contains("pid") { return "Personal ID" }
         if d.contains("mdl") || d.contains("18013.5.1") { return "Mobile Driving Licence" }
         if d.contains(".av.") { return "Age verification" }

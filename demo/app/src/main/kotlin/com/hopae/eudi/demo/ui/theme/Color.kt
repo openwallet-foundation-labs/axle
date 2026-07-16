@@ -62,6 +62,8 @@ val LogError = Color(0xFFF06A5E)
 object DocGradients {
     val Pid = listOf(Color(0xFF101F52), Color(0xFF1D3FA8), Color(0xFF2E63E7))
     val Mdl = listOf(Color(0xFF0B3B35), Color(0xFF116A5C), Color(0xFF1B9A82))
+    val Age = listOf(Color(0xFF4A1140), Color(0xFF7E1E5F), Color(0xFFB03A80))
+    val PhotoId = listOf(Color(0xFF0C3C4E), Color(0xFF156579), Color(0xFF2492A8))
     val Health = listOf(Color(0xFF0E4E8F), Color(0xFF1B74C9), Color(0xFF3D97E8))
     val Education = listOf(Color(0xFF3A1F63), Color(0xFF5B35A8), Color(0xFF8557E0))
     val Residence = listOf(Color(0xFF5F2D0C), Color(0xFF9A4E17), Color(0xFFD0742B))

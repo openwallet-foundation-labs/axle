@@ -7,7 +7,7 @@ import com.hopae.eudi.wallet.spi.CredentialFormat
 import kotlin.math.absoluteValue
 
 /** Stable "kind" of a credential, derived from its type string, used to pick a friendly name / glyph / gradient. */
-private enum class DocKind { PID, MDL, HEALTH, EDUCATION, RESIDENCE, FINANCE, OTHER }
+private enum class DocKind { PID, MDL, AGE, PHOTOID, HEALTH, EDUCATION, RESIDENCE, FINANCE, OTHER }
 
 private fun typeKey(c: Credential): String = when (val f = c.format) {
     is CredentialFormat.SdJwtVc -> f.vct
@@ -20,6 +20,8 @@ fun credType(c: Credential): String = typeKey(c)
 private fun kindOf(c: Credential): DocKind {
     val t = typeKey(c).lowercase()
     return when {
+        ".av." in t || "proof_of_age" in t || "age_verification" in t -> DocKind.AGE
+        "photoid" in t || "photo_id" in t -> DocKind.PHOTOID
         "pid" in t || "eudi.pid" in t || "identity" in t -> DocKind.PID
         "mdl" in t || "mdoc" in t && "18013" in t || "18013.5.1.mdl" in t || "driving" in t -> DocKind.MDL
         "ehic" in t || "health" in t || "insurance" in t -> DocKind.HEALTH
@@ -34,6 +36,8 @@ private fun kindOf(c: Credential): DocKind {
 fun credTitle(c: Credential): String = when (kindOf(c)) {
     DocKind.PID -> "Personal ID"
     DocKind.MDL -> "Mobile Driving Licence"
+    DocKind.AGE -> "Proof of Age"
+    DocKind.PHOTOID -> "Photo ID"
     DocKind.HEALTH -> "Health Insurance Card"
     DocKind.EDUCATION -> "Education Credential"
     DocKind.RESIDENCE -> "Residence Certificate"
@@ -45,6 +49,8 @@ fun credTitle(c: Credential): String = when (kindOf(c)) {
 fun credKicker(c: Credential): String = when (kindOf(c)) {
     DocKind.PID -> "Personal ID · PID"
     DocKind.MDL -> "Driving Licence · mDL"
+    DocKind.AGE -> "Age Verification · 18+"
+    DocKind.PHOTOID -> "Photo ID · ISO 23220"
     DocKind.HEALTH -> "Health · EHIC"
     DocKind.EDUCATION -> "Education"
     DocKind.RESIDENCE -> "Residence"
@@ -56,6 +62,8 @@ fun credKicker(c: Credential): String = when (kindOf(c)) {
 fun credGlyph(c: Credential): String = when (kindOf(c)) {
     DocKind.PID -> "ID"
     DocKind.MDL -> "DL"
+    DocKind.AGE -> "18"
+    DocKind.PHOTOID -> "PH"
     DocKind.HEALTH -> "HC"
     DocKind.EDUCATION -> "ED"
     DocKind.RESIDENCE -> "RC"
@@ -67,6 +75,8 @@ fun credGlyph(c: Credential): String = when (kindOf(c)) {
 fun credGradient(c: Credential): List<Color> = when (kindOf(c)) {
     DocKind.PID -> DocGradients.Pid
     DocKind.MDL -> DocGradients.Mdl
+    DocKind.AGE -> DocGradients.Age
+    DocKind.PHOTOID -> DocGradients.PhotoId
     DocKind.HEALTH -> DocGradients.Health
     DocKind.EDUCATION -> DocGradients.Education
     DocKind.RESIDENCE -> DocGradients.Residence

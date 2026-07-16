@@ -3,7 +3,7 @@
  * (or API caller) selects one or more by key; the request builder assembles a single `dcql_query` with one
  * credential entry per selection. Query ids double as the key under which verified claims are returned.
  */
-export type RequestableKey = 'pid_sd_jwt' | 'pid_mdoc' | 'mdl';
+export type RequestableKey = 'pid_sd_jwt' | 'pid_mdoc' | 'mdl' | 'proof_of_age' | 'photoid';
 
 export interface RequestableCredential {
   key: RequestableKey;
@@ -24,6 +24,12 @@ const PID_DOCTYPE = 'eu.europa.ec.eudi.pid.1';
 const PID_NAMESPACE = 'eu.europa.ec.eudi.pid.1';
 const MDL_DOCTYPE = 'org.iso.18013.5.1.mDL';
 const MDL_NAMESPACE = 'org.iso.18013.5.1';
+// Proof of Age (EU Age Verification Profile, Annex A §A.4): DocType and namespace are the same string.
+const AV_DOCTYPE = 'eu.europa.ec.av.1';
+// Photo ID (ISO/IEC TS 23220-4:2026 Annex C) — identity claims live in the generic ISO/IEC TS 23220-2
+// namespace (Table C.1), not in the photoid-specific one. The published TS spells `photoid` lowercase.
+const PHOTOID_DOCTYPE = 'org.iso.23220.photoid.1';
+const PHOTOID_NAMESPACE = 'org.iso.23220.1';
 
 // The default claim set — an identity request (given name, family name, date of birth). Age-verification
 // attributes were removed from the PID Rulebook (v1.1, following CIR 2024/2977), so we request `birthdate`
@@ -54,6 +60,26 @@ export const REQUESTABLE: Record<RequestableKey, RequestableCredential> = {
     type: MDL_DOCTYPE,
     namespace: MDL_NAMESPACE,
     claimNames: ['given_name', 'family_name', 'birth_date', 'driving_privileges'],
+  },
+  proof_of_age: {
+    key: 'proof_of_age',
+    queryId: 'proof_of_age',
+    format: 'mso_mdoc',
+    label: 'Proof of Age (18+)',
+    type: AV_DOCTYPE,
+    namespace: AV_DOCTYPE,
+    // AV Profile §A.4: either age_over_18 or one age_over_NN SHALL be requested — no other attribute exists.
+    claimNames: ['age_over_18'],
+  },
+  photoid: {
+    key: 'photoid',
+    queryId: 'photoid',
+    format: 'mso_mdoc',
+    label: 'Photo ID',
+    type: PHOTOID_DOCTYPE,
+    namespace: PHOTOID_NAMESPACE,
+    // `portrait` is deliberately not requested: the demo result view renders claims as text/JSON.
+    claimNames: ['family_name', 'given_name', 'birth_date', 'age_over_18'],
   },
 };
 

@@ -47,10 +47,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.hopae.eudi.demo.ui.ClaimImageRow
 import com.hopae.eudi.demo.ui.credFormatLabel
 import com.hopae.eudi.demo.ui.credIsMdl
 import com.hopae.eudi.demo.ui.credKicker
 import com.hopae.eudi.demo.ui.credTitle
+import com.hopae.eudi.demo.ui.isImageClaim
+import com.hopae.eudi.demo.ui.rememberClaimImage
 import com.hopae.eudi.demo.ui.components.absorbTouches
 import com.hopae.eudi.demo.ui.components.InfoRow
 import com.hopae.eudi.demo.ui.components.Pill
@@ -183,8 +186,13 @@ private fun ClaimsCard(cred: Credential, items: List<Claim>, reveal: Boolean) {
     WalletCard(padding = PaddingValues(0.dp)) {
         items.forEach { claim ->
             val raw = claim.value.display() // SDK-typed rendering (arrays → list, booleans → Yes/No)
-            val value = if (isSensitive(claim.path) && !reveal) mask(raw) else raw
-            InfoRow(claimLabel(cred, claim.path), value)
+            val image = if (isImageClaim(claim.path)) rememberClaimImage(raw) else null
+            if (image != null) {
+                ClaimImageRow(claimLabel(cred, claim.path), image)
+            } else {
+                val value = if (isSensitive(claim.path) && !reveal) mask(raw) else raw
+                InfoRow(claimLabel(cred, claim.path), value)
+            }
         }
     }
 }

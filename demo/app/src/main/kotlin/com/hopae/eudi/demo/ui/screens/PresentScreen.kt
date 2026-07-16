@@ -64,9 +64,12 @@ import com.hopae.eudi.demo.ui.components.TrustBadge
 import com.hopae.eudi.demo.ui.components.TrustRow
 import com.hopae.eudi.demo.ui.components.WalletCard
 import com.hopae.eudi.demo.ui.components.absorbTouches
+import com.hopae.eudi.demo.ui.ClaimImageRow
 import com.hopae.eudi.demo.ui.credGlyph
 import com.hopae.eudi.demo.ui.credGradient
 import com.hopae.eudi.demo.ui.credTitle
+import com.hopae.eudi.demo.ui.isImageClaim
+import com.hopae.eudi.demo.ui.rememberClaimImage
 import com.hopae.eudi.demo.ui.theme.WalletTheme
 import com.hopae.eudi.wallet.ClaimCategory
 import com.hopae.eudi.wallet.Credential
@@ -340,6 +343,7 @@ private fun QueryCard(
                 val disc = cand.disclosedPaths.toSet()
                 val subtitle = (cred?.lifecycle as? Lifecycle.Issued)?.claims.orEmpty()
                     .filter { it.category == ClaimCategory.Subject && disc.any { d -> d.size <= it.path.size && it.path.subList(0, d.size) == d } }
+                    .filterNot { isImageClaim(it.path) } // an image value is a base64 blob — useless as a text preview
                     .map { it.value.display() }.filter { it.isNotBlank() }.take(2).joinToString(" · ")
                 CandidateCard(cred, checked, q.multiple, subtitle) {
                     chosen[q.queryId] = if (q.multiple) {
@@ -357,7 +361,12 @@ private fun QueryCard(
             Text("No personal attributes.", style = MaterialTheme.typography.bodySmall, color = c.inkMuted, modifier = Modifier.padding(16.dp, 6.dp, 16.dp, 12.dp))
         } else {
             sharedLeaves.forEach { claim ->
-                InfoRow(claimPathLabel(claim.path), if (willShare) claim.value.display() else "Off", if (willShare) c.ink else c.inkFaint)
+                val image = if (willShare && isImageClaim(claim.path)) rememberClaimImage(claim.value.display()) else null
+                if (image != null) {
+                    ClaimImageRow(claimPathLabel(claim.path), image)
+                } else {
+                    InfoRow(claimPathLabel(claim.path), if (willShare) claim.value.display() else "Off", if (willShare) c.ink else c.inkFaint)
+                }
             }
         }
     }

@@ -24,7 +24,7 @@ struct DocumentDetailView: View {
 
                 // Proximity is the one genuinely holder-initiated present action — show *this* mDL in person
                 // over BLE. Cross-device / QR presentation is request-driven (scan a verifier from Home).
-                if credIsMdl(cred) {
+                if credIsMdoc(cred) {
                     Button { showProximity = true } label: {
                         Label("Present via proximity", systemImage: "dot.radiowaves.left.and.right")
                             .font(WalletFont.labelLarge)

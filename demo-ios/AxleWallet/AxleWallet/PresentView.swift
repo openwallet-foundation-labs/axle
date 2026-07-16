@@ -170,9 +170,13 @@ struct PresentView: View {
                         .padding(.horizontal, 16).padding(.bottom, 12)
                 } else {
                     ForEach(Array(leaves.enumerated()), id: \.offset) { _, claim in
-                        WalletInfoRow(label: claimLabel(claim.path),
-                                      value: willShare ? claim.value.display() : "Off",
-                                      valueColor: willShare ? WalletTheme.ink : WalletTheme.inkFaint)
+                        if willShare, isImageClaim(claim.path), let image = claimImage(claim) {
+                            ClaimImageRow(label: claimLabel(claim.path), image: image)
+                        } else {
+                            WalletInfoRow(label: claimLabel(claim.path),
+                                          value: willShare ? claim.value.display() : "Off",
+                                          valueColor: willShare ? WalletTheme.ink : WalletTheme.inkFaint)
+                        }
                     }
                 }
             }
@@ -341,7 +345,9 @@ struct PresentView: View {
     }
 
     private func candidateSubtitle(_ cred: Credential?, _ disclosed: [[String]]) -> String {
-        sharedLeaves(cred, disclosed).map { $0.value.display() }.filter { !$0.isEmpty }.prefix(2).joined(separator: " · ")
+        sharedLeaves(cred, disclosed)
+            .filter { !isImageClaim($0.path) } // an image value is a base64 blob — useless as a text preview
+            .map { $0.value.display() }.filter { !$0.isEmpty }.prefix(2).joined(separator: " · ")
     }
 
     private func rpName(_ verifier: VerifierInfo) -> String {

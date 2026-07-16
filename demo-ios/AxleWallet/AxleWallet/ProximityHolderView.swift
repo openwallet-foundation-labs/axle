@@ -160,7 +160,11 @@ struct ProximityHolderView: View {
                     .padding(.horizontal, 16).padding(.bottom, 12)
             } else {
                 ForEach(Array(shared.enumerated()), id: \.offset) { _, entry in
-                    WalletInfoRow(label: elementLabel(entry.path), value: entry.value)
+                    if isImageClaim(entry.path), let image = claimImage(base64: entry.value) {
+                        ClaimImageRow(label: elementLabel(entry.path), image: image)
+                    } else {
+                        WalletInfoRow(label: elementLabel(entry.path), value: entry.value)
+                    }
                 }
             }
         }
@@ -169,7 +173,7 @@ struct ProximityHolderView: View {
     private func candidateCard(_ doc: RequestedDocumentView, _ candId: CredentialId, checked: Bool) -> some View {
         let cred = credsById[candId]
         let requestedPaths = doc.requestedElements.flatMap { ns, els in els.map { [ns, $0] } }
-        let subtitle = sharedValues(cred, requestedPaths).prefix(2).map { $0.value }.joined(separator: " · ")
+        let subtitle = sharedValues(cred, requestedPaths.filter { !isImageClaim($0) }).prefix(2).map { $0.value }.joined(separator: " · ")
         let shape = RoundedRectangle(cornerRadius: 12)
         return Button {
             chosen[doc.docType] = candId

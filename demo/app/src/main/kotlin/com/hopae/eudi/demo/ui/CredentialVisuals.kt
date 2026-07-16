@@ -93,6 +93,9 @@ fun credFormatLabel(c: Credential): String = when (c.format) {
 /** True for a Mobile Driving Licence — the one credential kind that also presents over proximity. */
 fun credIsMdl(c: Credential): Boolean = kindOf(c) == DocKind.MDL
 
+/** True for any ISO mdoc — the format that presents over proximity (ISO 18013-5 / 23220-4). */
+fun credIsMdoc(c: Credential): Boolean = c.format is CredentialFormat.MsoMdoc
+
 /** True for a Personal ID (PID) — the wallet's primary identity credential, featured as the home hero. */
 fun credIsPid(c: Credential): Boolean = kindOf(c) == DocKind.PID
 

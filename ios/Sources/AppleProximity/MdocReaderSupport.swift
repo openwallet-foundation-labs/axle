@@ -21,7 +21,7 @@ public struct ReaderResultDoc: Sendable {
     }
 }
 
-/// The document types the demo reader can request — picked one at a time on the reader screen.
+/// The document types the demo reader can request — pick one or several on the reader screen.
 /// Mirrors the android demo's `ReaderDocKind`.
 public enum ReaderDocKind: String, CaseIterable, Sendable {
     case pid = "Personal ID"
@@ -43,21 +43,28 @@ public enum ReaderDocKind: String, CaseIterable, Sendable {
 public enum MdocReaderRequests {
     /// The request for one document kind (android demo `readerRequest(kind)`).
     public static func request(_ kind: ReaderDocKind) -> [RequestedDocument] {
-        let elements: [(String, [String])]
-        switch kind {
-        case .pid:
-            elements = [("eu.europa.ec.eudi.pid.1", ["family_name", "given_name", "birth_date", "nationality"])]
-        // portrait is an ISO 18013-5 mandatory element — the reader verifies the holder's photo.
-        case .mdl:
-            elements = [("org.iso.18013.5.1", ["family_name", "given_name", "portrait", "driving_privileges"])]
-        // AV Profile §A.4: age_over_18 is the only attribute a Proof of Age attestation carries.
-        case .age:
-            elements = [("eu.europa.ec.av.1", ["age_over_18"])]
-        // ISO 23220-4 Annex C: identity claims live in the generic 23220-2 namespace.
-        case .photoID:
-            elements = [("org.iso.23220.1", ["family_name", "given_name", "birth_date", "portrait", "age_over_18"])]
+        request([kind])
+    }
+
+    /// One DocRequest per selected kind — a single DeviceRequest may carry several (ISO 18013-5 §8.3.2.1.2.1).
+    public static func request(_ kinds: Set<ReaderDocKind>) -> [RequestedDocument] {
+        ReaderDocKind.allCases.filter { kinds.contains($0) }.map { kind in
+            let elements: [(String, [String])]
+            switch kind {
+            case .pid:
+                elements = [("eu.europa.ec.eudi.pid.1", ["family_name", "given_name", "birth_date", "nationality"])]
+            // portrait is an ISO 18013-5 mandatory element — the reader verifies the holder's photo.
+            case .mdl:
+                elements = [("org.iso.18013.5.1", ["family_name", "given_name", "portrait", "driving_privileges"])]
+            // AV Profile §A.4: age_over_18 is the only attribute a Proof of Age attestation carries.
+            case .age:
+                elements = [("eu.europa.ec.av.1", ["age_over_18"])]
+            // ISO 23220-4 Annex C: identity claims live in the generic 23220-2 namespace.
+            case .photoID:
+                elements = [("org.iso.23220.1", ["family_name", "given_name", "birth_date", "portrait", "age_over_18"])]
+            }
+            return RequestedDocument(docType: kind.doctype, elements: elements)
         }
-        return [RequestedDocument(docType: kind.doctype, elements: elements)]
     }
 
     /// Flattens verified documents into display rows, rendering each CBOR element value to a readable string.

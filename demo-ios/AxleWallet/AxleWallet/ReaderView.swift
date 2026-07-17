@@ -16,7 +16,8 @@ struct ReaderView: View {
     @State private var results: [ReaderResultDoc] = []
     @State private var errorMessage: String?
     @State private var transport: (any ProximityTransport)?
-    @State private var kind: ReaderDocKind = .pid
+    // Multi-select: one DocRequest per picked kind; deselecting the last one is a no-op (a request needs ≥1).
+    @State private var kinds: Set<ReaderDocKind> = [.pid]
 
     enum Phase { case idle, connecting, reading, results, failed }
 
@@ -62,7 +63,7 @@ struct ReaderView: View {
                 .font(WalletFont.bodyMedium).foregroundStyle(WalletTheme.inkMuted).multilineTextAlignment(.center)
             Spacer()
             VStack(alignment: .leading, spacing: 8) {
-                Text("DOCUMENT TO REQUEST")
+                Text("DOCUMENTS TO REQUEST")
                     .font(WalletFont.labelSmall).tracking(0.6).foregroundStyle(WalletTheme.inkFaint)
                 ForEach(ReaderDocKind.allCases, id: \.self) { k in
                     docKindChip(k)
@@ -116,9 +117,11 @@ struct ReaderView: View {
 
     /// A selectable row for the document-type picker: friendly name + the exact DocType it requests.
     private func docKindChip(_ k: ReaderDocKind) -> some View {
-        let selected = k == kind
+        let selected = kinds.contains(k)
         let shape = RoundedRectangle(cornerRadius: 10)
-        return Button { kind = k } label: {
+        return Button {
+            if selected { if kinds.count > 1 { kinds.remove(k) } } else { kinds.insert(k) }
+        } label: {
             VStack(alignment: .leading, spacing: 1) {
                 Text(k.rawValue)
                     .font(WalletFont.labelLarge)
@@ -149,7 +152,7 @@ struct ReaderView: View {
             let t = try await makeReaderTransport(engagement)
             transport = t
             phase = .reading
-            let verified = try await wallet.reader.read(transport: t, engagement: engagement, documents: MdocReaderRequests.request(kind))
+            let verified = try await wallet.reader.read(transport: t, engagement: engagement, documents: MdocReaderRequests.request(kinds))
             results = MdocReaderRequests.flatten(verified)
             phase = .results
         } catch {

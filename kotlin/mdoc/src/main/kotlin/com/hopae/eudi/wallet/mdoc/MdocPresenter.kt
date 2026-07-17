@@ -32,6 +32,21 @@ sealed interface DeviceAuth {
 }
 
 /**
+ * One document of a (possibly multi-document) `DeviceResponse`: which issuer-signed credential to
+ * present, which elements to disclose, and how the device authenticates it. Each document carries
+ * its own [DeviceAuth] — `DeviceAuthentication` is per-docType and each mdoc has its own DeviceKey.
+ */
+class PresentedDocument(
+    val issuerSigned: IssuerSigned,
+    val docType: String,
+    /** namespace -> element identifiers to disclose. */
+    val disclosed: Map<String, List<String>>,
+    val deviceAuth: DeviceAuth,
+    /** Device-signed data elements (namespace -> id -> value), e.g. OpenID4VP mdoc transaction data (B.2.1). */
+    val deviceSignedNamespaces: Map<String, Map<String, Cbor>> = emptyMap(),
+)
+
+/**
  * Builds an mdoc `DeviceResponse` (ISO 18013-5 §8.3.2.1.2.2) for presentation: keeps only the
  * disclosed issuer-signed items and produces `DeviceSigned` — a `deviceSignature` or a `deviceMac`
  * over the `DeviceAuthentication` structure (detached payload) bound to the [sessionTranscript].
@@ -51,6 +66,7 @@ object MdocPresenter {
         DeviceAuth.Signature(deviceSigner, deviceSignAlgorithm),
     )
 
+    /** Convenience for the single-document response (one `DocRequest` answered). */
     suspend fun deviceResponse(
         issuerSigned: IssuerSigned,
         docType: String,
@@ -60,7 +76,30 @@ object MdocPresenter {
         deviceAuth: DeviceAuth,
         /** Device-signed data elements (namespace -> id -> value), e.g. OpenID4VP mdoc transaction data (B.2.1). */
         deviceSignedNamespaces: Map<String, Map<String, Cbor>> = emptyMap(),
-    ): ByteArray {
+    ): ByteArray = deviceResponse(
+        listOf(PresentedDocument(issuerSigned, docType, disclosed, deviceAuth, deviceSignedNamespaces)),
+        sessionTranscript,
+    )
+
+    /** A `DeviceResponse` answering several `DocRequest`s at once — one `Document` per [documents] entry. */
+    suspend fun deviceResponse(documents: List<PresentedDocument>, sessionTranscript: Cbor): ByteArray {
+        require(documents.isNotEmpty()) { "a DeviceResponse needs at least one document" }
+        val deviceResponse = Cbor.CborMap(
+            listOf(
+                Cbor.Text("version") to Cbor.Text("1.0"),
+                Cbor.Text("documents") to Cbor.Array(documents.map { document(it, sessionTranscript) }),
+                Cbor.Text("status") to Cbor.int(0),
+            )
+        )
+        return CborEncoder.encode(deviceResponse)
+    }
+
+    private suspend fun document(presented: PresentedDocument, sessionTranscript: Cbor): Cbor {
+        val issuerSigned = presented.issuerSigned
+        val docType = presented.docType
+        val disclosed = presented.disclosed
+        val deviceAuth = presented.deviceAuth
+        val deviceSignedNamespaces = presented.deviceSignedNamespaces
         // Keep only the disclosed items, re-emitting their exact IssuerSignedItemBytes (#6.24).
         val filteredNs = issuerSigned.nameSpaces.mapNotNull { (ns, items) ->
             val ids = disclosed[ns] ?: return@mapNotNull null
@@ -108,20 +147,12 @@ object MdocPresenter {
             )
         )
 
-        val document = Cbor.CborMap(
+        return Cbor.CborMap(
             listOf(
                 Cbor.Text("docType") to Cbor.Text(docType),
                 Cbor.Text("issuerSigned") to issuerSignedCbor,
                 Cbor.Text("deviceSigned") to deviceSigned,
             )
         )
-        val deviceResponse = Cbor.CborMap(
-            listOf(
-                Cbor.Text("version") to Cbor.Text("1.0"),
-                Cbor.Text("documents") to Cbor.Array(listOf(document)),
-                Cbor.Text("status") to Cbor.int(0),
-            )
-        )
-        return CborEncoder.encode(deviceResponse)
     }
 }

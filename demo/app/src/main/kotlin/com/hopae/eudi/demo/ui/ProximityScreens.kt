@@ -134,8 +134,7 @@ private val BLE_PERMISSIONS: Array<String> = if (Build.VERSION.SDK_INT >= Build.
     arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
 else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
 
-/** What the reader requests — the PID (mdoc); the holder answers if it holds a matching mdoc credential. */
-/** The document types this demo reader can request — picked one at a time on the reader screen. */
+/** The document types this demo reader can request — pick one or several on the reader screen. */
 enum class ReaderDocKind(val label: String, val doctype: String) {
     PID("Personal ID", "eu.europa.ec.eudi.pid.1"),
     MDL("Driving Licence", "org.iso.18013.5.1.mDL"),
@@ -143,7 +142,8 @@ enum class ReaderDocKind(val label: String, val doctype: String) {
     PHOTOID("Photo ID", "org.iso.23220.photoid.1"),
 }
 
-private fun readerRequest(kind: ReaderDocKind) = listOf(
+/** One DocRequest per selected kind — a single DeviceRequest may carry several (ISO 18013-5 §8.3.2.1.2.1). */
+private fun readerRequest(kinds: Set<ReaderDocKind>) = ReaderDocKind.entries.filter { it in kinds }.map { kind ->
     RequestedDocument(
         kind.doctype,
         when (kind) {
@@ -155,8 +155,8 @@ private fun readerRequest(kind: ReaderDocKind) = listOf(
             // ISO 23220-4 Annex C: identity claims live in the generic 23220-2 namespace.
             ReaderDocKind.PHOTOID -> mapOf("org.iso.23220.1" to listOf("family_name", "given_name", "birth_date", "portrait", "age_over_18"))
         },
-    ),
-)
+    )
+}
 
 /** Holder present flow phases: waiting for a reader → reviewing its request → sending → terminal. */
 private enum class ProxPhase { Engaging, Consent, Sending, Done, Declined, Failed }
@@ -547,7 +547,8 @@ fun ProximityReaderScreen(wallet: Wallet) {
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf("Scan a wallet's QR or tap it over NFC to read its mdoc.") }
     var results by remember { mutableStateOf<List<VerifiedDocument>>(emptyList()) }
-    var kind by remember { mutableStateOf(ReaderDocKind.PID) }
+    // Multi-select: one DocRequest per picked kind; deselecting the last one is a no-op (a request needs ≥1).
+    var kinds by remember { mutableStateOf(setOf(ReaderDocKind.PID)) }
     var nfcWaiting by remember { mutableStateOf(false) } // waiting for the NFC tap → show the pulse
     var nfcJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var granted by remember { mutableStateOf(BLE_PERMISSIONS.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }) }
@@ -574,7 +575,7 @@ fun ProximityReaderScreen(wallet: Wallet) {
                     else -> { status = "❌ Engagement carries no BLE UUID"; return@launch }
                 }
                 status = "Requesting documents…"
-                val docs = wallet.reader.read(transport, engagement, readerRequest(kind))
+                val docs = wallet.reader.read(transport, engagement, readerRequest(kinds))
                 results = docs
                 status = if (docs.isEmpty()) "No documents returned" else "✅ Read ${docs.size} document(s)"
                 LogStore.log("Reader read ${docs.size} document(s) over BLE")
@@ -615,7 +616,7 @@ fun ProximityReaderScreen(wallet: Wallet) {
                 val uuids = if (eng.peripheralServerMode) Ble.PERIPHERAL_SERVER else Ble.CENTRAL_CLIENT
                 val transport = BleGattClientTransport(context, Ble.bytesToUuid(eng.serviceUuid), uuids, logger = LogWalletLogger()).also { it.connect() }
                 status = "Requesting documents…"
-                val docs = wallet.reader.read(transport, eng.deviceEngagement, readerRequest(kind), handoverNdef = handover.handoverSelect, handoverRequestNdef = handover.handoverRequest)
+                val docs = wallet.reader.read(transport, eng.deviceEngagement, readerRequest(kinds), handoverNdef = handover.handoverSelect, handoverRequestNdef = handover.handoverRequest)
                 results = docs
                 status = if (docs.isEmpty()) "No documents returned" else "✅ Read ${docs.size} document(s)"
                 LogStore.log("Reader read ${docs.size} document(s) over NFC+BLE")
@@ -653,9 +654,11 @@ fun ProximityReaderScreen(wallet: Wallet) {
                 style = MaterialTheme.typography.bodyMedium, color = c.inkMuted,
             )
         }
-        SectionLabel("Document to request")
+        SectionLabel("Documents to request")
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ReaderDocKind.entries.forEach { k -> DocKindChip(k, k == kind) { kind = k } }
+            ReaderDocKind.entries.forEach { k ->
+                DocKindChip(k, k in kinds) { kinds = if (k in kinds) (kinds - k).ifEmpty { kinds } else kinds + k }
+            }
         }
 
         PrimaryButton("Scan holder's QR", onClick = {

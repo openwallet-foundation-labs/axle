@@ -9,10 +9,10 @@ const config = {
 
   future: {v4: true},
 
-  url: 'https://hopae.github.io',
-  baseUrl: '/',
-  organizationName: 'hopae',
-  projectName: 'eudi-wallet-sdk',
+  url: 'https://lukasjhan.github.io',
+  baseUrl: '/Axle/',
+  organizationName: 'lukasjhan',
+  projectName: 'Axle',
   onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
 

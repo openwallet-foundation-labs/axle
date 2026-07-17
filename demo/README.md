@@ -56,3 +56,20 @@ The SDK's proximity engine (engagement, ECDH session, DeviceRequest → DeviceRe
 authentication) is complete and unit-tested. Presenting to an in-person reader additionally needs a
 **BLE `ProximityTransport`** adapter (a GATT peripheral) — that is device-only integration and is not
 included here. See the developer docs for a BLE transport guide.
+
+## Development notes
+
+- **App identity vs code namespace** — the `applicationId` is `com.hopae.axle.wallet` (label
+  "Axle Wallet") but the code package stays `com.hopae.eudi.demo`. Use the *application id* for
+  `adb pm/am/uninstall/logcat --pid`; use the code package when grepping sources.
+- **Logs**: `adb logcat -s EudiDemo`.
+- **Image claims render by element name.** The SDK exposes mdoc bstr values as base64url text
+  (`CborJson` — by design, for DCQL matching); `ui/ClaimImage.kt` detects
+  `portrait`/`enrolment_portrait_image`/`signature_usual_mark` by name and renders thumbnail rows on
+  every claim surface (detail, consents, proximity, reader). New image-bearing elements go in that
+  one list — and in the iOS mirror (`demo-ios` `CredentialContent.swift`).
+- **Presenting is request-driven by design.** The document detail page deliberately has no
+  proximity/present button; holder sharing starts from Home, and the reader screen requests **one
+  document kind at a time** (`ReaderDocKind` / `readerRequest(kind)` in `ui/ProximityScreens.kt`).
+- **This UI is mirrored 1:1 by `demo-ios`** — when changing `CredentialVisuals`, `CredentialContent`,
+  or screen flows, port the change in the same PR.

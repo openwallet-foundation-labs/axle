@@ -82,3 +82,47 @@ and the **RP Registrar** is a separate project at
 The Scheme Operator signing key and the issuer CA private keys are held offline
 (`trusted-list/secrets/`, gitignored — move to KMS/HSM for anything beyond the sandbox). Lists are re-issued
 at least every 6 months (Annex E `nextUpdate`).
+
+## Development notes
+
+### Verifying changes (project convention)
+
+- **Don't verify with local NestJS builds/servers.** The loop is: `npx tsc --noEmit` per service +
+  standalone Node checks against the service's `node_modules` (e.g. issue-and-parse an mdoc directly
+  with `@lukas.j.han/mdoc`), then deploy to the dev cluster and verify live.
+- Images are tagged with the **SDK repo commit SHA** (ECR tags are immutable — never re-tag): issuer
+  `<sha>`, verifier `<sha>-verifierNN`. Build with `docker build --platform linux/amd64`.
+- Runtime config lives in AWS Secrets Manager (one JSON secret per service) synced by
+  External Secrets: `put-secret-value` → annotate the ExternalSecret with `force-sync` → rollout.
+
+### Certificate profiles — test against ALL verifier stacks
+
+The sandbox Document Signers / CAs (minted by `trusted-list/tools/gen-signer.mjs`, keys under
+`trusted-list/secrets/`, map in `KEYS.md`) are consumed by three X.509 stacks with different
+strictness: **Java PKIX (kotlin), Node, and swift-certificates (iOS)**. swift-certificates rejects
+any chain carrying a *critical* extension no verifier policy handles — a spec-required critical EKU
+on the mDL DS broke iOS while Android/Node stayed green. **After any cert-profile change (especially
+critical extensions), run the fixture harness**:
+`issuer-be/tools/gen-mdoc-fixtures.ts` → `swift test --filter LiveIssuerFixtureTests`
+(see `swift/README.md`).
+
+Related: the mdoc library truncates MSO `ValidityInfo` tdates to whole seconds (ISO 18013-5 forbids
+fractional seconds) — don't rely on millisecond precision; third-party issuers may still emit
+fractional tdates, which the wallets accept leniently.
+
+### Adding a credential type end-to-end (checklist)
+
+1. `issuer-be/src/vci/credential-configs.ts` — new `CredentialConfig` (metadata/consent/issuance all
+   derive from it). New DSC only if it must chain to a different CA.
+2. `verifier-be/src/vp/dcql.ts` — `RequestableKey` + `REQUESTABLE` entry; `verifier-fe` card + the
+   ISO-mdoc gate.
+3. **Re-mint the RP registration** — `verifier-be/tools/mint-rp.mjs` + `mint-intermediary-rp.mjs`
+   must register the new credential/claims (RPRC_21), then update the verifier secret
+   (`VERIFIER_WRPAC/WRPRC/REGISTRAR_DATASET` + `_INTERMEDIARY`) — otherwise wallets flag the request
+   "out of registration scope". Registrar gotchas: re-minting creates a NEW RP (delete stale RPs with
+   the same identifier — `check-intended-use` matches the first); its `claimpath` query param is a
+   single path element, not a JSON array.
+4. iOS: add the doctype to `demo-ios/.../AxleWallet.entitlements` (DC API routing) — see
+   `ios/README.md`. Android needs nothing (registration is store-driven).
+5. Demo cosmetics: `CredentialVisuals` (both platforms), issuer-fe `DESCRIPTIONS`, reader
+   `ReaderDocKind` if it should be requestable in person.

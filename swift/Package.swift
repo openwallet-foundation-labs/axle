@@ -109,7 +109,7 @@ let package = Package(
         .testTarget(name: "GoldenTests", dependencies: ["SdJwt", "CborCose", .product(name: "Crypto", package: "swift-crypto")]),
         .testTarget(
             name: "TrustTests",
-            dependencies: ["Trust", "WalletTestKit", .product(name: "X509", package: "swift-certificates")],
+            dependencies: ["Trust", "TrustList", "MDoc", "WalletTestKit", .product(name: "X509", package: "swift-certificates")],
             resources: [
                 .copy("Resources/pid_issuer_ca_ut_02.der"),
                 .copy("Resources/registrar_ca.der"),

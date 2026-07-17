@@ -1,4 +1,5 @@
 import Foundation
+import SwiftASN1
 import X509
 
 /// Trust anchors (IACA / issuer-CA roots) the wallet is configured with — populated from the
@@ -57,6 +58,7 @@ public struct X509ChainValidator {
         let time = validationTime
         var verifier = Verifier(rootCertificates: CertificateStore(anchors.roots)) {
             RFC5280Policy(validationTime: time)
+            AcceptExtendedKeyUsagePolicy()
         }
         let result = await verifier.validate(
             leafCertificate: leaf,
@@ -68,5 +70,18 @@ public struct X509ChainValidator {
         case let .couldNotValidate(failures):
             throw TrustError("chain does not validate to a trust anchor: \(failures)")
         }
+    }
+}
+
+/// Marks `extendedKeyUsage` as a handled extension so a certificate that carries it CRITICAL is not
+/// rejected as bearing an unhandled critical extension. ISO/IEC 18013-5 Annex B REQUIRES a critical EKU
+/// (id-mdl-kp-mdlDS, 1.0.18013.5.1.2) on the mDL Document Signer — `RFC5280Policy` does not process EKU,
+/// so without this policy every spec-conformant mDL/mdoc DS chain fails validation (the Java/Node stacks
+/// treat EKU as a known extension natively). Purpose-specific EKU *enforcement* (e.g. requiring mdlDS for
+/// mdoc issuer auth, TS 119 475 EKUs for a WRPAC) remains with the calling context.
+private struct AcceptExtendedKeyUsagePolicy: VerifierPolicy {
+    let verifyingCriticalExtensions: [ASN1ObjectIdentifier] = [.X509ExtensionID.extendedKeyUsage]
+    mutating func chainMeetsPolicyRequirements(chain: UnverifiedCertificateChain) async -> PolicyEvaluationResult {
+        .meetsPolicy
     }
 }

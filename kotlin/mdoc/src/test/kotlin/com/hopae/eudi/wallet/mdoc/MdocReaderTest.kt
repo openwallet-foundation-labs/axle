@@ -74,6 +74,47 @@ class MdocReaderTest {
         assertTrue(verified.elements[namespace]!!["age_over_18"] == null) // not disclosed
     }
 
+    /**
+     * ISO 18013-7 Annex C DeviceRequests may carry several DocRequests (the verifier demo asks for e.g.
+     * Photo ID + Proof of Age in one DC API call); the DeviceResponse must answer with one `Document` per
+     * satisfied request — each device-authenticated with its own DeviceKey — not just the first.
+     */
+    @Test
+    fun multiDocumentDeviceResponse() = runBlocking {
+        val p = Party()
+        val avDocType = "eu.europa.ec.av.1" // AV Profile: namespace == docType
+        val avDevice = p.area.createKey(KeySpec(secureArea = p.area.id, algorithm = SigningAlgorithm.ES256))
+        val avMdoc = MdocTestIssuer.issue(
+            area = p.area, issuerKey = p.issuer, deviceKey = avDevice.publicKey, docType = avDocType, namespace = avDocType,
+            elements = listOf("age_over_18" to Cbor.Bool(true)),
+            x5chain = listOf(byteArrayOf(0x30, 0x03)),
+            signed = Instant.parse("2026-01-01T00:00:00Z"), validFrom = Instant.parse("2026-01-01T00:00:00Z"), validUntil = Instant.parse("2027-01-01T00:00:00Z"),
+        )
+        val st = MdocSessionTranscript.dcApiIsoMdoc("ZW5j", "https://reader.example")
+
+        val deviceResponse = MdocPresenter.deviceResponse(
+            listOf(
+                PresentedDocument(
+                    issuerSigned = IssuerSigned.decode(mdoc(p)), docType = docType,
+                    disclosed = mapOf(namespace to listOf("family_name")),
+                    deviceAuth = DeviceAuth.Signature(SecureAreaCoseSigner(p.area, p.device.handle, SigningAlgorithm.ES256)),
+                ),
+                PresentedDocument(
+                    issuerSigned = IssuerSigned.decode(avMdoc), docType = avDocType,
+                    disclosed = mapOf(avDocType to listOf("age_over_18")),
+                    deviceAuth = DeviceAuth.Signature(SecureAreaCoseSigner(p.area, avDevice.handle, SigningAlgorithm.ES256)),
+                ),
+            ),
+            st,
+        )
+
+        val verified = readerFacade(p).verifyDeviceResponse(deviceResponse, st)
+        assertEquals(listOf(docType, avDocType), verified.map { it.docType })
+        assertTrue(verified.all { it.deviceAuthenticated })
+        assertEquals(Cbor.Text("Han"), verified[0].elements[namespace]!!["family_name"])
+        assertEquals(Cbor.Bool(true), verified[1].elements[avDocType]!!["age_over_18"])
+    }
+
     /** §8.3.2.1.2.3 Table 8: a non-zero DeviceResponse status (mdoc returned no documents) is surfaced. */
     @Test
     fun nonZeroDeviceResponseStatusRejected(): Unit = runBlocking {

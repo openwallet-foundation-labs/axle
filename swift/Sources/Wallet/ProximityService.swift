@@ -189,38 +189,45 @@ public struct ProximityService {
         }.map { $0.id }
     }
 
-    /// Builds the DeviceResponse for the first requested document (single-document retrieval; multi-doc is a
-    /// follow-up). `eReaderKey` / `transcriptBytes` are only needed for `deviceMac`; the Digital Credentials
+    /// Builds the DeviceResponse for every requested document the selection chose a credential for — one
+    /// `Document` per satisfied `DocRequest` (ISO 18013-5 §8.3.2.1.2.2), each device-authenticated with its own
+    /// DeviceKey. `eReaderKey` / `transcriptBytes` are only needed for `deviceMac`; the Digital Credentials
     /// API path has no EReaderKey and always signs.
     private func buildDeviceResponse(
         _ deviceRequest: DeviceRequest, _ transcript: Cbor, _ selection: ProximitySelection,
         eReaderKey: EcPublicKey? = nil, transcriptBytes: [UInt8]? = nil
     ) async throws -> [UInt8] {
-        guard let docRequest = deviceRequest.docRequests.first(where: { selection.chosen[$0.docType] != nil }) else {
+        let docRequests = deviceRequest.docRequests.filter { selection.chosen[$0.docType] != nil }
+        guard !docRequests.isEmpty else {
             throw ProximityError.noMatchingCredential("no chosen document")
         }
-        let credentialId = selection.chosen[docRequest.docType]!
-        guard let consumed = try await store.consumeInstance(credentialId) else {
-            throw ProximityError.noMatchingCredential(docRequest.docType)
-        }
-        let area = secureAreas.first(where: { $0.id == consumed.instance.key.secureArea }) ?? secureAreas[0]
-        let issuerSigned = try IssuerSigned.decode(consumed.instance.payload)
 
-        let deviceAuth: DeviceAuth
-        if case .mac = deviceAuthMode, let eReaderKey, let transcriptBytes {
-            guard area.capabilities.keyAgreement else {
-                throw ProximityError.sessionFailed("deviceMac needs a key-agreement DeviceKey; '\(area.id)' cannot do ECDH")
+        var documents: [PresentedDocument] = []
+        for docRequest in docRequests {
+            let credentialId = selection.chosen[docRequest.docType]!
+            guard let consumed = try await store.consumeInstance(credentialId) else {
+                throw ProximityError.noMatchingCredential(docRequest.docType)
             }
-            // Zab = ECDH(DeviceKey, EReaderKey) computed inside the secure area — the private half never leaves.
-            let zab = try await area.keyAgreement(key: consumed.instance.key, peerPublicKey: eReaderKey, hint: nil)
-            deviceAuth = .mac(emacKey: try SessionEncryption.emacKey(sharedSecret: zab, sessionTranscriptBytes: transcriptBytes))
-        } else {
-            deviceAuth = .signature(signer: SecureAreaCoseSigner(area: area, key: consumed.instance.key, algorithm: .es256))
-        }
+            let area = secureAreas.first(where: { $0.id == consumed.instance.key.secureArea }) ?? secureAreas[0]
+            let issuerSigned = try IssuerSigned.decode(consumed.instance.payload)
 
-        return try await MdocPresenter.deviceResponse(
-            issuerSigned: issuerSigned, docType: docRequest.docType, disclosed: docRequest.disclosable(issuerSigned),
-            sessionTranscript: transcript, deviceAuth: deviceAuth)
+            let deviceAuth: DeviceAuth
+            if case .mac = deviceAuthMode, let eReaderKey, let transcriptBytes {
+                guard area.capabilities.keyAgreement else {
+                    throw ProximityError.sessionFailed("deviceMac needs a key-agreement DeviceKey; '\(area.id)' cannot do ECDH")
+                }
+                // Zab = ECDH(DeviceKey, EReaderKey) computed inside the secure area — the private half never leaves.
+                let zab = try await area.keyAgreement(key: consumed.instance.key, peerPublicKey: eReaderKey, hint: nil)
+                deviceAuth = .mac(emacKey: try SessionEncryption.emacKey(sharedSecret: zab, sessionTranscriptBytes: transcriptBytes))
+            } else {
+                deviceAuth = .signature(signer: SecureAreaCoseSigner(area: area, key: consumed.instance.key, algorithm: .es256))
+            }
+
+            documents.append(PresentedDocument(
+                issuerSigned: issuerSigned, docType: docRequest.docType,
+                disclosed: docRequest.disclosable(issuerSigned), deviceAuth: deviceAuth))
+        }
+        return try await MdocPresenter.deviceResponse(documents: documents, sessionTranscript: transcript)
     }
 
     private func recordSuccess(_ request: ProximityRequest, _ selection: ProximitySelection) async throws {

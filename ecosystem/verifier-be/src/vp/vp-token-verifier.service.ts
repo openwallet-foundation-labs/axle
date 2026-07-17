@@ -221,8 +221,13 @@ export class VpTokenVerifierService {
     cred: RequestableCredential,
     anchors: x509.X509Certificate[],
   ): Promise<Record<string, unknown>> {
-    const doc = deviceResponse.documents?.find((d) => d.docType === cred.type) ?? deviceResponse.documents?.[0];
-    if (!doc) throw new Error(`mdoc DeviceResponse has no document for docType '${cred.type}'`);
+    // No fallback to documents[0]: a wallet that answered only part of a multi-document request must produce
+    // a "missing document" error for the absent docType, not have another document's claims read (and crash).
+    const doc = deviceResponse.documents?.find((d) => d.docType === cred.type);
+    if (!doc) {
+      const got = deviceResponse.documents?.map((d) => d.docType).join(', ') || 'none';
+      throw new Error(`mdoc DeviceResponse has no document for docType '${cred.type}' (returned: ${got})`);
+    }
 
     // Revocation: the MSO may carry a Token Status List reference (ISO/IEC 18013-5 `status.status_list`,
     // @lukas.j.han/mdoc >= 0.6.0). Reuse the same TSL check as SD-JWT VC — a credential without one is accepted.

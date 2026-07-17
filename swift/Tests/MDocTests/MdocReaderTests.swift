@@ -123,6 +123,42 @@ final class MdocReaderTests: XCTestCase {
         XCTAssertNil(verified.elements[namespace]?["age_over_18"]) // not disclosed
     }
 
+    /// ISO 18013-7 Annex C DeviceRequests may carry several DocRequests (the verifier demo asks for e.g.
+    /// Photo ID + Proof of Age in one DC API call); the DeviceResponse must answer with one `Document` per
+    /// satisfied request — each device-authenticated with its own DeviceKey — not just the first.
+    func testMultiDocumentDeviceResponse() async throws {
+        let p = try await Party()
+        let avDocType = "eu.europa.ec.av.1" // AV Profile: namespace == docType
+        let avDevice = try await p.area.createKey(spec: KeySpec(secureArea: p.area.id, algorithm: .es256))
+        let avMdoc = try await MdocTestIssuer.issue(
+            area: p.area, issuerKey: p.issuer, deviceKey: avDevice.publicKey, docType: avDocType, namespace: avDocType,
+            elements: [("age_over_18", .bool(true))],
+            x5chain: [[0x30, 0x03]],
+            signed: MdocTestIssuer.isoFormatter.date(from: "2026-01-01T00:00:00Z")!,
+            validFrom: MdocTestIssuer.isoFormatter.date(from: "2026-01-01T00:00:00Z")!,
+            validUntil: MdocTestIssuer.isoFormatter.date(from: "2027-01-01T00:00:00Z")!)
+        let st = try MdocSessionTranscript.dcApiIsoMdoc(encryptionInfoBase64: "ZW5j", origin: "https://reader.example")
+
+        let deviceResponse = try await MdocPresenter.deviceResponse(
+            documents: [
+                PresentedDocument(
+                    issuerSigned: try IssuerSigned.decode(try await mdoc(p)), docType: docType,
+                    disclosed: [namespace: ["family_name"]],
+                    deviceAuth: .signature(signer: SecureAreaCoseSigner(area: p.area, key: p.device.handle, algorithm: .es256))),
+                PresentedDocument(
+                    issuerSigned: try IssuerSigned.decode(avMdoc), docType: avDocType,
+                    disclosed: [avDocType: ["age_over_18"]],
+                    deviceAuth: .signature(signer: SecureAreaCoseSigner(area: p.area, key: avDevice.handle, algorithm: .es256))),
+            ],
+            sessionTranscript: st)
+
+        let verified = try await readerFacade(p).verifyDeviceResponse(deviceResponse, sessionTranscript: st)
+        XCTAssertEqual([docType, avDocType], verified.map(\.docType))
+        XCTAssertTrue(verified.allSatisfy(\.deviceAuthenticated))
+        XCTAssertEqual(.text("Han"), verified[0].elements[namespace]?["family_name"])
+        XCTAssertEqual(.bool(true), verified[1].elements[avDocType]?["age_over_18"])
+    }
+
     /// §8.3.2.1.2.3 Table 8: a non-zero DeviceResponse status (mdoc returned no documents) is surfaced.
     func testNonZeroDeviceResponseStatusRejected() async throws {
         let response = try CborEncoder.encode(.map([(.text("version"), .text("1.0")), (.text("status"), .uint(10))]))

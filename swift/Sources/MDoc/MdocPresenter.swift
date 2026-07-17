@@ -16,6 +16,33 @@ public enum DeviceAuth {
     case mac(emacKey: [UInt8])
 }
 
+/// One document of a (possibly multi-document) `DeviceResponse`: which issuer-signed credential to
+/// present, which elements to disclose, and how the device authenticates it. Each document carries
+/// its own `DeviceAuth` — `DeviceAuthentication` is per-docType and each mdoc has its own DeviceKey.
+public struct PresentedDocument {
+    public let issuerSigned: IssuerSigned
+    public let docType: String
+    /// namespace -> element identifiers to disclose.
+    public let disclosed: [String: [String]]
+    public let deviceAuth: DeviceAuth
+    /// Device-signed data elements (namespace -> id -> value), e.g. OpenID4VP mdoc transaction data (B.2.1).
+    public let deviceSignedNamespaces: [String: [String: Cbor]]
+
+    public init(
+        issuerSigned: IssuerSigned,
+        docType: String,
+        disclosed: [String: [String]],
+        deviceAuth: DeviceAuth,
+        deviceSignedNamespaces: [String: [String: Cbor]] = [:]
+    ) {
+        self.issuerSigned = issuerSigned
+        self.docType = docType
+        self.disclosed = disclosed
+        self.deviceAuth = deviceAuth
+        self.deviceSignedNamespaces = deviceSignedNamespaces
+    }
+}
+
 /// Builds an mdoc `DeviceResponse` (ISO 18013-5 §8.3.2.1.2.2) for presentation: keeps only the
 /// disclosed issuer-signed items and produces `DeviceSigned` — a `deviceSignature` or a `deviceMac`
 /// over the `DeviceAuthentication` structure (detached payload) bound to the `sessionTranscript`.
@@ -38,6 +65,7 @@ public enum MdocPresenter {
             deviceAuth: .signature(signer: deviceSigner, algorithm: deviceSignAlgorithm))
     }
 
+    /// Convenience for the single-document response (one `DocRequest` answered).
     public static func deviceResponse(
         issuerSigned: IssuerSigned,
         docType: String,
@@ -47,6 +75,34 @@ public enum MdocPresenter {
         /// Device-signed data elements (namespace -> id -> value), e.g. OpenID4VP mdoc transaction data (B.2.1).
         deviceSignedNamespaces: [String: [String: Cbor]] = [:]
     ) async throws -> [UInt8] {
+        try await deviceResponse(
+            documents: [PresentedDocument(
+                issuerSigned: issuerSigned, docType: docType, disclosed: disclosed,
+                deviceAuth: deviceAuth, deviceSignedNamespaces: deviceSignedNamespaces)],
+            sessionTranscript: sessionTranscript)
+    }
+
+    /// A `DeviceResponse` answering several `DocRequest`s at once — one `Document` per `documents` entry.
+    public static func deviceResponse(documents: [PresentedDocument], sessionTranscript: Cbor) async throws -> [UInt8] {
+        guard !documents.isEmpty else { throw MdocError("a DeviceResponse needs at least one document") }
+        var docs: [Cbor] = []
+        for presented in documents {
+            docs.append(try await document(presented, sessionTranscript: sessionTranscript))
+        }
+        let deviceResponse = Cbor.map([
+            (.text("version"), .text("1.0")),
+            (.text("documents"), .array(docs)),
+            (.text("status"), .int(0)),
+        ])
+        return try CborEncoder.encode(deviceResponse)
+    }
+
+    private static func document(_ presented: PresentedDocument, sessionTranscript: Cbor) async throws -> Cbor {
+        let issuerSigned = presented.issuerSigned
+        let docType = presented.docType
+        let disclosed = presented.disclosed
+        let deviceAuth = presented.deviceAuth
+        let deviceSignedNamespaces = presented.deviceSignedNamespaces
         // Keep only the disclosed items, re-emitting their exact IssuerSignedItemBytes (#6.24).
         var filteredNs: [(Cbor, Cbor)] = []
         for (ns, items) in issuerSigned.nameSpaces {
@@ -87,16 +143,10 @@ public enum MdocPresenter {
             (.text("deviceAuth"), .map([deviceAuthEntry])),
         ])
 
-        let document = Cbor.map([
+        return Cbor.map([
             (.text("docType"), .text(docType)),
             (.text("issuerSigned"), issuerSignedCbor),
             (.text("deviceSigned"), deviceSigned),
         ])
-        let deviceResponse = Cbor.map([
-            (.text("version"), .text("1.0")),
-            (.text("documents"), .array([document])),
-            (.text("status"), .int(0)),
-        ])
-        return try CborEncoder.encode(deviceResponse)
     }
 }

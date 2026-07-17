@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		AA30000000000000000000C1 /* Wallet in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000B1 /* Wallet */; };
-		AA30000000000000000000C2 /* WalletTestKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000B2 /* WalletTestKit */; };
 		AA30000000000000000000C3 /* AppleCore in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000B3 /* AppleCore */; };
 		AA30000000000000000000C4 /* AppleProximity in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000B4 /* AppleProximity */; };
 		AA30000000000000000000C5 /* AppleAttestation in Frameworks */ = {isa = PBXBuildFile; productRef = AA20000000000000000000B5 /* AppleAttestation */; };
@@ -92,7 +91,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				AA30000000000000000000C1 /* Wallet in Frameworks */,
-				AA30000000000000000000C2 /* WalletTestKit in Frameworks */,
 				AA30000000000000000000C3 /* AppleCore in Frameworks */,
 				AA30000000000000000000C4 /* AppleProximity in Frameworks */,
 				AA30000000000000000000C5 /* AppleAttestation in Frameworks */,
@@ -156,7 +154,6 @@
 			name = AxleWallet;
 			packageProductDependencies = (
 				AA20000000000000000000B1 /* Wallet */,
-				AA20000000000000000000B2 /* WalletTestKit */,
 				AA20000000000000000000B3 /* AppleCore */,
 				AA20000000000000000000B4 /* AppleProximity */,
 				AA20000000000000000000B5 /* AppleAttestation */,
@@ -579,11 +576,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA10000000000000000000A1 /* XCLocalSwiftPackageReference "../../swift" */;
 			productName = Wallet;
-		};
-		AA20000000000000000000B2 /* WalletTestKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AA10000000000000000000A1 /* XCLocalSwiftPackageReference "../../swift" */;
-			productName = WalletTestKit;
 		};
 		AA20000000000000000000B3 /* AppleCore */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -93,6 +93,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.hopae.eudi.wallet.Credential
 import com.hopae.eudi.wallet.Lifecycle
 import com.hopae.eudi.wallet.RequestedDocumentView
@@ -602,6 +603,15 @@ fun ProximityReaderScreen(wallet: Wallet) {
     // Check BLE readiness the moment the screen opens (i.e. when the Home "Reader" button is pressed), so a
     // missing permission / disabled Bluetooth is prompted up front instead of surfacing as a silent timeout.
     LaunchedEffect(Unit) { ensureReady {} }
+    // Hold NFC reader mode for as long as this screen is up, not just for the tap itself. Letting it go while the
+    // mdoc is still coupled hands the tag to the platform dispatcher, which throws "New tag found" over the app
+    // (backgrounding it mid-BLE). Android drops reader mode when we pause, so re-arm on resume — and release on
+    // the way out, since reader mode suppresses card emulation and the holder screen needs it.
+    LifecycleResumeEffect(Unit) {
+        val activity = context as Activity
+        if (!nfcWaiting) NfcReader.armIdle(activity) // don't clobber the callback of a tap already being waited on
+        onPauseOrDispose { NfcReader.release(activity) }
+    }
 
     fun onNfc() {
         results = emptyList()
@@ -613,8 +623,22 @@ fun ProximityReaderScreen(wallet: Wallet) {
                 nfcWaiting = false // tap received — the NFC handover is done, the rest is BLE
                 val eng = MdocNfcEngagement.parseHandoverSelect(handover.handoverSelect) ?: run { status = "❌ Not an mdoc NFC tag"; return@launch }
                 status = if (handover.negotiated) "Connecting over BLE (negotiated)…" else "Connecting over BLE…"
-                val uuids = if (eng.peripheralServerMode) Ble.PERIPHERAL_SERVER else Ble.CENTRAL_CLIENT
-                val transport = BleGattClientTransport(context, Ble.bytesToUuid(eng.serviceUuid), uuids, logger = LogWalletLogger()).also { it.connect() }
+                val uuid = Ble.bytesToUuid(eng.serviceUuid)
+                LogStore.log(
+                    "NFC handover ${if (handover.negotiated) "negotiated" else "static"}: " +
+                        "mdoc ${if (eng.peripheralServerMode) "peripheral server" else "central client"} mode, uuid=$uuid",
+                )
+                // Same role split as the QR path: the mdoc's mode decides who advertises. In peripheral-server mode
+                // it advertises and we connect as GATT client; in central-client mode *we* are the peripheral, so we
+                // must stand up the GATT server — connecting as a client there leaves both sides waiting.
+                val transport: ProximityTransport = if (eng.peripheralServerMode) {
+                    BleGattClientTransport(context, uuid, Ble.PERIPHERAL_SERVER, logger = LogWalletLogger()).also { it.connect() }
+                } else {
+                    BleGattServerTransport(
+                        context, uuid, Ble.CENTRAL_CLIENT,
+                        identKey = DeviceEngagement.eDeviceKeyBytes(eng.deviceEngagement), logger = LogWalletLogger(),
+                    ).also { it.start() }
+                }
                 status = "Requesting documents…"
                 val docs = wallet.reader.read(transport, eng.deviceEngagement, readerRequest(kinds), handoverNdef = handover.handoverSelect, handoverRequestNdef = handover.handoverRequest)
                 results = docs
@@ -625,6 +649,9 @@ fun ProximityReaderScreen(wallet: Wallet) {
                 LogStore.log("❌ Reader (NFC): ${e.message}")
             } finally {
                 nfcWaiting = false
+                // Back to idle-armed, never off: the phones are typically still coupled here, and dropping reader
+                // mode would let the platform re-dispatch the mdoc as an unknown tag right on top of us.
+                NfcReader.armIdle(context as Activity)
             }
         }
     }

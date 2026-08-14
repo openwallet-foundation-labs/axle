@@ -18,9 +18,15 @@ class MdocVerifierTest {
     private val namespace = "org.iso.18013.5.1"
     private val now = Instant.parse("2026-01-01T00:00:00Z")
 
-    private class TestTrust(val expected: EcPublicKey) : MdocIssuerTrust {
+    private class TestTrust(
+        val expected: EcPublicKey,
+        /** DS certificate window for §9.3.1 step 5; null keeps the check out of the way of other cases. */
+        val notBefore: Instant? = null,
+        val notAfter: Instant? = null,
+    ) : MdocIssuerTrust {
         // Unit-level: return the known issuer key (chain validation is covered by the trust module).
-        override suspend fun issuerKey(x5chain: List<ByteArray>): EcPublicKey = expected
+        override suspend fun issuerKey(x5chain: List<ByteArray>): MdocIssuerKey =
+            MdocIssuerKey(expected, notBefore, notAfter)
     }
 
     private fun issued(area: SoftwareSecureArea, issuerKey: com.hopae.eudi.wallet.spi.KeyInfo, deviceKey: EcPublicKey,
@@ -140,6 +146,67 @@ class MdocVerifierTest {
             MdocVerifier(TestTrust(issuerKey.publicKey), now = { Instant.parse("2026-12-01T00:00:00Z") })
                 .verify(IssuerSigned.decode(bytes))
         }
+    }
+
+    /**
+     * ISO 18013-5 §9.3.1 step 5, first bullet: "the 'signed' date is within the validity period of the
+     * certificate in the MSO header". The MSO here is signed 2026-01-01.
+     */
+    @Test
+    fun signedBeforeTheDocumentSignerCertificateRejected(): Unit = runBlocking {
+        val area = SoftwareSecureArea()
+        val issuerKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val deviceKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256)).publicKey
+        val bytes = issued(area, issuerKey, deviceKey)
+
+        // DS certificate only came into existence in February — it never vouched for a January signature.
+        val trust = TestTrust(issuerKey.publicKey, notBefore = Instant.parse("2026-02-01T00:00:00Z"))
+        assertFailsWith<MdocException> {
+            MdocVerifier(trust, now = { now }).verify(IssuerSigned.decode(bytes))
+        }
+    }
+
+    @Test
+    fun signedAfterTheDocumentSignerCertificateRejected(): Unit = runBlocking {
+        val area = SoftwareSecureArea()
+        val issuerKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val deviceKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256)).publicKey
+        val bytes = issued(area, issuerKey, deviceKey)
+
+        val trust = TestTrust(issuerKey.publicKey, notAfter = Instant.parse("2025-12-01T00:00:00Z"))
+        assertFailsWith<MdocException> {
+            MdocVerifier(trust, now = { now }).verify(IssuerSigned.decode(bytes))
+        }
+    }
+
+    /** Signed inside the window passes — and stays valid even once that certificate has expired. */
+    @Test
+    fun signedInsideTheDocumentSignerWindowAccepted() = runBlocking {
+        val area = SoftwareSecureArea()
+        val issuerKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val deviceKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256)).publicKey
+        val bytes = issued(area, issuerKey, deviceKey)
+
+        val trust = TestTrust(
+            issuerKey.publicKey,
+            notBefore = Instant.parse("2025-06-01T00:00:00Z"),
+            notAfter = Instant.parse("2026-03-01T00:00:00Z"), // already expired at `now`, but not when signed
+        )
+        val verified = MdocVerifier(trust, now = { Instant.parse("2026-06-01T00:00:00Z") })
+            .verify(IssuerSigned.decode(bytes))
+        assertEquals(docType, verified.docType)
+    }
+
+    /** A trust implementation that cannot supply the window leaves the step-5 certificate check out. */
+    @Test
+    fun missingCertificateWindowSkipsTheCheck() = runBlocking {
+        val area = SoftwareSecureArea()
+        val issuerKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val deviceKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256)).publicKey
+        val bytes = issued(area, issuerKey, deviceKey)
+
+        val verified = MdocVerifier(TestTrust(issuerKey.publicKey), now = { now }).verify(IssuerSigned.decode(bytes))
+        assertEquals(docType, verified.docType)
     }
 
     private fun ByteArray.indexOf(sub: ByteArray): Int {

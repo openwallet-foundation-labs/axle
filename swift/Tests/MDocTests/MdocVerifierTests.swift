@@ -13,7 +13,12 @@ final class MdocVerifierTests: XCTestCase {
 
     private struct TestTrust: MdocIssuerTrust {
         let expected: EcPublicKey // unit-level: chain validation is covered by the Trust module
-        func issuerKey(x5chain: [[UInt8]]) async throws -> EcPublicKey { expected }
+        /// DS certificate window for §9.3.1 step 5; nil keeps the check out of the way of other cases.
+        var notBefore: Date?
+        var notAfter: Date?
+        func issuerKey(x5chain: [[UInt8]]) async throws -> MdocIssuerKey {
+            MdocIssuerKey(key: expected, notBefore: notBefore, notAfter: notAfter)
+        }
     }
 
     private func issued(area: SoftwareSecureArea, issuerKey: KeyInfo, deviceKey: EcPublicKey,
@@ -151,5 +156,65 @@ final class MdocVerifierTests: XCTestCase {
         guard needle.count <= haystack.count else { return nil }
         for i in 0...(haystack.count - needle.count) where Array(haystack[i..<i + needle.count]) == needle { return i }
         return nil
+    }
+
+    // MARK: - §9.3.1 step 5: 'signed' within the Document Signer certificate's validity period
+
+    /// The MSO fixtures are signed 2026-01-01; a DS certificate that only began in February never vouched
+    /// for that signature.
+    func testSignedBeforeTheDocumentSignerCertificateRejected() async throws {
+        let area = SoftwareSecureArea()
+        let issuerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let deviceKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256)).publicKey
+        let bytes = try await issued(area: area, issuerKey: issuerKey, deviceKey: deviceKey)
+
+        let trust = TestTrust(expected: issuerKey.publicKey,
+                              notBefore: MsoCodec.isoFormatter.date(from: "2026-02-01T00:00:00Z")!)
+        let verifier = MdocVerifier(trust: trust, now: { [now] in now })
+        do {
+            _ = try await verifier.verify(try IssuerSigned.decode(bytes))
+            XCTFail("expected §9.3.1 step 5 to reject a signature predating the DS certificate")
+        } catch {}
+    }
+
+    func testSignedAfterTheDocumentSignerCertificateRejected() async throws {
+        let area = SoftwareSecureArea()
+        let issuerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let deviceKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256)).publicKey
+        let bytes = try await issued(area: area, issuerKey: issuerKey, deviceKey: deviceKey)
+
+        let trust = TestTrust(expected: issuerKey.publicKey, notAfter: MsoCodec.isoFormatter.date(from: "2025-12-01T00:00:00Z")!)
+        let verifier = MdocVerifier(trust: trust, now: { [now] in now })
+        do {
+            _ = try await verifier.verify(try IssuerSigned.decode(bytes))
+            XCTFail("expected §9.3.1 step 5 to reject a signature postdating the DS certificate")
+        } catch {}
+    }
+
+    /// Signed inside the window passes — and stays valid even once that certificate has expired.
+    func testSignedInsideTheDocumentSignerWindowAccepted() async throws {
+        let area = SoftwareSecureArea()
+        let issuerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let deviceKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256)).publicKey
+        let bytes = try await issued(area: area, issuerKey: issuerKey, deviceKey: deviceKey)
+
+        let trust = TestTrust(expected: issuerKey.publicKey,
+                              notBefore: MsoCodec.isoFormatter.date(from: "2025-06-01T00:00:00Z")!,
+                              // already expired at `now`, but not when the MSO was signed
+                              notAfter: MsoCodec.isoFormatter.date(from: "2026-03-01T00:00:00Z")!)
+        let verified = try await MdocVerifier(trust: trust, now: { [now] in now }).verify(try IssuerSigned.decode(bytes))
+        XCTAssertEqual(docType, verified.docType)
+    }
+
+    /// A trust implementation that cannot supply the window leaves the step-5 certificate check out.
+    func testMissingCertificateWindowSkipsTheCheck() async throws {
+        let area = SoftwareSecureArea()
+        let issuerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let deviceKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256)).publicKey
+        let bytes = try await issued(area: area, issuerKey: issuerKey, deviceKey: deviceKey)
+
+        let verified = try await MdocVerifier(trust: TestTrust(expected: issuerKey.publicKey), now: { [now] in now })
+            .verify(try IssuerSigned.decode(bytes))
+        XCTAssertEqual(docType, verified.docType)
     }
 }

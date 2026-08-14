@@ -28,7 +28,7 @@ class MdocReaderTest {
         val device = runBlocking { area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256)) }
     }
 
-    private fun issuerTrust(key: EcPublicKey) = MdocIssuerTrust { key }
+    private fun issuerTrust(key: EcPublicKey) = MdocIssuerTrust { MdocIssuerKey(key) }
 
     private fun mdoc(p: Party): ByteArray = runBlocking {
         MdocTestIssuer.issue(
@@ -206,5 +206,28 @@ class MdocReaderTest {
         )
         val reader = MdocReader(issuerTrust = issuerTrust(rogue.publicKey), now = { Instant.parse("2026-06-01T00:00:00Z") })
         assertFailsWith<MdocException> { reader.verifyDeviceResponse(deviceResponse, st) }
+    }
+
+    /**
+     * ISO 18013-5 §9.3.1 step 4: "verify that the DocType in the MSO matches the relevant DocType in the
+     * Documents structure". `DeviceAuthentication` is signed over the Document's docType while the elements
+     * are vouched for by the MSO's — a mismatch means the two halves describe different credentials, so the
+     * reader must reject rather than report the MSO's type over someone else's device binding.
+     */
+    @Test
+    fun docTypeMismatchBetweenMsoAndDocumentRejected(): Unit = runBlocking {
+        val p = Party()
+        val issuerSigned = IssuerSigned.decode(mdoc(p)) // MSO docType = org.iso.18013.5.1.mDL
+        val st = MdocSessionTranscript.dcApiIsoMdoc("ZW5j", "https://verifier.example")
+
+        // Present the same issuer-signed credential under a different Document docType.
+        val deviceResponse = MdocPresenter.deviceResponse(
+            issuerSigned = issuerSigned, docType = "eu.europa.ec.eudi.pid.1",
+            disclosed = mapOf(namespace to listOf("family_name")),
+            sessionTranscript = st, deviceSigner = SecureAreaCoseSigner(p.area, p.device.handle, SigningAlgorithm.ES256),
+        )
+
+        val e = assertFailsWith<MdocException> { readerFacade(p).verifyDeviceResponse(deviceResponse, st) }
+        assertTrue(e.message!!.contains("docType mismatch"), "unexpected: ${e.message}")
     }
 }

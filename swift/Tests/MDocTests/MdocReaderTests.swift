@@ -15,7 +15,7 @@ final class MdocReaderTests: XCTestCase {
 
     private struct TestIssuerTrust: MdocIssuerTrust {
         let key: EcPublicKey
-        func issuerKey(x5chain: [[UInt8]]) async throws -> EcPublicKey { key }
+        func issuerKey(x5chain: [[UInt8]]) async throws -> MdocIssuerKey { MdocIssuerKey(key: key) }
     }
 
     private struct Party {
@@ -192,5 +192,28 @@ final class MdocReaderTests: XCTestCase {
             sessionTranscript: st, deviceSigner: SecureAreaCoseSigner(area: p.area, key: p.device.handle, algorithm: .es256))
         let reader = MdocReader(issuerTrust: TestIssuerTrust(key: rogue.publicKey), now: { [verifyTime] in verifyTime })
         do { _ = try await reader.verifyDeviceResponse(deviceResponse, sessionTranscript: st); XCTFail("should reject") } catch is MdocError {}
+    }
+
+    /// ISO 18013-5 §9.3.1 step 4: "verify that the DocType in the MSO matches the relevant DocType in the
+    /// Documents structure". `DeviceAuthentication` is signed over the Document's docType while the elements
+    /// are vouched for by the MSO's — a mismatch means the two halves describe different credentials, so the
+    /// reader must reject rather than report the MSO's type over someone else's device binding.
+    func testDocTypeMismatchBetweenMsoAndDocumentRejected() async throws {
+        let p = try await Party()
+        let issuerSigned = try IssuerSigned.decode(try await mdoc(p)) // MSO docType = org.iso.18013.5.1.mDL
+        let st = try MdocSessionTranscript.dcApiIsoMdoc(encryptionInfoBase64: "ZW5j", origin: "https://verifier.example")
+
+        // Present the same issuer-signed credential under a different Document docType.
+        let deviceResponse = try await MdocPresenter.deviceResponse(
+            issuerSigned: issuerSigned, docType: "eu.europa.ec.eudi.pid.1",
+            disclosed: [namespace: ["family_name"]], sessionTranscript: st,
+            deviceSigner: SecureAreaCoseSigner(area: p.area, key: p.device.handle, algorithm: .es256))
+
+        do {
+            _ = try await readerFacade(p).verifyDeviceResponse(deviceResponse, sessionTranscript: st)
+            XCTFail("expected §9.3.1 step 4 to reject a docType mismatch")
+        } catch let error as MdocError {
+            XCTAssertTrue(error.description.contains("docType mismatch"), "unexpected: \(error.description)")
+        }
     }
 }

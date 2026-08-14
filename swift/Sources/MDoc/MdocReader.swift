@@ -124,6 +124,12 @@ public struct MdocReader {
         var out: [VerifiedDocument] = []
         for doc in response.documents {
             let verified = try await verifier.verify(doc.issuerSigned) // issuerAuth + digests + validity
+            // §9.3.1 step 4: "verify that the DocType in the MSO matches the relevant DocType in the Documents
+            // structure". DeviceAuthentication is signed over the *Document's* docType while the elements are
+            // vouched for by the *MSO's*; if they disagree, the two halves describe different credentials.
+            guard verified.docType == doc.docType else {
+                throw MdocError("docType mismatch: MSO says '\(verified.docType)', Document says '\(doc.docType)'")
+            }
             let deviceAuthentication = Cbor.array([.text("DeviceAuthentication"), sessionTranscript, .text(doc.docType), doc.deviceNameSpacesBytes])
             let deviceAuthBytes = try CborEncoder.encode(.tagged(tag24, .bytes(try CborEncoder.encode(deviceAuthentication))))
             let bound: Bool

@@ -2,10 +2,29 @@ import CborCose
 import Crypto
 import Foundation
 
-/// Resolves the mdoc issuer's public key from the `issuerAuth` x5chain, validating the chain to
+/// The Document Signer resolved from an mdoc `issuerAuth` x5chain: the key that signed the MSO, plus the
+/// validity window of the certificate carrying it.
+///
+/// `notBefore`/`notAfter` exist for ISO 18013-5 §9.3.1 step 5 — "the 'signed' date is within the validity
+/// period of the certificate in the MSO header" — a check on the *signing moment*, distinct from the chain
+/// validation of step 1, which runs at the verifier's own clock. Nil means the trust implementation could not
+/// supply the window, and the check is skipped; the shipped `X5cMdocIssuerTrust` always supplies it.
+public struct MdocIssuerKey: Sendable {
+    public let key: EcPublicKey
+    public let notBefore: Date?
+    public let notAfter: Date?
+
+    public init(key: EcPublicKey, notBefore: Date? = nil, notAfter: Date? = nil) {
+        self.key = key
+        self.notBefore = notBefore
+        self.notAfter = notAfter
+    }
+}
+
+/// Resolves the mdoc issuer's Document Signer from the `issuerAuth` x5chain, validating the chain to
 /// a trust anchor. Implemented by the `Trust` module (mirrors SD-JWT VC's IssuerKeyResolver).
 public protocol MdocIssuerTrust: Sendable {
-    func issuerKey(x5chain: [[UInt8]]) async throws -> EcPublicKey
+    func issuerKey(x5chain: [[UInt8]]) async throws -> MdocIssuerKey
 }
 
 /// A verified mdoc: integrity-checked disclosed elements plus the holder (device) binding.
@@ -33,10 +52,10 @@ public struct MdocVerifier {
 
     public func verify(_ issuerSigned: IssuerSigned) async throws -> VerifiedMdoc {
         guard let x5chain = issuerSigned.issuerCertChain else { throw MdocError("issuerAuth has no x5chain") }
-        let issuerKey = try await trust.issuerKey(x5chain: x5chain)
+        let issuer = try await trust.issuerKey(x5chain: x5chain) // §9.3.1 step 1: chain validated to a trust anchor
 
         let cose = issuerSigned.issuerAuth
-        guard cose.verify(publicKey: issuerKey) else { throw MdocError("issuerAuth signature invalid") }
+        guard cose.verify(publicKey: issuer.key) else { throw MdocError("issuerAuth signature invalid") } // step 2
 
         let mso = try issuerSigned.parseMso()
 
@@ -45,6 +64,15 @@ public struct MdocVerifier {
             throw MdocError("unsupported MSO digest algorithm \(mso.digestAlgorithm)")
         }
 
+        // §9.3.1 step 5: validate ValidityInfo. The 'signed' date must fall inside the Document Signer
+        // certificate's own validity period — an MSO signed before the DS existed, or after it expired, is not
+        // something that certificate ever vouched for, however the chain validates at the verifier's clock.
+        if let notBefore = issuer.notBefore, mso.signed < notBefore {
+            throw MdocError("MSO signed=\(mso.signed) predates the DS certificate (notBefore=\(notBefore))")
+        }
+        if let notAfter = issuer.notAfter, mso.signed > notAfter {
+            throw MdocError("MSO signed=\(mso.signed) postdates the DS certificate (notAfter=\(notAfter))")
+        }
         let instant = now()
         if instant < mso.validFrom { throw MdocError("mdoc not yet valid (validFrom=\(mso.validFrom))") }
         if instant > mso.validUntil { throw MdocError("mdoc expired (validUntil=\(mso.validUntil))") }

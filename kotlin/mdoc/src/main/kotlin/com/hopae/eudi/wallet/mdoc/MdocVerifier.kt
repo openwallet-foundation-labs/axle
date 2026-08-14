@@ -7,11 +7,26 @@ import java.security.MessageDigest
 import java.time.Instant
 
 /**
- * Resolves the mdoc issuer's public key from the `issuerAuth` x5chain, validating the chain to
+ * The Document Signer resolved from an mdoc `issuerAuth` x5chain: the key that signed the MSO, plus the
+ * validity window of the certificate carrying it.
+ *
+ * [notBefore]/[notAfter] exist for ISO 18013-5 §9.3.1 step 5 — "the 'signed' date is within the validity
+ * period of the certificate in the MSO header" — a check on the *signing moment*, distinct from the chain
+ * validation of step 1, which runs at the verifier's own clock. Null means the trust implementation could not
+ * supply the window, and the check is skipped; the shipped `X5cMdocIssuerTrust` always supplies it.
+ */
+class MdocIssuerKey(
+    val key: EcPublicKey,
+    val notBefore: Instant? = null,
+    val notAfter: Instant? = null,
+)
+
+/**
+ * Resolves the mdoc issuer's Document Signer from the `issuerAuth` x5chain, validating the chain to
  * a trust anchor. Implemented by the `trust` module (mirrors SD-JWT VC's IssuerKeyResolver).
  */
 fun interface MdocIssuerTrust {
-    suspend fun issuerKey(x5chain: List<ByteArray>): EcPublicKey
+    suspend fun issuerKey(x5chain: List<ByteArray>): MdocIssuerKey
 }
 
 /** A verified mdoc: integrity-checked disclosed elements plus the holder (device) binding. */
@@ -36,10 +51,10 @@ class MdocVerifier(
 ) {
     suspend fun verify(issuerSigned: IssuerSigned): VerifiedMdoc {
         val x5chain = issuerSigned.issuerCertChain ?: throw MdocException("issuerAuth has no x5chain")
-        val issuerKey = trust.issuerKey(x5chain)
+        val issuer = trust.issuerKey(x5chain) // §9.3.1 step 1: chain validated to a trust anchor
 
         val cose = issuerSigned.issuerAuth
-        if (!cose.verify(issuerKey)) throw MdocException("issuerAuth signature invalid")
+        if (!cose.verify(issuer.key)) throw MdocException("issuerAuth signature invalid") // step 2
 
         val mso = issuerSigned.parseMso()
 
@@ -51,6 +66,17 @@ class MdocVerifier(
             else -> throw MdocException("unsupported MSO digest algorithm ${mso.digestAlgorithm}")
         }
 
+        // §9.3.1 step 5: validate ValidityInfo. The 'signed' date must fall inside the Document Signer
+        // certificate's own validity period — an MSO signed before the DS existed, or after it expired, is not
+        // something that certificate ever vouched for, however the chain validates at the verifier's clock.
+        mso.signed.let { signed ->
+            issuer.notBefore?.let {
+                if (signed.isBefore(it)) throw MdocException("MSO signed=$signed predates the DS certificate (notBefore=$it)")
+            }
+            issuer.notAfter?.let {
+                if (signed.isAfter(it)) throw MdocException("MSO signed=$signed postdates the DS certificate (notAfter=$it)")
+            }
+        }
         val instant = now()
         if (instant.isBefore(mso.validFrom)) throw MdocException("mdoc not yet valid (validFrom=${mso.validFrom})")
         if (instant.isAfter(mso.validUntil)) throw MdocException("mdoc expired (validUntil=${mso.validUntil})")

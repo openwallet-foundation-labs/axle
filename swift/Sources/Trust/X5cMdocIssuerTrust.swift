@@ -12,8 +12,11 @@ public struct X5cMdocIssuerTrust: MdocIssuerTrust {
         self.validator = validator
     }
 
-    public func issuerKey(x5chain: [[UInt8]]) async throws -> EcPublicKey {
+    public func issuerKey(x5chain: [[UInt8]]) async throws -> MdocIssuerKey {
         let chain = try await validator.validate(x5chain) // throws if not trusted
-        return try X509Support.ecPublicKey(chain[0])
+        let leaf = chain[0]
+        // The Document Signer's own window, so MdocVerifier can apply §9.3.1 step 5 to the MSO 'signed' date.
+        return MdocIssuerKey(key: try X509Support.ecPublicKey(leaf),
+                             notBefore: leaf.notValidBefore, notAfter: leaf.notValidAfter)
     }
 }

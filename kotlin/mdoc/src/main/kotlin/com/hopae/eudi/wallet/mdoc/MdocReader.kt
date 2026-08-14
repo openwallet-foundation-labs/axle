@@ -119,6 +119,12 @@ class MdocReader(
         val verifier = MdocVerifier(trust, now)
         return response.documents.map { doc ->
             val verified = verifier.verify(doc.issuerSigned) // issuerAuth + digests + validity
+            // §9.3.1 step 4: "verify that the DocType in the MSO matches the relevant DocType in the Documents
+            // structure". DeviceAuthentication is signed over the *Document's* docType while the elements are
+            // vouched for by the *MSO's*; if they disagree, the two halves describe different credentials.
+            if (verified.docType != doc.docType) {
+                throw MdocException("docType mismatch: MSO says '${verified.docType}', Document says '${doc.docType}'")
+            }
             val deviceAuthentication = Cbor.Array(listOf(Cbor.Text("DeviceAuthentication"), sessionTranscript, Cbor.Text(doc.docType), doc.deviceNameSpacesBytes))
             val deviceAuthBytes = CborEncoder.encode(Cbor.Tagged(TAG_ENCODED_CBOR, Cbor.Bytes(CborEncoder.encode(deviceAuthentication))))
             val bound = when {

@@ -79,7 +79,7 @@ public enum MdocReaderRequests {
                     if case let .bytes(b) = value, imageElements.contains(element.lowercased()) {
                         imageBase64 = Data(b).base64EncodedString()
                     }
-                    claims.append(.init(namespace: namespace, element: element, value: cborString(value), imageBase64: imageBase64))
+                    claims.append(.init(namespace: namespace, element: element, value: cborString(element: element, value), imageBase64: imageBase64))
                 }
             }
             return ReaderResultDoc(
@@ -95,16 +95,82 @@ public enum MdocReaderRequests {
 /// mdoc image-carrying elements (ISO 23220-2 / 18013-5) — surfaced with raw bytes for thumbnail rendering.
 private let imageElements: Set<String> = ["portrait", "enrolment_portrait_image", "signature_usual_mark"]
 
-/// Best-effort human rendering of a CBOR element value (dates unwrapped from their tag).
-func cborString(_ value: Cbor) -> String {
+/// Renders a received mdoc element value for display.
+///
+/// Most ISO 18013-5 elements are scalars — `family_name` is a tstr, `birth_date` a tagged full-date,
+/// `age_over_18` a bool, `portrait` a bstr — so a flat renderer got by. `driving_privileges` is not: §7.2.4
+/// defines it as an array of maps, and 23220-based doctypes nest further still. Anything this function does
+/// not name recurses through `cborValue` rather than falling through to a `String(describing:)` dump.
+func cborString(element: String, _ value: Cbor) -> String {
+    if element == "driving_privileges", let rendered = drivingPrivilegesText(value) { return rendered }
+    return cborValue(value)
+}
+
+/// Generic recursive rendering. Maps become `key: value` pairs and arrays their elements; the top level of an
+/// array goes one entry per line, nested levels stay inline so a row does not explode vertically.
+func cborValue(_ value: Cbor, depth: Int = 0) -> String {
     switch value {
     case let .text(s): return s
     case let .uint(u): return String(u)
+    case let .nint(n): return "-\(n + 1)"
     case let .bool(b): return b ? "Yes" : "No"
     case let .bytes(b): return "\(b.count) bytes"
-    case let .array(a): return a.map(cborString).joined(separator: ", ")
-    case let .tagged(_, inner): return cborString(inner)
     case .null: return "—"
+    case let .tagged(_, inner): return cborValue(inner, depth: depth) // full-date / tdate carry the date inside
+    case let .array(a):
+        // One line per entry only when the entries carry structure (an array of maps, e.g. driving_privileges);
+        // a list of scalars like `nationality` stays inline so it does not eat four rows of screen.
+        let structured = depth == 0 && a.contains { if case .map = $0 { return true }; if case .array = $0 { return true }; return false }
+        return a.map { cborValue($0, depth: depth + 1) }.joined(separator: structured ? "\n" : ", ")
+    case let .map(entries):
+        return entries.map { "\(elementLabel(cborValue($0.0, depth: depth + 1))): \(cborValue($0.1, depth: depth + 1))" }
+            .joined(separator: ", ")
     default: return String(describing: value)
     }
+}
+
+/// `snake_case` element identifier → "Snake case", for map keys surfaced inside a value.
+private func elementLabel(_ id: String) -> String {
+    let spaced = id.replacingOccurrences(of: "_", with: " ")
+    return spaced.prefix(1).uppercased() + spaced.dropFirst()
+}
+
+/// ISO 18013-5 §7.2.4 `DrivingPrivileges`: an array of `{vehicle_category_code, ?issue_date, ?expiry_date,
+/// ?codes}`, where each `Code` is `{code, ?sign, ?value}`. Rendered one category per line — the category is
+/// what a verifier reads, so it leads; dates and codes qualify it.
+///
+/// Returns nil when the value is not that shape, so an issuer that sends something unexpected still gets the
+/// generic rendering instead of a blank row.
+private func drivingPrivilegesText(_ value: Cbor) -> String? {
+    guard case let .array(privileges) = value else { return nil }
+    if privileges.isEmpty { return "—" } // §7.2.4 NOTE 2: the structure can legitimately be an empty array
+
+    func fields(_ c: Cbor) -> [String: Cbor]? {
+        guard case let .map(entries) = c else { return nil }
+        return Dictionary(entries.map { (cborValue($0.0), $0.1) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    var lines: [String] = []
+    for privilege in privileges {
+        guard let f = fields(privilege), let categoryValue = f["vehicle_category_code"] else { return nil }
+        let category = cborValue(categoryValue)
+        let issued = f["issue_date"].map { cborValue($0) }
+        let expires = f["expiry_date"].map { cborValue($0) }
+        let validity: String
+        switch (issued, expires) {
+        case let (issued?, expires?): validity = " · \(issued) → \(expires)"
+        case let (issued?, nil): validity = " · from \(issued)"
+        case let (nil, expires?): validity = " · until \(expires)"
+        default: validity = ""
+        }
+        var codes: [String] = []
+        if case let .array(rawCodes)? = f["codes"] {
+            for code in rawCodes {
+                guard let cf = fields(code), let id = cf["code"] else { continue }
+                codes.append(cborValue(id) + (cf["sign"].map { cborValue($0) } ?? "") + (cf["value"].map { cborValue($0) } ?? ""))
+            }
+        }
+        lines.append(category + validity + (codes.isEmpty ? "" : " · " + codes.joined(separator: ", ")))
+    }
+    return lines.joined(separator: "\n")
 }

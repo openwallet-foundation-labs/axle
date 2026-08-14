@@ -751,7 +751,7 @@ private fun ReaderResultCard(doc: VerifiedDocument) {
             // Image elements come off the wire as raw CBOR bstr — render the received photo, not "0x…(nB)".
             val image = if (isImageElement(k) && v is Cbor.Bytes) rememberClaimImage(v.value) else null
             if (image != null) ClaimImageRow(claimPathLabel(listOf(k)), image)
-            else InfoRow(claimPathLabel(listOf(k)), cborText(v))
+            else InfoRow(claimPathLabel(listOf(k)), cborText(k, v))
         }
     }
 }
@@ -767,13 +767,71 @@ private fun decodeEngagement(content: String): ByteArray? {
 
 private fun encodeQr(content: String): Bitmap = BarcodeEncoder().encodeBitmap(content, BarcodeFormat.QR_CODE, 600, 600)
 
-private fun cborText(c: Cbor): String = when (c) {
+/**
+ * Renders a received mdoc element value for display.
+ *
+ * Most ISO 18013-5 elements are scalars — `family_name` is a tstr, `birth_date` a tagged full-date,
+ * `age_over_18` a bool, `portrait` a bstr — so a flat renderer got by. `driving_privileges` is not: §7.2.4
+ * defines it as an array of maps, and 23220-based doctypes nest further still. Anything this function does not
+ * name recurses through [cborValue] rather than falling through to a `toString()` dump of the CBOR node.
+ */
+private fun cborText(elementId: String, c: Cbor): String = when (elementId) {
+    "driving_privileges" -> drivingPrivilegesText(c) ?: cborValue(c)
+    else -> cborValue(c)
+}
+
+/**
+ * Generic recursive rendering. Maps become `key: value` pairs and arrays their elements; the top level of an
+ * array goes one entry per line, nested levels stay inline so a row does not explode vertically.
+ */
+private fun cborValue(c: Cbor, depth: Int = 0): String = when (c) {
     is Cbor.Text -> c.value
     is Cbor.UInt -> c.value.toString()
     is Cbor.NInt -> "-${c.n + 1uL}"
     is Cbor.Bool -> c.value.toString()
     is Cbor.Bytes -> "0x…(${c.value.size}B)"
-    is Cbor.Tagged -> cborText(c.value)
-    is Cbor.Array -> c.items.joinToString(", ") { cborText(it) }
+    Cbor.Null -> "—"
+    is Cbor.Tagged -> cborValue(c.value, depth) // full-date / tdate carry the date as the tagged text
+    // One line per entry only when the entries carry structure (an array of maps, e.g. driving_privileges);
+    // a list of scalars like `nationality` stays inline so it does not eat four rows of screen.
+    is Cbor.Array -> {
+        val structured = depth == 0 && c.items.any { it is Cbor.CborMap || it is Cbor.Array }
+        c.items.joinToString(if (structured) "\n" else ", ") { cborValue(it, depth + 1) }
+    }
+    is Cbor.CborMap -> c.entries.joinToString(", ") { (k, v) ->
+        "${claimPathLabel(listOf(cborValue(k, depth + 1)))}: ${cborValue(v, depth + 1)}"
+    }
     else -> c.toString()
+}
+
+/**
+ * ISO 18013-5 §7.2.4 `DrivingPrivileges`: an array of `{vehicle_category_code, ?issue_date, ?expiry_date,
+ * ?codes}`, where each `Code` is `{code, ?sign, ?value}`. Rendered one category per line — the category is
+ * what a verifier reads, so it leads; dates and codes qualify it.
+ *
+ * Returns null when the value is not that shape, so an issuer that sends something unexpected still gets the
+ * generic rendering instead of a blank row.
+ */
+private fun drivingPrivilegesText(c: Cbor): String? {
+    val privileges = (c as? Cbor.Array)?.items ?: return null
+    if (privileges.isEmpty()) return "—" // §7.2.4 NOTE 2: the structure can legitimately be an empty array
+    val lines = privileges.map { entry ->
+        val fields = (entry as? Cbor.CborMap)?.entries?.associate { (k, v) -> cborValue(k) to v } ?: return null
+        val category = fields["vehicle_category_code"]?.let { cborValue(it) } ?: return null
+        val issued = fields["issue_date"]?.let { cborValue(it) }
+        val expires = fields["expiry_date"]?.let { cborValue(it) }
+        val validity = when {
+            issued != null && expires != null -> " · $issued → $expires"
+            issued != null -> " · from $issued"
+            expires != null -> " · until $expires"
+            else -> ""
+        }
+        val codes = (fields["codes"] as? Cbor.Array)?.items.orEmpty().mapNotNull { code ->
+            val f = (code as? Cbor.CborMap)?.entries?.associate { (k, v) -> cborValue(k) to v } ?: return@mapNotNull null
+            val id = f["code"]?.let { cborValue(it) } ?: return@mapNotNull null
+            id + (f["sign"]?.let { cborValue(it) } ?: "") + (f["value"]?.let { cborValue(it) } ?: "")
+        }
+        category + validity + if (codes.isEmpty()) "" else " · ${codes.joinToString(", ")}"
+    }
+    return lines.joinToString("\n")
 }

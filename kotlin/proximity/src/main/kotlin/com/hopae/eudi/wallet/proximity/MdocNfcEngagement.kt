@@ -54,6 +54,25 @@ object MdocNfcEngagement {
     }
 
     /**
+     * Resolves the carrier of a finished handover, which the Handover Select alone does not always name.
+     * §8.3.3.1.1.2 splits where the UUID lives: the mdoc puts one in its **Select** when it picks mdoc
+     * peripheral server mode, whereas the UUID for **mdoc central client mode** is the one the reader offered in
+     * its **Request** — a Select accepting that carrier names no UUID of its own, so only the pair identifies the
+     * connection. Prefer this over [parseHandoverSelect] on the reader side; pass [handoverRequest] = null for
+     * static handover, where there is no Request and the Select must be self-contained.
+     */
+    fun parseHandover(handoverSelect: ByteArray, handoverRequest: ByteArray? = null): NfcEngagement? {
+        parseHandoverSelect(handoverSelect)?.let { return it }
+        // No carrier of the mdoc's own → it took ours, whose LE Role (the *reader's* role) says which mode that is:
+        // reader-as-peripheral is mdoc central client mode; reader-as-central would have needed the mdoc's UUID.
+        val request = handoverRequest?.let { parseHandoverRequest(it) }?.takeIf { it.peripheralServerMode } ?: return null
+        val records = runCatching { Ndef.decodeMessage(handoverSelect) }.getOrNull() ?: return null
+        if (!hasHandover(records, "Hs")) return null
+        val de = records.firstOrNull { it.tnf == Ndef.TNF_EXTERNAL && it.type.contentEquals(DE_TYPE) }?.payload ?: return null
+        return NfcEngagement(de, request.serviceUuid, peripheralServerMode = false)
+    }
+
+    /**
      * Builds the negotiated-handover Handover Request NDEF message the mdoc **reader** sends to the mdoc
      * (§8.2.2.1): an `Hr` record (version + collision-resolution record + one Alternative Carrier) plus the
      * BLE carrier-configuration record, and optionally a `ReaderEngagement` auxiliary record.

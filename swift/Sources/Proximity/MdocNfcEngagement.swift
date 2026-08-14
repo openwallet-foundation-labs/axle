@@ -56,6 +56,24 @@ public enum MdocNfcEngagement {
         return NfcEngagement(deviceEngagement: de, serviceUuid: uuid, peripheralServerMode: peripheralServerMode)
     }
 
+    /// Resolves the carrier of a finished handover, which the Handover Select alone does not always name.
+    /// §8.3.3.1.1.2 splits where the UUID lives: the mdoc puts one in its **Select** when it picks mdoc
+    /// peripheral server mode, whereas the UUID for **mdoc central client mode** is the one the reader offered in
+    /// its **Request** — a Select accepting that carrier names no UUID of its own, so only the pair identifies the
+    /// connection. Prefer this over `parseHandoverSelect` on the reader side; pass `handoverRequest` = nil for
+    /// static handover, where there is no Request and the Select must be self-contained.
+    public static func parseHandover(_ handoverSelect: [UInt8], handoverRequest: [UInt8]? = nil) -> NfcEngagement? {
+        if let engagement = parseHandoverSelect(handoverSelect) { return engagement }
+        // No carrier of the mdoc's own → it took ours, whose LE Role (the *reader's* role) says which mode that is:
+        // reader-as-peripheral is mdoc central client mode; reader-as-central would have needed the mdoc's UUID.
+        guard let request = handoverRequest.flatMap(parseHandoverRequest), request.peripheralServerMode else { return nil }
+        let records = Ndef.decodeMessage(handoverSelect)
+        guard hasHandover(records, "Hs"),
+              let de = records.first(where: { $0.tnf == Ndef.tnfExternal && $0.type == deType })?.payload
+        else { return nil }
+        return NfcEngagement(deviceEngagement: de, serviceUuid: request.serviceUuid, peripheralServerMode: false)
+    }
+
     /// Builds the negotiated-handover Handover Request NDEF message the mdoc **reader** sends to the mdoc
     /// (§8.2.2.1): an `Hr` record (version + collision-resolution record + one Alternative Carrier) plus the
     /// BLE carrier-configuration record, and optionally a `ReaderEngagement` auxiliary record.

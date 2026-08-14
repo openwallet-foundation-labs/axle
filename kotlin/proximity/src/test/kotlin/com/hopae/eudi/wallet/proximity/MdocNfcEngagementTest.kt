@@ -61,6 +61,44 @@ class MdocNfcEngagementTest {
         assertTrue(parsed.peripheralServerMode) // default
     }
 
+    /** §8.3.3.1.1.2: a Select that takes the reader's carrier names no UUID — it is the one from the Request. */
+    @Test
+    fun negotiatedSelectWithoutCarrierUsesTheRequestUuid() {
+        val engagement = byteArrayOf(0xA2.toByte(), 0x00, 0x63, 0x31, 0x2E, 0x30)
+        val uuid = ByteArray(16) { (it + 1).toByte() }
+        val hs = Ndef.encodeMessage(
+            listOf(
+                NdefRecord(Ndef.TNF_WELL_KNOWN, "Hs".toByteArray(), payload = byteArrayOf(0x15)),
+                NdefRecord(Ndef.TNF_EXTERNAL, "iso.org:18013:deviceengagement".toByteArray(), "mdoc".toByteArray(), engagement),
+            ),
+        )
+        assertNull(MdocNfcEngagement.parseHandoverSelect(hs)) // not self-contained…
+        assertNull(MdocNfcEngagement.parseHandover(hs)) // …and static handover has no Request to fall back on
+
+        val hr = MdocNfcEngagement.buildHandoverRequest(uuid, byteArrayOf(0x12, 0x34), peripheralServerMode = true)
+        val parsed = assertNotNull(MdocNfcEngagement.parseHandover(hs, hr))
+        assertContentEquals(engagement, parsed.deviceEngagement)
+        assertContentEquals(uuid, parsed.serviceUuid)
+        assertTrue(!parsed.peripheralServerMode) // the reader is the peripheral ⇒ mdoc central client mode
+
+        // A reader offering to be the central has no UUID to lend — that mode's UUID is the mdoc's to name.
+        val central = MdocNfcEngagement.buildHandoverRequest(uuid, byteArrayOf(0x12, 0x34), peripheralServerMode = false)
+        assertNull(MdocNfcEngagement.parseHandover(hs, central))
+    }
+
+    /** The mdoc's own carrier stays authoritative whenever its Select carries one. */
+    @Test
+    fun selectCarrierOutranksTheRequestCarrier() {
+        val mdocUuid = ByteArray(16) { (it + 1).toByte() }
+        val readerUuid = ByteArray(16) { (0x80 + it).toByte() }
+        val hs = MdocNfcEngagement.buildHandoverSelect(byteArrayOf(0xA0.toByte()), mdocUuid, peripheralServerMode = true)
+        val hr = MdocNfcEngagement.buildHandoverRequest(readerUuid, byteArrayOf(0x00, 0x01), peripheralServerMode = true)
+
+        val parsed = assertNotNull(MdocNfcEngagement.parseHandover(hs, hr))
+        assertContentEquals(mdocUuid, parsed.serviceUuid)
+        assertTrue(parsed.peripheralServerMode)
+    }
+
     /** §9.1.5.1: static handover binds `[Hs, null]`; negotiated binds `[Hs, Hr]`. */
     @Test
     fun sessionTranscriptHandoverShapes() {

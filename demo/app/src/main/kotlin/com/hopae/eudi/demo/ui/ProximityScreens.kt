@@ -621,7 +621,9 @@ fun ProximityReaderScreen(wallet: Wallet) {
             try {
                 val handover = NfcReader.readHandover(context as Activity)
                 nfcWaiting = false // tap received — the NFC handover is done, the rest is BLE
-                val eng = MdocNfcEngagement.parseHandoverSelect(handover.handoverSelect) ?: run { status = "❌ Not an mdoc NFC tag"; return@launch }
+                // Both messages: a negotiated Select that takes the carrier we offered names no UUID of its own.
+                val eng = MdocNfcEngagement.parseHandover(handover.handoverSelect, handover.handoverRequest)
+                    ?: run { status = "❌ Not an mdoc NFC tag"; return@launch }
                 status = if (handover.negotiated) "Connecting over BLE (negotiated)…" else "Connecting over BLE…"
                 val uuid = Ble.bytesToUuid(eng.serviceUuid)
                 LogStore.log(

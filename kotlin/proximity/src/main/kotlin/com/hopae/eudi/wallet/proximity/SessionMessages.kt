@@ -23,24 +23,38 @@ object SessionMessages {
         const val SESSION_TERMINATION = 20L
     }
 
-    fun encodeEstablishment(eReaderKey: EcPublicKey, encryptedDeviceRequest: ByteArray): ByteArray {
-        val eReaderKeyBytes = Cbor.Tagged(TAG_ENCODED_CBOR, Cbor.Bytes(CborEncoder.encode(CoseKey.encode(eReaderKey))))
-        return CborEncoder.encode(
+    /**
+     * `EReaderKeyBytes = #6.24(bstr .cbor EReaderKey)` (§9.1.1.4) for a key this party generated — the one
+     * place the reader's ephemeral key is encoded, so the `SessionEstablishment` message and the
+     * SessionTranscript are guaranteed to carry identical bytes (§8.1).
+     */
+    fun eReaderKeyBytes(eReaderKey: EcPublicKey): ByteArray =
+        CborEncoder.encode(Cbor.Tagged(TAG_ENCODED_CBOR, Cbor.Bytes(CborEncoder.encode(CoseKey.encode(eReaderKey)))))
+
+    fun encodeEstablishment(eReaderKey: EcPublicKey, encryptedDeviceRequest: ByteArray): ByteArray =
+        encodeEstablishment(eReaderKeyBytes(eReaderKey), encryptedDeviceRequest)
+
+    /** As above, from already-encoded `EReaderKeyBytes` — so a sender reuses the exact bytes it will bind. */
+    fun encodeEstablishment(eReaderKeyBytes: ByteArray, encryptedDeviceRequest: ByteArray): ByteArray =
+        CborEncoder.encode(
             Cbor.CborMap(
                 listOf(
-                    Cbor.Text("eReaderKey") to eReaderKeyBytes,
+                    Cbor.Text("eReaderKey") to CborDecoder.decode(eReaderKeyBytes),
                     Cbor.Text("data") to Cbor.Bytes(encryptedDeviceRequest),
                 ),
             ),
         )
-    }
 
     fun decodeEstablishment(bytes: ByteArray): SessionEstablishment {
         val map = CborDecoder.decode(bytes).asMap("SessionEstablishment")
         val tagged = map.field("eReaderKey") as? Cbor.Tagged ?: throw ProximityException("missing eReaderKey")
-        val eReaderKey = CoseKey.decode(CborDecoder.decode((tagged.value as Cbor.Bytes).value).asMap("EReaderKey"))
+        if (tagged.tag != TAG_ENCODED_CBOR) throw ProximityException("eReaderKey must be #6.24")
+        val inner = (tagged.value as? Cbor.Bytes)?.value ?: throw ProximityException("eReaderKey tag 24 value must be bstr")
+        val eReaderKey = CoseKey.decode(CborDecoder.decode(inner).asMap("EReaderKey"))
         val data = (map.field("data") as? Cbor.Bytes)?.value ?: throw ProximityException("missing data")
-        return SessionEstablishment(eReaderKey, data)
+        // Keep the received bytestring — the COSE_Key map inside is preserved verbatim, so a peer whose key
+        // ordering or optional labels differ from ours still yields the same SessionTranscript (§8.1).
+        return SessionEstablishment(eReaderKey, CborEncoder.encode(tagged), data)
     }
 
     fun encodeData(encryptedDeviceResponse: ByteArray, status: Long? = null): ByteArray {
@@ -79,4 +93,13 @@ object SessionMessages {
         entries.firstOrNull { (k, _) -> (k as? Cbor.Text)?.value == key }?.second
 }
 
-class SessionEstablishment(val eReaderKey: EcPublicKey, val encryptedDeviceRequest: ByteArray)
+/**
+ * A decoded `SessionEstablishment` (§9.1.1.4). [eReaderKey] is the parsed key — use it for the ECDH;
+ * [eReaderKeyBytes] is the `#6.24(bstr)` **as received** — use it for the SessionTranscript, which §8.1
+ * forbids re-creating from the parsed map.
+ */
+class SessionEstablishment(
+    val eReaderKey: EcPublicKey,
+    val eReaderKeyBytes: ByteArray,
+    val encryptedDeviceRequest: ByteArray,
+)

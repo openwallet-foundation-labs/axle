@@ -45,14 +45,16 @@ public struct ProximityReaderService: Sendable {
         // §9.1.5.2: the reader's ephemeral key must be on the same curve as the mdoc's EDeviceKey.
         let eReader = EphemeralKeyPair(curve: eDeviceKey.curve)
         let handover: Cbor = handoverNdef != nil ? ProximitySessionTranscript.nfcHandover(handoverNdef!, handoverRequestMessage: handoverRequestNdef) : .null
-        let transcript = try ProximitySessionTranscript.build(deviceEngagement: engagement, eReaderKey: eReader.publicKey, handover: handover)
+        // §8.1: encode EReaderKeyBytes once and bind the same bytes we put on the wire below.
+        let eReaderKeyBytes = try SessionMessages.eReaderKeyBytes(eReader.publicKey)
+        let transcript = try ProximitySessionTranscript.build(deviceEngagement: engagement, eReaderKeyBytes: eReaderKeyBytes, handover: handover)
         let transcriptBytes = try ProximitySessionTranscript.encode(transcript)
         let enc = try SessionEncryption.forReader(ephemeral: eReader, devicePublicKey: eDeviceKey, sessionTranscriptBytes: transcriptBytes)
         let reader = MdocReader(readerAuth: readerAuth, issuerTrust: issuerTrust)
 
         let deviceRequest = try await reader.buildDeviceRequest(documents, sessionTranscript: transcript)
         try await transport.send(try SessionMessages.encodeEstablishment(
-            eReaderKey: eReader.publicKey, encryptedDeviceRequest: try enc.encrypt(deviceRequest)))
+            eReaderKeyBytes: eReaderKeyBytes, encryptedDeviceRequest: try enc.encrypt(deviceRequest)))
 
         return try await withTermination(transport, enc) {
             // ISO 18013-5 Table 20: the mdoc may answer with an error/termination status instead of data.

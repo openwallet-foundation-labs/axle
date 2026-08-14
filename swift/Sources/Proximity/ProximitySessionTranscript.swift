@@ -9,10 +9,28 @@ private let tagEncodedCbor: UInt64 = 24
 /// and Handover is `null` for QR-code engagement. Also builds a minimal QR `DeviceEngagement`.
 public enum ProximitySessionTranscript {
 
-    public static func build(deviceEngagement: [UInt8], eReaderKey: EcPublicKey, handover: Cbor = .null) throws -> Cbor {
+    /// The transcript from the `EReaderKeyBytes` **exactly as they crossed the wire** — ISO 18013-5 §8.1:
+    /// "an mdoc, mdoc reader or issuing authority infrastructure shall use these bytestrings as they were sent
+    /// or received, without attempting to re-create them from the underlying maps."
+    ///
+    /// Map-key ordering is not canonical in this document, so a COSE_Key carrying the same public point can be
+    /// encoded several equally-valid ways (a different key order, an extra `kid`). The SessionTranscript is the
+    /// HKDF salt *and* the signed payload of `DeviceAuthentication`/`ReaderAuthentication`, so re-encoding it
+    /// from the parsed key silently derives different session keys against such a peer. Receivers pass
+    /// `SessionEstablishment.eReaderKeyBytes`; senders pass what they put in the `SessionEstablishment`
+    /// message (`SessionMessages.eReaderKeyBytes`).
+    public static func build(deviceEngagement: [UInt8], eReaderKeyBytes: [UInt8], handover: Cbor = .null) throws -> Cbor {
         let deviceEngagementBytes = Cbor.tagged(tagEncodedCbor, .bytes(deviceEngagement))
-        let eReaderKeyBytes = Cbor.tagged(tagEncodedCbor, .bytes(try CborEncoder.encode(CoseKey.encode(eReaderKey))))
-        return .array([deviceEngagementBytes, eReaderKeyBytes, handover])
+        return .array([deviceEngagementBytes, try CborDecoder.decode(eReaderKeyBytes), handover])
+    }
+
+    /// Convenience for the party that *generated* `EReaderKey` and is about to send it: it encodes the key the
+    /// same way `SessionMessages.encodeEstablishment` does, so both copies match. A receiver must not use this —
+    /// it would re-create the bytestring from the parsed map, which §8.1 forbids.
+    public static func build(deviceEngagement: [UInt8], eReaderKey: EcPublicKey, handover: Cbor = .null) throws -> Cbor {
+        try build(deviceEngagement: deviceEngagement,
+                  eReaderKeyBytes: try SessionMessages.eReaderKeyBytes(eReaderKey),
+                  handover: handover)
     }
 
     /// SessionTranscript bytes fed to session-key derivation (HKDF salt = SHA-256 of these).

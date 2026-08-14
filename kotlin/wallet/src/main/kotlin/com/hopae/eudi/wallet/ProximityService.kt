@@ -91,7 +91,8 @@ class ProximityService internal constructor(
             // EngagementReady stays the current state while blocked on receive() — the reader-waiting state.
             emit(ProximityState.EngagementReady(engagement, handoverNdef))
             val establishment = catchingProximity { SessionMessages.decodeEstablishment(transport.receive()) }
-            val transcript = ProximitySessionTranscript.build(engagement, establishment.eReaderKey, handover)
+            // §8.1: bind the EReaderKeyBytes the reader actually sent, not a re-encoding of the parsed key.
+            val transcript = ProximitySessionTranscript.build(engagement, establishment.eReaderKeyBytes, handover)
             val enc = SessionEncryption.forMdoc(eDevice, establishment.eReaderKey, ProximitySessionTranscript.encode(transcript))
             val deviceRequest = catchingProximity { DeviceRequest.decode(enc.decrypt(establishment.encryptedDeviceRequest)) }
 

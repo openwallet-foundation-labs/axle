@@ -16,22 +16,38 @@ public enum SessionMessages {
         public static let sessionTermination: Int64 = 20
     }
 
+    /// `EReaderKeyBytes = #6.24(bstr .cbor EReaderKey)` (§9.1.1.4) for a key this party generated — the one
+    /// place the reader's ephemeral key is encoded, so the `SessionEstablishment` message and the
+    /// SessionTranscript are guaranteed to carry identical bytes (§8.1).
+    public static func eReaderKeyBytes(_ eReaderKey: EcPublicKey) throws -> [UInt8] {
+        try CborEncoder.encode(.tagged(tagEncodedCbor, .bytes(try CborEncoder.encode(CoseKey.encode(eReaderKey)))))
+    }
+
     public static func encodeEstablishment(eReaderKey: EcPublicKey, encryptedDeviceRequest: [UInt8]) throws -> [UInt8] {
-        let eReaderKeyBytes = Cbor.tagged(tagEncodedCbor, .bytes(try CborEncoder.encode(CoseKey.encode(eReaderKey))))
-        return try CborEncoder.encode(.map([
-            (.text("eReaderKey"), eReaderKeyBytes),
+        try encodeEstablishment(eReaderKeyBytes: try eReaderKeyBytes(eReaderKey),
+                                encryptedDeviceRequest: encryptedDeviceRequest)
+    }
+
+    /// As above, from already-encoded `EReaderKeyBytes` — so a sender reuses the exact bytes it will bind.
+    public static func encodeEstablishment(eReaderKeyBytes: [UInt8], encryptedDeviceRequest: [UInt8]) throws -> [UInt8] {
+        try CborEncoder.encode(.map([
+            (.text("eReaderKey"), try CborDecoder.decode(eReaderKeyBytes)),
             (.text("data"), .bytes(encryptedDeviceRequest)),
         ]))
     }
 
     public static func decodeEstablishment(_ bytes: [UInt8]) throws -> SessionEstablishment {
         let map = try CborDecoder.decode(bytes)
-        guard case let .tagged(_, inner)? = field(map, "eReaderKey"), case let .bytes(keyBytes) = inner else {
+        guard case let .tagged(tag, inner)? = field(map, "eReaderKey"), case let .bytes(keyBytes) = inner else {
             throw ProximityError("missing eReaderKey")
         }
+        guard tag == tagEncodedCbor else { throw ProximityError("eReaderKey must be #6.24") }
         let eReaderKey = try CoseKey.decode(try CborDecoder.decode(keyBytes))
         guard case let .bytes(data)? = field(map, "data") else { throw ProximityError("missing data") }
-        return SessionEstablishment(eReaderKey: eReaderKey, encryptedDeviceRequest: data)
+        // Keep the received bytestring — the COSE_Key map inside is preserved verbatim, so a peer whose key
+        // ordering or optional labels differ from ours still yields the same SessionTranscript (§8.1).
+        let received = try CborEncoder.encode(.tagged(tagEncodedCbor, .bytes(keyBytes)))
+        return SessionEstablishment(eReaderKey: eReaderKey, eReaderKeyBytes: received, encryptedDeviceRequest: data)
     }
 
     public static func encodeData(_ encryptedDeviceResponse: [UInt8], status: Int64? = nil) throws -> [UInt8] {
@@ -73,7 +89,11 @@ public struct SessionData {
     public let status: Int64?
 }
 
+/// A decoded `SessionEstablishment` (§9.1.1.4). `eReaderKey` is the parsed key — use it for the ECDH;
+/// `eReaderKeyBytes` is the `#6.24(bstr)` **as received** — use it for the SessionTranscript, which §8.1
+/// forbids re-creating from the parsed map.
 public struct SessionEstablishment {
     public let eReaderKey: EcPublicKey
+    public let eReaderKeyBytes: [UInt8]
     public let encryptedDeviceRequest: [UInt8]
 }

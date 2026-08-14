@@ -51,7 +51,8 @@ public struct ProximityService {
             s.emit(.engagementReady(deviceEngagement: engagement, handoverNdef: handoverNdef))
 
             let establishment = try await catchingProximity { try SessionMessages.decodeEstablishment(try await transport.receive()) }
-            let transcript = try ProximitySessionTranscript.build(deviceEngagement: engagement, eReaderKey: establishment.eReaderKey, handover: handover)
+            // §8.1: bind the EReaderKeyBytes the reader actually sent, not a re-encoding of the parsed key.
+            let transcript = try ProximitySessionTranscript.build(deviceEngagement: engagement, eReaderKeyBytes: establishment.eReaderKeyBytes, handover: handover)
             let enc = try SessionEncryption.forMdoc(
                 ephemeral: eDevice, readerPublicKey: establishment.eReaderKey,
                 sessionTranscriptBytes: try ProximitySessionTranscript.encode(transcript))

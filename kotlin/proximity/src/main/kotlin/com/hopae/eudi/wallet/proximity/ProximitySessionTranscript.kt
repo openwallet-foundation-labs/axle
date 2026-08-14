@@ -16,11 +16,30 @@ private const val TAG_ENCODED_CBOR: ULong = 24u
  */
 object ProximitySessionTranscript {
 
-    fun build(deviceEngagement: ByteArray, eReaderKey: EcPublicKey, handover: Cbor = Cbor.Null): Cbor {
+    /**
+     * The transcript from the `EReaderKeyBytes` **exactly as they crossed the wire** — ISO 18013-5 §8.1:
+     * "an mdoc, mdoc reader or issuing authority infrastructure shall use these bytestrings as they were sent
+     * or received, without attempting to re-create them from the underlying maps."
+     *
+     * Map-key ordering is not canonical in this document, so a COSE_Key carrying the same public point can be
+     * encoded several equally-valid ways (a different key order, an extra `kid`). The SessionTranscript is the
+     * HKDF salt *and* the signed payload of `DeviceAuthentication`/`ReaderAuthentication`, so re-encoding it
+     * from the parsed key silently derives different session keys against such a peer. Receivers pass
+     * [SessionEstablishment.eReaderKeyBytes]; senders pass what they put in the `SessionEstablishment` message
+     * ([SessionMessages.eReaderKeyBytes]).
+     */
+    fun build(deviceEngagement: ByteArray, eReaderKeyBytes: ByteArray, handover: Cbor = Cbor.Null): Cbor {
         val deviceEngagementBytes = Cbor.Tagged(TAG_ENCODED_CBOR, Cbor.Bytes(deviceEngagement))
-        val eReaderKeyBytes = Cbor.Tagged(TAG_ENCODED_CBOR, Cbor.Bytes(CborEncoder.encode(CoseKey.encode(eReaderKey))))
-        return Cbor.Array(listOf(deviceEngagementBytes, eReaderKeyBytes, handover))
+        return Cbor.Array(listOf(deviceEngagementBytes, CborDecoder.decode(eReaderKeyBytes), handover))
     }
+
+    /**
+     * Convenience for the party that *generated* `EReaderKey` and is about to send it: it encodes the key the
+     * same way [SessionMessages.encodeEstablishment] does, so both copies match. A receiver must not use this —
+     * it would re-create the bytestring from the parsed map, which §8.1 forbids.
+     */
+    fun build(deviceEngagement: ByteArray, eReaderKey: EcPublicKey, handover: Cbor = Cbor.Null): Cbor =
+        build(deviceEngagement, SessionMessages.eReaderKeyBytes(eReaderKey), handover)
 
     /** SessionTranscript bytes fed to session-key derivation (HKDF salt = SHA-256 of these). */
     fun encode(sessionTranscript: Cbor): ByteArray = CborEncoder.encode(sessionTranscript)

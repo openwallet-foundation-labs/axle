@@ -47,14 +47,16 @@ class ProximityReaderService internal constructor(
         // §9.1.5.2: the reader's ephemeral key must be on the same curve as the mdoc's EDeviceKey.
         val eReader = EphemeralKeyPair.generate(eDeviceKey.curve)
         val handover = if (handoverNdef != null) ProximitySessionTranscript.nfcHandover(handoverNdef, handoverRequestNdef) else Cbor.Null
-        val transcript = ProximitySessionTranscript.build(engagement, eReader.publicKey, handover)
+        // §8.1: encode EReaderKeyBytes once and bind the same bytes we put on the wire below.
+        val eReaderKeyBytes = SessionMessages.eReaderKeyBytes(eReader.publicKey)
+        val transcript = ProximitySessionTranscript.build(engagement, eReaderKeyBytes, handover)
         val transcriptBytes = ProximitySessionTranscript.encode(transcript)
         val enc = SessionEncryption.forReader(eReader, eDeviceKey, transcriptBytes)
         val reader = MdocReader(readerAuth, issuerTrust)
 
         try {
             val deviceRequest = reader.buildDeviceRequest(documents, transcript)
-            transport.send(SessionMessages.encodeEstablishment(eReader.publicKey, enc.encrypt(deviceRequest)))
+            transport.send(SessionMessages.encodeEstablishment(eReaderKeyBytes, enc.encrypt(deviceRequest)))
 
             // ISO 18013-5 Table 20: the mdoc may answer with an error/termination status instead of data.
             val frame = SessionMessages.decodeSessionData(transport.receive())

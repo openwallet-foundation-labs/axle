@@ -4,6 +4,11 @@
   "description": "EUDI credential Issuer — OpenID4VCI + HAIP (PID as SD-JWT VC & mdoc, mDL as mdoc). NestJS + Fastify.",
   "private": true,
   "packageManager": "pnpm@10.28.0",
+  "pnpm": {
+    "overrides": {
+      "@esbuild-kit/core-utils>esbuild": "^0.25.0"
+    }
+  },
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\"",

@@ -10,7 +10,11 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "unrs-resolver"
-    ]
+    ],
+    "overrides": {
+      "@esbuild-kit/core-utils>esbuild": "^0.25.0",
+      "multer": "^2.2.0"
+    }
   },
   "scripts": {
     "build": "nest build",

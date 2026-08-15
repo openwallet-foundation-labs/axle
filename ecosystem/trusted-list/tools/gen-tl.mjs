@@ -54,9 +54,11 @@ for (const list of lists) {
     sequenceNumber: info.loteSequenceNumber,
     issued: info.listIssueDateTime,
     nextUpdate: info.nextUpdate,
+    // The portal groups entities by provenance, so it needs the service type alongside the name: a list
+    // mixes CAs the scheme operates with anchors it only republishes, and a flat roll-call hides that.
     entities: lote.trustedEntitiesList.map((e) => ({
       name: e.trustedEntityInformation.teName,
-      services: e.trustedEntityServices.map((s) => s.serviceName),
+      services: e.trustedEntityServices.map((s) => ({ name: s.serviceName, type: s.serviceTypeIdentifier })),
     })),
     formats: [
       { key: 'jws', label: 'Compact JWS', hint: 'protected.payload.signature', file: `${list.slug}.jws` },

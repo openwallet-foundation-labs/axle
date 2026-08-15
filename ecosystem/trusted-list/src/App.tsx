@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, Download, ShieldCheck, FileSignature, CalendarClock } from 'lucide-react';
+import { Check, ChevronRight, Copy, Download, ShieldCheck, FileSignature, CalendarClock } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,9 +16,70 @@ interface Format {
   hint: string;
   file: string;
 }
+interface Service {
+  name: string;
+  type: string;
+}
 interface Entity {
   name: string;
-  services: string[];
+  services: Service[];
+}
+
+/**
+ * How an anchor got onto the list, derived from its `serviceTypeIdentifier`. A list mixes CAs the scheme
+ * operates and is answerable for with anchors it merely observed and republished — the reader has to be able
+ * to tell those apart at a glance, so the portal groups by this rather than listing everything in one run.
+ */
+const PROVENANCE = [
+  {
+    id: 'scheme',
+    short: 'Scheme',
+    label: 'Operated by the scheme',
+    note: 'Certificate authorities this sandbox runs and is answerable for.',
+    match: (t: string) => t.startsWith('http://uri.etsi.org/19602/SvcType/'),
+  },
+  {
+    id: 'production',
+    short: 'Production',
+    label: 'Mirrored — production issuers',
+    note: 'Live issuing authority roots observed from their public sources. Republished, not certified by the scheme.',
+    match: (t: string) => t.includes('/mirrored-iaca'),
+  },
+  {
+    id: 'reference',
+    short: 'Reference',
+    label: 'Mirrored — EU reference implementation',
+    note: 'The EU reference wallet stack’s PID and Age Verification issuer CAs.',
+    match: (t: string) => t.includes('/mirrored-reference'),
+  },
+  {
+    id: 'test',
+    short: 'Test',
+    label: 'Test & conformance roots',
+    note: 'Interop and conformance harnesses. Present because this ecosystem is itself a demo.',
+    match: (t: string) => t.includes('/sandbox-only'),
+  },
+] as const;
+const OTHER = { id: 'other', short: 'Other', label: 'Other', note: '', match: () => true } as const;
+
+const provenanceOf = (type: string) => PROVENANCE.find((p) => p.match(type)) ?? OTHER;
+
+/** Splits "mDL IACA — California DMV IACA Root · valid to 2033-01-07" into its kind and the rest. */
+function splitKind(serviceName: string): [kind: string | null, rest: string] {
+  const at = serviceName.indexOf(' — ');
+  return at === -1 ? [null, serviceName] : [serviceName.slice(0, at), serviceName.slice(at + 3)];
+}
+
+/** Entities split by provenance, each entity carrying only the services of that group. */
+function groupByProvenance(entities: Entity[]) {
+  return [...PROVENANCE, OTHER]
+    .map((group) => ({
+      ...group,
+      entities: entities
+        .map((e) => ({ name: e.name, services: e.services.filter((s) => provenanceOf(s.type).id === group.id) }))
+        .filter((e) => e.services.length > 0),
+    }))
+    .filter((g) => g.entities.length > 0);
 }
 interface TrustList {
   slug: string;
@@ -41,6 +102,66 @@ interface Manifest {
   generatedAt: string;
   schemeOperator?: SchemeOperator;
   lists: TrustList[];
+}
+
+/** The entities on a list — collapsed to a one-line census, grouped by provenance when opened. */
+function EntityDirectory({ entities }: { entities: Entity[] }) {
+  const groups = groupByProvenance(entities);
+  const count = (list: Entity[]) => list.reduce((n, e) => n + e.services.length, 0);
+  const anchors = count(entities);
+
+  return (
+    <details
+      // A short list is worth reading outright; a 25-entity roll-call has to earn its space.
+      open={entities.length <= 3}
+      className="group mt-2 rounded-lg border bg-muted/20"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs hover:bg-muted/40">
+        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+        <span className="font-medium text-foreground">
+          {entities.length} {entities.length === 1 ? 'entity' : 'entities'} · {anchors}{' '}
+          {anchors === 1 ? 'anchor' : 'anchors'}
+        </span>
+        <span className="ml-auto flex flex-wrap justify-end gap-1">
+          {groups.map((g) => (
+            <Badge key={g.id} variant="outline" className="text-[10px] font-normal">
+              {g.short} {count(g.entities)}
+            </Badge>
+          ))}
+        </span>
+      </summary>
+
+      <div className="space-y-5 border-t px-3 py-3">
+        {groups.map((g) => (
+          <section key={g.id}>
+            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-foreground">{g.label}</h4>
+            {g.note && <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{g.note}</p>}
+            <ul className="mt-2 space-y-2">
+              {g.entities.map((e) => (
+                <li key={e.name} className="text-xs">
+                  <span className="font-medium text-foreground">{e.name}</span>
+                  <ul className="mt-1 space-y-1 border-l border-border pl-3">
+                    {e.services.map((s) => {
+                      // serviceName is written to stand alone inside the signed list ("mDL IACA — <CN> …").
+                      // Here the group heading already says what kind it is, so the prefix is dimmed and the
+                      // certificate itself gets the emphasis.
+                      const [kind, rest] = splitKind(s.name);
+                      return (
+                        <li key={s.name} className="leading-relaxed">
+                          {kind && <span className="text-muted-foreground/70">{kind} — </span>}
+                          <span className="text-muted-foreground">{rest}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </details>
+  );
 }
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
@@ -190,12 +311,7 @@ export default function App() {
                   <CardDescription className="flex flex-col gap-1.5 pt-1">
                     <span className="font-mono text-xs">{list.standard}</span>
                     <span>{list.description}</span>
-                    {list.entities.map((e) => (
-                      <span key={e.name} className="text-xs">
-                        <span className="font-medium text-foreground">{e.name}</span>
-                        <span className="text-muted-foreground"> — {e.services.join(' · ')}</span>
-                      </span>
-                    ))}
+                    <EntityDirectory entities={list.entities} />
                   </CardDescription>
                 </CardHeader>
 

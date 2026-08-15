@@ -11,6 +11,7 @@ config/
   scheme.json          shared Scheme Operator info + siteUrl (distribution-point origin)
   lists/*.json         one file per Trusted List: loteType, scheme name, entities, cert refs
   certs/*.pem          public CA certificates listed in the lists (the trust anchors)
+  certs/mdl-iaca/*.pem mirrored real-world mDL / ID-Pass IACA roots (see below)
 tools/
   gen-so-keystore.mjs  mint the Scheme Operator signing key   → secrets/so-keystore.json
   gen-issuer-ca.mjs    mint an issuer/attestation CA           → config/certs + secrets/
@@ -45,6 +46,29 @@ git commit … && git push   # Vercel deploys the static site
    `entities[]` referencing the cert).
 3. `npm run gen:tl && npm run verify:tl`, commit, push. The portal picks it up from `lists.json` — no app
    code change.
+
+## Mirrored real-world IACAs
+
+`attestation-issuers` carries two kinds of entity, told apart by `serviceTypeIdentifier`:
+
+| | `serviceTypeIdentifier` | Meaning |
+| --- | --- | --- |
+| Scheme-certified | `http://uri.etsi.org/19602/SvcType/…` | The Attestation Issuer CA this sandbox operates |
+| **Mirrored** | `…/svctype/EAA/Issuance/{mDL,PhotoID}/mirrored-iaca` | A production issuing authority root observed from its public source and republished |
+
+The mirrored entries are the US state mDL IACA roots plus the Apple / Google ID-Pass roots, so the sandbox
+verifier and the demo reader can verify **real** credentials from Apple Wallet, Google Wallet and the state
+wallets. The Scheme Operator does not certify, audit or supervise a mirrored entity — it only republishes a
+certificate it observed. In a production ecosystem these belong in an ISO/IEC 18013-5 Annex C **VICAL**, not
+in a scheme LoTE; this is a sandbox shortcut, tracked as such.
+
+Adding or rotating one: drop the PEM in `config/certs/mdl-iaca/`, add a service to that authority's entity in
+`config/lists/attestation-issuers.json` (`serviceName` carries the CN + expiry), bump `loteSequenceNumber`,
+then regenerate, verify, commit and push as above. Consumers need no code change — `verifier-be` re-reads the
+list every 15 min, the demo wallet every 24 h.
+
+Superseded roots stay listed while credentials signed under them are still in the field; expired ones are
+dropped (the importer refuses to register a cert past `notAfter`).
 
 ## Develop
 

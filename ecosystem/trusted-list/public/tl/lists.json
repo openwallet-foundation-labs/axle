@@ -1,11 +1,5 @@
 {
-  "generatedAt": "2026-07-12T11:02:35.291Z",
-  "schemeOperator": {
-    "file": "scheme-operator.pem",
-    "subject": "CN=Hopae Scheme Operator, O=Hopae, C=EU",
-    "fingerprintSha256": "e5418dfd7173396738200c97ffa4e728a5dc05bee5f1e3062dee0eafe3cbac66",
-    "validTo": "Jul 12 06:07:08 2036 GMT"
-  },
+  "generatedAt": "2026-08-15T08:12:27.591Z",
   "lists": [
     {
       "slug": "wallet-providers",
@@ -13,8 +7,8 @@
       "standard": "ETSI TS 119 602 · Annex E",
       "description": "Trusted wallet solution providers. Wallet-unit attestations (WUAs) chain to the certificate on this list.",
       "sequenceNumber": 1,
-      "issued": "2026-07-12T11:02:35.291Z",
-      "nextUpdate": "2027-01-12T11:02:35.291Z",
+      "issued": "2026-08-15T08:12:27.591Z",
+      "nextUpdate": "2027-02-15T08:12:27.591Z",
       "entities": [
         {
           "name": "Hopae S.A.",
@@ -44,8 +38,8 @@
       "standard": "ETSI TS 119 602 · EUDI ARF (PID Providers)",
       "description": "Providers of Person Identification Data (PID). Issued PIDs — SD-JWT VC and mdoc — chain to the certificate on this list.",
       "sequenceNumber": 1,
-      "issued": "2026-07-12T12:54:59.211Z",
-      "nextUpdate": "2027-01-12T12:54:59.211Z",
+      "issued": "2026-08-15T08:12:27.591Z",
+      "nextUpdate": "2027-02-15T08:12:27.591Z",
       "entities": [
         {
           "name": "Hopae S.A.",
@@ -74,15 +68,152 @@
       "slug": "attestation-issuers",
       "title": "Attestation Issuers",
       "standard": "ETSI TS 119 602 · EUDI ARF ((Q)EAA Providers)",
-      "description": "Providers of (Qualified) Electronic Attestations of Attributes. The mDL (ISO/IEC 18013-5) issued here chains to the certificate on this list.",
-      "sequenceNumber": 1,
-      "issued": "2026-07-12T12:54:59.211Z",
-      "nextUpdate": "2027-01-12T12:54:59.211Z",
+      "description": "Providers of (Qualified) Electronic Attestations of Attributes. The mDL (ISO/IEC 18013-5) issued here chains to the certificate on this list. Also carries mirrored real-world mDL issuing authority roots (IACAs), republished for sandbox interop and not certified by the scheme.",
+      "sequenceNumber": 2,
+      "issued": "2026-08-15T08:12:27.591Z",
+      "nextUpdate": "2027-02-15T08:12:27.591Z",
       "entities": [
         {
           "name": "Hopae S.A.",
           "services": [
             "mDL — mdoc (ISO/IEC 18013-5)"
+          ]
+        },
+        {
+          "name": "Alaska Division of Motor Vehicles",
+          "services": [
+            "mDL IACA — Alaska DMV IACA · valid to 2035-02-10"
+          ]
+        },
+        {
+          "name": "Apple Inc.",
+          "services": [
+            "ID Pass root — Apple Issuing Authority ECC Root CA - G1 · valid to 2045-04-24"
+          ]
+        },
+        {
+          "name": "Arizona Department of Transportation",
+          "services": [
+            "mDL IACA — MVMProdCA · valid to 2034-08-16",
+            "mDL IACA — MVMProdCA · valid to 2034-08-16",
+            "mDL IACA — MVMProdCA · valid to 2034-08-16",
+            "mDL IACA — SamsungIACA · valid to 2035-12-15",
+            "mDL IACA — GoogleIACA · valid to 2035-12-15",
+            "mDL IACA — AzWalletIACA · valid to 2035-12-15",
+            "mDL IACA — AvocetIACA · valid to 2035-12-15"
+          ]
+        },
+        {
+          "name": "California Department of Motor Vehicles",
+          "services": [
+            "mDL IACA — California DMV IACA Root · valid to 2033-01-07"
+          ]
+        },
+        {
+          "name": "Colorado Department of Revenue",
+          "services": [
+            "mDL IACA — Colorado Root Certificate · valid to 2029-10-29",
+            "mDL IACA — Colorado Root Certificate · valid to 2031-01-12"
+          ]
+        },
+        {
+          "name": "Georgia Department of Driver Services",
+          "services": [
+            "mDL IACA — Georgia Root Certificate Authority · valid to 2029-03-20"
+          ]
+        },
+        {
+          "name": "Google LLC",
+          "services": [
+            "ID Pass root — Identity Credential Root IACA · valid to 2034-02-20",
+            "ID Pass root — Identity Credential Root IACA · valid to 2035-03-05"
+          ]
+        },
+        {
+          "name": "Hawaii Department of Transportation",
+          "services": [
+            "mDL IACA — HI_IACA_Prod · valid to 2034-06-03"
+          ]
+        },
+        {
+          "name": "Illinois Secretary of State",
+          "services": [
+            "mDL IACA — Prod IACA Root · valid to 2044-09-18"
+          ]
+        },
+        {
+          "name": "Iowa Department of Transportation",
+          "services": [
+            "mDL IACA — iowadot.gov · valid to 2032-04-25"
+          ]
+        },
+        {
+          "name": "Kentucky Transportation Cabinet",
+          "services": [
+            "mDL IACA — US-KY PROD IACA for IDEMIA Wallet · valid to 2034-10-08"
+          ]
+        },
+        {
+          "name": "Maryland MVA",
+          "services": [
+            "mDL IACA — Fast Enterprises Root · valid to 2029-01-04",
+            "mDL IACA — MDOT MVA mDL Root · valid to 2030-06-18"
+          ]
+        },
+        {
+          "name": "Montana Department of Justice",
+          "services": [
+            "mDL IACA — carswsnp.dojmt.gov · valid to 2030-05-02"
+          ]
+        },
+        {
+          "name": "New Mexico Taxation and Revenue Department",
+          "services": [
+            "mDL IACA — New Mexico Root Certificate Authority · valid to 2030-10-01"
+          ]
+        },
+        {
+          "name": "New York State Department of Motor Vehicles",
+          "services": [
+            "mDL IACA — New York State Department of Motor Vehicles · valid to 2032-04-29"
+          ]
+        },
+        {
+          "name": "North Dakota Department of Transportation",
+          "services": [
+            "mDL IACA — https://partner.mdl.dot.nd.gov/ · valid to 2030-06-10"
+          ]
+        },
+        {
+          "name": "Ohio Department of Public Safety",
+          "services": [
+            "mDL IACA — Ohio mDL Root CA Gen 1 · valid to 2034-03-19"
+          ]
+        },
+        {
+          "name": "PR Department of Transportation and Public Works",
+          "services": [
+            "mDL IACA — PRDTOP-MDL-PROD-CA · valid to 2029-06-03"
+          ]
+        },
+        {
+          "name": "Utah DLD",
+          "services": [
+            "mDL IACA — IACA-UTAH-USA · valid to 2032-12-15",
+            "mDL IACA — IACA-UTAH-USA · valid to 2034-06-07",
+            "mDL IACA — IACA-UTAH-USA-002 · valid to 2034-11-16"
+          ]
+        },
+        {
+          "name": "Virginia Department of Motor Vehicles",
+          "services": [
+            "mDL IACA — VA mID IACA-A · valid to 2027-07-22"
+          ]
+        },
+        {
+          "name": "West Virginia Division of Motor Vehicles",
+          "services": [
+            "mDL IACA — WV prod IACA certificate · valid to 2033-12-09"
           ]
         }
       ],
@@ -107,8 +238,8 @@
       "standard": "ETSI TS 119 602 · EUDI ARF (Registration)",
       "description": "Registrar of relying parties. Relying-party access certificates chain to the Registrar CA on this list.",
       "sequenceNumber": 1,
-      "issued": "2026-07-12T13:21:40.268Z",
-      "nextUpdate": "2027-01-12T13:21:40.268Z",
+      "issued": "2026-08-15T08:12:27.591Z",
+      "nextUpdate": "2027-02-15T08:12:27.591Z",
       "entities": [
         {
           "name": "Hopae Registrar",
@@ -132,5 +263,11 @@
         }
       ]
     }
-  ]
+  ],
+  "schemeOperator": {
+    "file": "scheme-operator.pem",
+    "subject": "CN=Hopae Scheme Operator, O=Hopae, C=EU",
+    "fingerprintSha256": "e5418dfd7173396738200c97ffa4e728a5dc05bee5f1e3062dee0eafe3cbac66",
+    "validTo": "Jul 12 06:07:08 2036 GMT"
+  }
 }

@@ -1,27 +1,415 @@
 {
-  "_note": "List of (Q)EAA / Attestation Providers (EUDI ARF §Attestation Providers, shaped as an ETSI TS 119 602 LoTE). The mDL (ISO/IEC 18013-5) is an electronic attestation of attributes issued under the Attestation Issuer CA listed here.",
+  "_note": "List of (Q)EAA / Attestation Providers (EUDI ARF §Attestation Providers, shaped as an ETSI TS 119 602 LoTE). The mDL (ISO/IEC 18013-5) is an electronic attestation of attributes issued under the Attestation Issuer CA listed here. The list holds two kinds of entity, told apart by serviceTypeIdentifier: (1) providers the scheme itself certifies (http://uri.etsi.org/19602/SvcType/...), and (2) real-world mDL / ID-Pass issuing authority root certificates (IACAs) MIRRORED from their public sources so the sandbox can verify production credentials (.../svctype/.../mirrored-iaca). The scheme operator does NOT certify, audit or supervise a mirrored entity — it only republishes a certificate it observed. In a production ecosystem these belong in an ISO/IEC 18013-5 Annex C VICAL, not in a scheme LoTE.",
   "slug": "attestation-issuers",
   "title": "Attestation Issuers",
   "standard": "ETSI TS 119 602 · EUDI ARF ((Q)EAA Providers)",
-  "description": "Providers of (Qualified) Electronic Attestations of Attributes. The mDL (ISO/IEC 18013-5) issued here chains to the certificate on this list.",
+  "description": "Providers of (Qualified) Electronic Attestations of Attributes. The mDL (ISO/IEC 18013-5) issued here chains to the certificate on this list. Also carries mirrored real-world mDL issuing authority roots (IACAs), republished for sandbox interop and not certified by the scheme.",
   "loteType": "http://uri.etsi.org/19602/LoTEType/EUAttestationProvidersList",
   "schemeName": "Hopae EUDI Sandbox — List of Attestation (QEAA) Providers",
   "loteVersionIdentifier": "1",
-  "loteSequenceNumber": 1,
+  "loteSequenceNumber": 2,
   "entities": [
     {
       "teName": "Hopae S.A.",
       "teTradeName": "NTRLU-B000000",
       "teAddress": {
-        "postal": { "country": "LU", "locality": "Luxembourg" },
-        "electronic": ["mailto:trust@hopae.dev"]
+        "postal": {
+          "country": "LU",
+          "locality": "Luxembourg"
+        },
+        "electronic": [
+          "mailto:trust@hopae.dev"
+        ]
       },
-      "teInformationUri": ["https://issuer.hopae.dev/mdl/policy"],
+      "teInformationUri": [
+        "https://issuer.hopae.dev/mdl/policy"
+      ],
       "services": [
         {
           "serviceTypeIdentifier": "http://uri.etsi.org/19602/SvcType/EAA/Issuance/mDL",
           "serviceName": "mDL — mdoc (ISO/IEC 18013-5)",
           "certFile": "config/certs/attestation-ca.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Alaska Division of Motor Vehicles",
+      "teAddress": {
+        "postal": {
+          "country": "US"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — Alaska DMV IACA · valid to 2035-02-10",
+          "certFile": "config/certs/mdl-iaca/alaska.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Apple Inc.",
+      "teAddress": {
+        "postal": {
+          "country": "US"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/PhotoID/mirrored-iaca",
+          "serviceName": "ID Pass root — Apple Issuing Authority ECC Root CA - G1 · valid to 2045-04-24",
+          "certFile": "config/certs/mdl-iaca/apple-idpass.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Arizona Department of Transportation",
+      "teAddress": {
+        "postal": {
+          "country": "US",
+          "locality": "Phoenix"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — MVMProdCA · valid to 2034-08-16",
+          "certFile": "config/certs/mdl-iaca/arizona-1.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — MVMProdCA · valid to 2034-08-16",
+          "certFile": "config/certs/mdl-iaca/arizona-2.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — MVMProdCA · valid to 2034-08-16",
+          "certFile": "config/certs/mdl-iaca/arizona-3.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — SamsungIACA · valid to 2035-12-15",
+          "certFile": "config/certs/mdl-iaca/arizona-4-samsung.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — GoogleIACA · valid to 2035-12-15",
+          "certFile": "config/certs/mdl-iaca/arizona-5-google.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — AzWalletIACA · valid to 2035-12-15",
+          "certFile": "config/certs/mdl-iaca/arizona-6-azwallet.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — AvocetIACA · valid to 2035-12-15",
+          "certFile": "config/certs/mdl-iaca/arizona-7-avocet.pem"
+        }
+      ]
+    },
+    {
+      "teName": "California Department of Motor Vehicles",
+      "teAddress": {
+        "postal": {
+          "country": "US"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — California DMV IACA Root · valid to 2033-01-07",
+          "certFile": "config/certs/mdl-iaca/california.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Colorado Department of Revenue",
+      "teAddress": {
+        "postal": {
+          "country": "US",
+          "locality": "Denver"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — Colorado Root Certificate · valid to 2029-10-29",
+          "certFile": "config/certs/mdl-iaca/colorado-1.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — Colorado Root Certificate · valid to 2031-01-12",
+          "certFile": "config/certs/mdl-iaca/colorado-2.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Georgia Department of Driver Services",
+      "teAddress": {
+        "postal": {
+          "country": "US",
+          "locality": "Conyers"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — Georgia Root Certificate Authority · valid to 2029-03-20",
+          "certFile": "config/certs/mdl-iaca/georgia.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Google LLC",
+      "teAddress": {
+        "postal": {
+          "country": "US"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/PhotoID/mirrored-iaca",
+          "serviceName": "ID Pass root — Identity Credential Root IACA · valid to 2034-02-20",
+          "certFile": "config/certs/mdl-iaca/google-idpass-us.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/PhotoID/mirrored-iaca",
+          "serviceName": "ID Pass root — Identity Credential Root IACA · valid to 2035-03-05",
+          "certFile": "config/certs/mdl-iaca/google-idpass-xg.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Hawaii Department of Transportation",
+      "teAddress": {
+        "postal": {
+          "country": "US",
+          "locality": "Honolulu"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — HI_IACA_Prod · valid to 2034-06-03",
+          "certFile": "config/certs/mdl-iaca/hawaii.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Illinois Secretary of State",
+      "teAddress": {
+        "postal": {
+          "country": "US",
+          "locality": "Springfield"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — Prod IACA Root · valid to 2044-09-18",
+          "certFile": "config/certs/mdl-iaca/illinois.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Iowa Department of Transportation",
+      "teAddress": {
+        "postal": {
+          "country": "US"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — iowadot.gov · valid to 2032-04-25",
+          "certFile": "config/certs/mdl-iaca/iowa.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Kentucky Transportation Cabinet",
+      "teAddress": {
+        "postal": {
+          "country": "US"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — US-KY PROD IACA for IDEMIA Wallet · valid to 2034-10-08",
+          "certFile": "config/certs/mdl-iaca/kentucky.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Maryland MVA",
+      "teAddress": {
+        "postal": {
+          "country": "US",
+          "locality": "Glen Burnie"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — Fast Enterprises Root · valid to 2029-01-04",
+          "certFile": "config/certs/mdl-iaca/maryland-1.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — MDOT MVA mDL Root · valid to 2030-06-18",
+          "certFile": "config/certs/mdl-iaca/maryland-2.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Montana Department of Justice",
+      "teAddress": {
+        "postal": {
+          "country": "US",
+          "locality": "Helena"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — carswsnp.dojmt.gov · valid to 2030-05-02",
+          "certFile": "config/certs/mdl-iaca/montana.pem"
+        }
+      ]
+    },
+    {
+      "teName": "New Mexico Taxation and Revenue Department",
+      "teAddress": {
+        "postal": {
+          "country": "US",
+          "locality": "Santa Fe"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — New Mexico Root Certificate Authority · valid to 2030-10-01",
+          "certFile": "config/certs/mdl-iaca/new-mexico.pem"
+        }
+      ]
+    },
+    {
+      "teName": "New York State Department of Motor Vehicles",
+      "teAddress": {
+        "postal": {
+          "country": "US"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — New York State Department of Motor Vehicles · valid to 2032-04-29",
+          "certFile": "config/certs/mdl-iaca/new-york.pem"
+        }
+      ]
+    },
+    {
+      "teName": "North Dakota Department of Transportation",
+      "teAddress": {
+        "postal": {
+          "country": "US",
+          "locality": "Bismarck"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — https://partner.mdl.dot.nd.gov/ · valid to 2030-06-10",
+          "certFile": "config/certs/mdl-iaca/north-dakota.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Ohio Department of Public Safety",
+      "teAddress": {
+        "postal": {
+          "country": "US",
+          "locality": "Columbus"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — Ohio mDL Root CA Gen 1 · valid to 2034-03-19",
+          "certFile": "config/certs/mdl-iaca/ohio.pem"
+        }
+      ]
+    },
+    {
+      "teName": "PR Department of Transportation and Public Works",
+      "teAddress": {
+        "postal": {
+          "country": "US",
+          "locality": "San Juan"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — PRDTOP-MDL-PROD-CA · valid to 2029-06-03",
+          "certFile": "config/certs/mdl-iaca/puerto-rico.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Utah DLD",
+      "teAddress": {
+        "postal": {
+          "country": "US"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — IACA-UTAH-USA · valid to 2032-12-15",
+          "certFile": "config/certs/mdl-iaca/utah-1.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — IACA-UTAH-USA · valid to 2034-06-07",
+          "certFile": "config/certs/mdl-iaca/utah-2.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — IACA-UTAH-USA-002 · valid to 2034-11-16",
+          "certFile": "config/certs/mdl-iaca/utah-3.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Virginia Department of Motor Vehicles",
+      "teAddress": {
+        "postal": {
+          "country": "US"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — VA mID IACA-A · valid to 2027-07-22",
+          "certFile": "config/certs/mdl-iaca/virginia-2.pem"
+        }
+      ]
+    },
+    {
+      "teName": "West Virginia Division of Motor Vehicles",
+      "teAddress": {
+        "postal": {
+          "country": "US"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
+          "serviceName": "mDL IACA — WV prod IACA certificate · valid to 2033-12-09",
+          "certFile": "config/certs/mdl-iaca/west-virginia.pem"
         }
       ]
     }

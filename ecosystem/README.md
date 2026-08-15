@@ -25,14 +25,16 @@ list for a service type — compact JWS or JAdES JSON — or fetch it with `curl
 | List | Trust anchor it publishes | Credentials / use | Standard |
 | --- | --- | --- | --- |
 | **Wallet Providers** | WP CA that wallet-unit attestations (WUAs) chain to | Axle Wallet | ETSI TS 119 602 Annex E |
-| **PID Issuers** | PID Issuer CA | PID — SD-JWT VC + mdoc | EUDI ARF (PID Providers) |
+| **PID Issuers** | PID Issuer CA + mirrored EU reference PID / AV CAs | PID — SD-JWT VC + mdoc, Proof of Age | EUDI ARF (PID Providers) |
 | **Attestation Issuers** | Attestation Issuer CA + mirrored real-world IACAs | mDL — mdoc (ISO/IEC 18013-5), Photo ID | EUDI ARF ((Q)EAA Providers) |
 | **Registrar** | Registrar CA relying-party access certs chain to | RP registration | EUDI ARF (Registration) |
 
-Alongside the CA it operates, the Attestation Issuers list republishes the **production** mDL / ID-Pass
-issuing authority roots (US state IACAs, Apple, Google) so the sandbox can verify real credentials from Apple
-Wallet, Google Wallet and the state wallets. Those entries are marked `…/mirrored-iaca` and are *not*
-certified by the scheme — see [`trusted-list/README.md`](./trusted-list/README.md#mirrored-real-world-iacas).
+Alongside the CAs it operates, the sandbox republishes trust anchors it does not control, so the verifier and
+the demo reader can check **real** credentials rather than only self-issued ones: the production mDL / ID-Pass
+issuing authority roots (US state IACAs, Apple, Google), the EU reference implementation's PID and Age
+Verification CAs, and the test / conformance roots (OWF Multipaz, Animo, OpenID Foundation, Google staging).
+Those entries are marked `…/mirrored-iaca`, `…/mirrored-reference` and `…/sandbox-only`, and are *not*
+certified by the scheme — see [`trusted-list/README.md`](./trusted-list/README.md#mirrored-and-test-anchors).
 
 Every list is signed by the Hopae **Scheme Operator** key (self-signed root; per ETSI TS 119 602 §6.8 the
 signer's `C` = Scheme Territory = `EU` and `O` = Scheme operator = `Hopae`). Signatures are ES256 with the

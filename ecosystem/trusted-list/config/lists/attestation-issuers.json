@@ -48,6 +48,21 @@
       ]
     },
     {
+      "teName": "Animo",
+      "teAddress": {
+        "postal": {
+          "country": "NL"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/Test/Issuance/sandbox-only",
+          "serviceName": "Test CA — Animo · valid to 2028-11-28",
+          "certFile": "config/certs/sandbox-test/animo-test.pem"
+        }
+      ]
+    },
+    {
       "teName": "Apple Inc.",
       "teAddress": {
         "postal": {
@@ -73,17 +88,17 @@
       "services": [
         {
           "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
-          "serviceName": "mDL IACA — MVMProdCA · valid to 2034-08-16",
+          "serviceName": "mDL IACA — MVMProdCA (US) · valid to 2034-08-16 · ski 33422c18",
           "certFile": "config/certs/mdl-iaca/arizona-1.pem"
         },
         {
           "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
-          "serviceName": "mDL IACA — MVMProdCA · valid to 2034-08-16",
+          "serviceName": "mDL IACA — MVMProdCA (US) · valid to 2034-08-16 · ski ac503e28",
           "certFile": "config/certs/mdl-iaca/arizona-2.pem"
         },
         {
           "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
-          "serviceName": "mDL IACA — MVMProdCA · valid to 2034-08-16",
+          "serviceName": "mDL IACA — MVMProdCA (US) · valid to 2034-08-16 · ski 2641c3d5",
           "certFile": "config/certs/mdl-iaca/arizona-3.pem"
         },
         {
@@ -177,6 +192,11 @@
           "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/PhotoID/mirrored-iaca",
           "serviceName": "ID Pass root — Identity Credential Root IACA · valid to 2035-03-05",
           "certFile": "config/certs/mdl-iaca/google-idpass-xg.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/Test/Issuance/sandbox-only",
+          "serviceName": "Staging root — TEST USE ONLY GICI Staging Root · valid to 2035-04-04",
+          "certFile": "config/certs/sandbox-test/google-staging-test.pem"
         }
       ]
     },
@@ -339,6 +359,41 @@
           "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/mDL/mirrored-iaca",
           "serviceName": "mDL IACA — Ohio mDL Root CA Gen 1 · valid to 2034-03-19",
           "certFile": "config/certs/mdl-iaca/ohio.pem"
+        }
+      ]
+    },
+    {
+      "teName": "OpenID Foundation",
+      "teAddress": {
+        "postal": {
+          "country": "GB"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/Test/Issuance/sandbox-only",
+          "serviceName": "Conformance CA — OIDF Test · valid to 2034-11-23",
+          "certFile": "config/certs/sandbox-test/oidf-test.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/Test/Issuance/sandbox-only",
+          "serviceName": "Conformance CA — certification.openid.net · valid to 2027-08-03",
+          "certFile": "config/certs/sandbox-test/oidf-conformance-ca.pem"
+        }
+      ]
+    },
+    {
+      "teName": "OpenWallet Foundation",
+      "teAddress": {
+        "postal": {
+          "country": "US"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/Test/Issuance/sandbox-only",
+          "serviceName": "Test IACA — OWF Multipaz TEST IACA · valid to 2034-12-01",
+          "certFile": "config/certs/sandbox-test/multipaz-test-iaca.pem"
         }
       ]
     },

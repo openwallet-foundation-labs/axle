@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-15T08:12:27.591Z",
+  "generatedAt": "2026-08-15T08:26:56.910Z",
   "lists": [
     {
       "slug": "wallet-providers",
@@ -7,8 +7,8 @@
       "standard": "ETSI TS 119 602 · Annex E",
       "description": "Trusted wallet solution providers. Wallet-unit attestations (WUAs) chain to the certificate on this list.",
       "sequenceNumber": 1,
-      "issued": "2026-08-15T08:12:27.591Z",
-      "nextUpdate": "2027-02-15T08:12:27.591Z",
+      "issued": "2026-08-15T08:26:56.910Z",
+      "nextUpdate": "2027-02-15T08:26:56.910Z",
       "entities": [
         {
           "name": "Hopae S.A.",
@@ -37,15 +37,34 @@
       "title": "PID Issuers",
       "standard": "ETSI TS 119 602 · EUDI ARF (PID Providers)",
       "description": "Providers of Person Identification Data (PID). Issued PIDs — SD-JWT VC and mdoc — chain to the certificate on this list.",
-      "sequenceNumber": 1,
-      "issued": "2026-08-15T08:12:27.591Z",
-      "nextUpdate": "2027-02-15T08:12:27.591Z",
+      "sequenceNumber": 2,
+      "issued": "2026-08-15T08:26:56.910Z",
+      "nextUpdate": "2027-02-15T08:26:56.910Z",
       "entities": [
         {
           "name": "Hopae S.A.",
           "services": [
             "PID — SD-JWT VC",
             "PID — mdoc (ISO/IEC 18013-5)"
+          ]
+        },
+        {
+          "name": "Age Verification Reference Implementation",
+          "services": [
+            "AV Issuer CA (reference) — Age Verification Issuer CA 01 (AV) · valid to 2034-07-05"
+          ]
+        },
+        {
+          "name": "EUDI Wallet Reference Implementation",
+          "services": [
+            "PID Issuer CA (reference) — PID Issuer CA - UT 01 (UT) · valid to 2032-11-27",
+            "PID Issuer CA (reference) — PID Issuer CA 02 (CZ) · valid to 2034-07-05",
+            "PID Issuer CA (reference) — PID Issuer CA 02 (EE) · valid to 2034-07-06",
+            "PID Issuer CA (reference) — PID Issuer CA 02 (EU) · valid to 2034-07-06",
+            "PID Issuer CA (reference) — PID Issuer CA 02 (LU) · valid to 2034-07-06",
+            "PID Issuer CA (reference) — PID Issuer CA 02 (NL) · valid to 2034-07-06",
+            "PID Issuer CA (reference) — PID Issuer CA - PT 02 (PT) · valid to 2034-07-05",
+            "PID Issuer CA (reference) — PID Issuer CA - UT 02 (UT) · valid to 2034-06-20"
           ]
         }
       ],
@@ -70,8 +89,8 @@
       "standard": "ETSI TS 119 602 · EUDI ARF ((Q)EAA Providers)",
       "description": "Providers of (Qualified) Electronic Attestations of Attributes. The mDL (ISO/IEC 18013-5) issued here chains to the certificate on this list. Also carries mirrored real-world mDL issuing authority roots (IACAs), republished for sandbox interop and not certified by the scheme.",
       "sequenceNumber": 2,
-      "issued": "2026-08-15T08:12:27.591Z",
-      "nextUpdate": "2027-02-15T08:12:27.591Z",
+      "issued": "2026-08-15T08:26:56.910Z",
+      "nextUpdate": "2027-02-15T08:26:56.910Z",
       "entities": [
         {
           "name": "Hopae S.A.",
@@ -86,6 +105,12 @@
           ]
         },
         {
+          "name": "Animo",
+          "services": [
+            "Test CA — Animo · valid to 2028-11-28"
+          ]
+        },
+        {
           "name": "Apple Inc.",
           "services": [
             "ID Pass root — Apple Issuing Authority ECC Root CA - G1 · valid to 2045-04-24"
@@ -94,9 +119,9 @@
         {
           "name": "Arizona Department of Transportation",
           "services": [
-            "mDL IACA — MVMProdCA · valid to 2034-08-16",
-            "mDL IACA — MVMProdCA · valid to 2034-08-16",
-            "mDL IACA — MVMProdCA · valid to 2034-08-16",
+            "mDL IACA — MVMProdCA (US) · valid to 2034-08-16 · ski 33422c18",
+            "mDL IACA — MVMProdCA (US) · valid to 2034-08-16 · ski ac503e28",
+            "mDL IACA — MVMProdCA (US) · valid to 2034-08-16 · ski 2641c3d5",
             "mDL IACA — SamsungIACA · valid to 2035-12-15",
             "mDL IACA — GoogleIACA · valid to 2035-12-15",
             "mDL IACA — AzWalletIACA · valid to 2035-12-15",
@@ -126,7 +151,8 @@
           "name": "Google LLC",
           "services": [
             "ID Pass root — Identity Credential Root IACA · valid to 2034-02-20",
-            "ID Pass root — Identity Credential Root IACA · valid to 2035-03-05"
+            "ID Pass root — Identity Credential Root IACA · valid to 2035-03-05",
+            "Staging root — TEST USE ONLY GICI Staging Root · valid to 2035-04-04"
           ]
         },
         {
@@ -191,6 +217,19 @@
           ]
         },
         {
+          "name": "OpenID Foundation",
+          "services": [
+            "Conformance CA — OIDF Test · valid to 2034-11-23",
+            "Conformance CA — certification.openid.net · valid to 2027-08-03"
+          ]
+        },
+        {
+          "name": "OpenWallet Foundation",
+          "services": [
+            "Test IACA — OWF Multipaz TEST IACA · valid to 2034-12-01"
+          ]
+        },
+        {
           "name": "PR Department of Transportation and Public Works",
           "services": [
             "mDL IACA — PRDTOP-MDL-PROD-CA · valid to 2029-06-03"
@@ -238,8 +277,8 @@
       "standard": "ETSI TS 119 602 · EUDI ARF (Registration)",
       "description": "Registrar of relying parties. Relying-party access certificates chain to the Registrar CA on this list.",
       "sequenceNumber": 1,
-      "issued": "2026-08-15T08:12:27.591Z",
-      "nextUpdate": "2027-02-15T08:12:27.591Z",
+      "issued": "2026-08-15T08:26:56.910Z",
+      "nextUpdate": "2027-02-15T08:26:56.910Z",
       "entities": [
         {
           "name": "Hopae Registrar",

@@ -10,14 +10,32 @@ import { join } from 'node:path';
 
 x509.cryptoProvider.set(new Crypto());
 
+/**
+ * The certificate's Subject Key Identifier, or undefined when it cannot be read.
+ *
+ * `getExtension()` materialises every extension while searching, so one extension the library cannot type
+ * takes the whole certificate down. That is not hypothetical for third-party anchors: the EU Age Verification
+ * reference CA (`CN=Age Verification Issuer CA 01`) carries a malformed issuerAltName — openssl renders it as
+ * raw bytes too. `x509Ski` is optional (§6.6.3) and the certificate is published in full alongside it, so
+ * omitting the field is strictly better than refusing to list the anchor.
+ */
+function subjectKeyIdentifier(cert) {
+  try {
+    return cert.getExtension(x509.SubjectKeyIdentifierExtension)?.keyId;
+  } catch (e) {
+    console.warn(`  ! SKI unreadable for "${cert.subjectName.toString()}" (${e.message}) — omitting x509Ski`);
+    return undefined;
+  }
+}
+
 /** Parses a PEM cert into the ServiceDigitalIdentity fields (§6.6.3): the cert, its subject DN, and SKI. */
 function digitalIdentity(pem) {
   const cert = new x509.X509Certificate(pem);
-  const ski = cert.getExtension(x509.SubjectKeyIdentifierExtension);
+  const ski = subjectKeyIdentifier(cert);
   return {
     x509Certificate: Buffer.from(cert.rawData).toString('base64'),
     x509SubjectName: cert.subjectName.toString(),
-    ...(ski ? { x509Ski: ski.keyId } : {}),
+    ...(ski ? { x509Ski: ski } : {}),
   };
 }
 

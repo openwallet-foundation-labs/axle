@@ -7,16 +7,23 @@
   "loteType": "http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList",
   "schemeName": "Hopae EUDI Sandbox — List of PID Providers",
   "loteVersionIdentifier": "1",
-  "loteSequenceNumber": 1,
+  "loteSequenceNumber": 2,
   "entities": [
     {
       "teName": "Hopae S.A.",
       "teTradeName": "NTRLU-B000000",
       "teAddress": {
-        "postal": { "country": "LU", "locality": "Luxembourg" },
-        "electronic": ["mailto:trust@hopae.dev"]
+        "postal": {
+          "country": "LU",
+          "locality": "Luxembourg"
+        },
+        "electronic": [
+          "mailto:trust@hopae.dev"
+        ]
       },
-      "teInformationUri": ["https://issuer.hopae.dev/pid/policy"],
+      "teInformationUri": [
+        "https://issuer.hopae.dev/pid/policy"
+      ],
       "services": [
         {
           "serviceTypeIdentifier": "http://uri.etsi.org/19602/SvcType/PID/Issuance/SD-JWT-VC",
@@ -27,6 +34,71 @@
           "serviceTypeIdentifier": "http://uri.etsi.org/19602/SvcType/PID/Issuance/mdoc",
           "serviceName": "PID — mdoc (ISO/IEC 18013-5)",
           "certFile": "config/certs/pid-issuer-ca.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Age Verification Reference Implementation",
+      "teAddress": {
+        "postal": {
+          "country": "AV"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/PID/Issuance/mirrored-reference",
+          "serviceName": "AV Issuer CA (reference) — Age Verification Issuer CA 01 (AV) · valid to 2034-07-05",
+          "certFile": "config/certs/ref-pid/av-issuer-ca-01.pem"
+        }
+      ]
+    },
+    {
+      "teName": "EUDI Wallet Reference Implementation",
+      "teAddress": {
+        "postal": {
+          "country": "UT"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/PID/Issuance/mirrored-reference",
+          "serviceName": "PID Issuer CA (reference) — PID Issuer CA - UT 01 (UT) · valid to 2032-11-27",
+          "certFile": "config/certs/ref-pid/ref-pid-ut-01.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/PID/Issuance/mirrored-reference",
+          "serviceName": "PID Issuer CA (reference) — PID Issuer CA 02 (CZ) · valid to 2034-07-05",
+          "certFile": "config/certs/ref-pid/ref-pid-cz-02.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/PID/Issuance/mirrored-reference",
+          "serviceName": "PID Issuer CA (reference) — PID Issuer CA 02 (EE) · valid to 2034-07-06",
+          "certFile": "config/certs/ref-pid/ref-pid-ee-02.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/PID/Issuance/mirrored-reference",
+          "serviceName": "PID Issuer CA (reference) — PID Issuer CA 02 (EU) · valid to 2034-07-06",
+          "certFile": "config/certs/ref-pid/ref-pid-eu-02.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/PID/Issuance/mirrored-reference",
+          "serviceName": "PID Issuer CA (reference) — PID Issuer CA 02 (LU) · valid to 2034-07-06",
+          "certFile": "config/certs/ref-pid/ref-pid-lu-02.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/PID/Issuance/mirrored-reference",
+          "serviceName": "PID Issuer CA (reference) — PID Issuer CA 02 (NL) · valid to 2034-07-06",
+          "certFile": "config/certs/ref-pid/ref-pid-nl-02.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/PID/Issuance/mirrored-reference",
+          "serviceName": "PID Issuer CA (reference) — PID Issuer CA - PT 02 (PT) · valid to 2034-07-05",
+          "certFile": "config/certs/ref-pid/ref-pid-pt-02.pem"
+        },
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/PID/Issuance/mirrored-reference",
+          "serviceName": "PID Issuer CA (reference) — PID Issuer CA - UT 02 (UT) · valid to 2034-06-20",
+          "certFile": "config/certs/ref-pid/ref-pid-ut-02.pem"
         }
       ]
     }

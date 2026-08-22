@@ -59,8 +59,20 @@ val docs = wallet.reader.read(clientTransport, engagement, requested)
 ```
 
 NFC의 경우 홀더는 `NfcEngagementProcessor`(static, 또는 negotiated `hr → hs` 셀렉터)로 HCE를 무장하고,
-리더는 `NfcReader.readHandover(...)`가 static vs TNEP negotiated를 자동 감지합니다. 전체 수명주기는
-`demo/.../ui/ProximityScreens.kt`와 [근접 가이드](./guides/proximity)를 참고하세요.
+리더는 `NfcReader.readHandover(...)`가 static vs TNEP negotiated를 자동 감지합니다. negotiated에서는 홀더가
+자기 BLE 역할을 강요하지 않고 **리더가 제안한 것 중에서** 고릅니다(`NfcHandoverRequest.selectCarrier()`) —
+[BLE 모드는 누가 정하나](./guides/proximity#ble-모드는-누가-정하나) 참고.
+
+양쪽 역할 모두 탭 콜백을 받습니다 — `readHandover(activity) { … }`와 `NfcEngagementService.onEngaged`가
+태그를 잡는 즉시, APDU 이전에 호출됩니다. 데모는 여기서 진동을 울립니다. 탭은 밀리초 만에 끝나는데 핸드오버와
+BLE 연결은 그 뒤로 수 초가 걸리기 때문에, 이 확인이 없으면 사람들이 교환 도중에 폰을 떼어버립니다.
+
+데모 기본값은 NFC **negotiated** handover, QR은 **Central** Bluetooth 역할입니다 — 둘 다 *mdoc central
+client 모드*로 귀결되며, 리더가 광고하고 지갑은 스캔만 합니다. Settings에서 바꿀 수 있습니다. 전체 수명주기는
+`demo/.../ui/ProximityScreens.kt`와 [근접 가이드](./guides/proximity), 그리고 손대고 나면 다시 돌려야 할
+기기 테스트 매트릭스
+[`demo/PROXIMITY-MATRIX.md`](https://github.com/openwallet-foundation-labs/axle/blob/main/demo/PROXIMITY-MATRIX.md)를
+참고하세요.
 
 ## Digital Credentials API
 

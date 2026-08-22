@@ -288,6 +288,10 @@ against the **Multipaz** reference wallet/reader (`org.multipaz.testapp`) on two
 | our **holder** → Multipaz **reader** | BLE peripheral-server & central-client | ✅ accepted |
 | our ↔ our | BLE both modes + NFC static **and negotiated** handover | ✅ end-to-end |
 
+Both roles are re-run as a full matrix before each release — QR + both handover kinds × both BLE modes,
+against Multipaz and Google Wallet — see **[demo/PROXIMITY-MATRIX.md](demo/PROXIMITY-MATRIX.md)** for the
+runbook and the dated results.
+
 Three interop bugs this surfaced, each fixed against the ISO text confirmed by reading Multipaz
 source (not just logs):
 
@@ -313,9 +317,16 @@ Exchange Protocol); the reader auto-detects this (a TNEP Service Parameter recor
 Service Select → TNEP status → write Handover Request → read Handover Select — then connects over BLE. Both
 sides bind `[Hs, Hr]` into the SessionTranscript; a successful DeviceResponse decrypt proves the transcripts
 matched. The protocol lives in the SDK (`kotlin/proximity`: `NfcTnep`, `NfcEngagementProcessor`,
-`MdocNfcHandover`, loopback-tested); `android/proximity` is a thin HCE/IsoDep bridge. **Not yet cross-checked
-against Multipaz** (Multipaz also implements TNEP, but BLE-role alignment for negotiated is unverified) — a
-bonus check still open.
+`MdocNfcHandover`, loopback-tested); `android/proximity` is a thin HCE/IsoDep bridge.
+
+Negotiated handover is now **cross-checked against Multipaz in both roles** (2026-08-22), which is what
+surfaced the BLE-role subtleties the loopback tests could not: ISO 18013-5 §8.3.3.1.1.1 lets a peer declare it
+supports the Central role, the Peripheral role **or both**, and Multipaz's reader declares "both" in a single
+carrier record (LE Role `0x03`) rather than sending one carrier per mode. Reading that field as a boolean
+mispairs the UUID with the mode — §8.3.3.1.1.2 reserves the Select's UUID for mdoc peripheral server mode, so
+an mdoc answering "both" has to be dialled on the *reader's* UUID instead. The parser models all four values
+(`NfcBleCarrier`), and the holder now picks its role from the carriers the reader actually offered rather than
+imposing its own.
 
 Independently, the holder claims the shared **NDEF Type-4 AID** (`D2760000850101`) while presenting via
 `CardEmulation.setPreferredService` (released on teardown), so with several NFC/mdoc wallets installed Android

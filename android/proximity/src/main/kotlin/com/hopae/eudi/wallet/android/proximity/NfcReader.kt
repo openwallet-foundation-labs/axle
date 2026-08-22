@@ -33,8 +33,12 @@ object NfcReader {
      * platform's tag dispatcher, which reads it as an unknown Type-4 tag and throws its "New tag found" activity
      * over the reader (backgrounding it mid-BLE, and tearing the mdoc's presentation down with it). Re-taps while
      * armed are ignored for the same reason: the engagement is already spent.
+     *
+     * [onTagDetected] fires the moment a tag is taken, before any APDU — the hook a host uses to confirm the
+     * tap to the user (haptics, a sound) while the handover and the BLE connection still have seconds to run.
+     * It is called on an NFC binder thread, so post to wherever it needs to land.
      */
-    suspend fun readHandover(activity: Activity): NfcHandover = suspendCancellableCoroutine { cont ->
+    suspend fun readHandover(activity: Activity, onTagDetected: (() -> Unit)? = null): NfcHandover = suspendCancellableCoroutine { cont ->
         val adapter = NfcAdapter.getDefaultAdapter(activity)
             ?: return@suspendCancellableCoroutine cont.resumeWithException(IllegalStateException("NFC unavailable"))
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -42,6 +46,7 @@ object NfcReader {
         val callback = NfcAdapter.ReaderCallback { tag ->
             val iso = IsoDep.get(tag) ?: return@ReaderCallback
             if (!engaging.compareAndSet(false, true)) return@ReaderCallback // already engaged (or engaging) — ignore
+            runCatching { onTagDetected?.invoke() } // confirm the tap now; the exchange itself takes seconds
             scope.launch {
                 try {
                     iso.connect()
@@ -96,9 +101,14 @@ object NfcReader {
      * below is that LE Role seen from the record's sender (this reader), **not** the mdoc's mode; the two are
      * opposite on this side of the exchange (see [MdocNfcEngagement.buildHandoverRequest]).
      *
-     * A second carrier goes out alongside it, offering the mdoc the peripheral role — an mdoc picks from what the
-     * reader put on the table, so naming only one mode is what keeps the other unreachable. Either way the mdoc's
-     * Handover Select is authoritative and the caller follows it. The collision-resolution random is fresh per tap.
+     * Both BLE modes go out in **one** carrier record, with LE Role 0x02 — "both roles supported, Peripheral
+     * preferred": this reader will be either end but would rather be the peripheral, which is mdoc central
+     * client mode (§8.3.3.1.1.1's recommendation, and what Google Wallet picks anyway). That is the granularity
+     * §8.2.2.1 describes, an alternative carrier being a *transmission technology* rather than a BLE role, and
+     * it drops the duplicated UUID the two-carrier form has to send. A holder that ignores the preference bit
+     * simply takes the other mode — device-measured 2026-08-22, the Multipaz holder does exactly that and the
+     * exchange still completes. Either way the mdoc's Handover Select is authoritative and the caller follows
+     * it. The collision-resolution random is fresh per tap.
      */
     private fun negotiatedHandoverRequest(): ByteArray {
         val uuid = ByteArray(16).also { u ->
@@ -110,9 +120,8 @@ object NfcReader {
         return MdocNfcEngagement.buildHandoverRequest(
             serviceUuid = uuid,
             collisionResolution = collisionResolution,
-            peripheralServerMode = true,
             readerEngagement = MdocNfcEngagement.readerEngagement(),
-            alsoOfferMdocPeripheralServer = true,
+            singleCarrierBothRoles = true,
         )
     }
 }

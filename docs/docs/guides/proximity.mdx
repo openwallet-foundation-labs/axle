@@ -282,7 +282,7 @@ final class BleProximityTransport: ProximityTransport {
 </TabItem>
 </Tabs>
 
-### NFC static handover
+### NFC handover
 
 With `present(transport, nfc = true)`, `EngagementReady.handoverNdef` is an ISO 18013-5 §8.3.3.1.2
 **Handover Select** NDEF message (an `Hs` record + a `DeviceEngagement` record + a BLE carrier record),
@@ -291,6 +291,77 @@ Type 4 Tag service; the reader taps, reads it, extracts the engagement + BLE UUI
 continues over BLE exactly as for QR. The full Handover Select message is hashed into the
 SessionTranscript so both sides derive the same keys. The SDK exposes `MdocNfcEngagement` (build/parse)
 and `Ndef` for the app's HCE + reader-mode plumbing; the demo ships the HCE service and NFC reader.
+
+That is **static handover**, where the mdoc serves a Select the reader simply takes. §8.2.2.1 also
+defines **negotiated handover**: the mdoc advertises a Connection Handover service over **TNEP**, the
+reader writes a **Handover Request** naming the carriers it supports, and the mdoc answers with a Select
+choosing exactly one of them. Pass those Request bytes to `present(transport, nfc = true,
+handoverRequestNdef = hr)` and the SDK binds `[Hs, Hr]` into the SessionTranscript (static binds
+`[Hs, null]`). `NfcEngagementProcessor` is the holder-side APDU state machine for both; it is
+transport-agnostic, so the platform layer is a thin HCE bridge.
+
+#### Who picks the BLE mode
+
+In negotiated handover the **reader** proposes and the **mdoc** selects, so the mode is not something
+either side simply asserts. Each BLE carrier record carries a Bluetooth **LE Role** (`0x1C`), and the
+value is always the *sender's own* role — which inverts against the ISO mode names, since those are
+written from the mdoc's point of view:
+
+| LE Role | The sender says | On a Handover **Request** (sender = the reader) |
+| --- | --- | --- |
+| `0x00` | Peripheral only | the reader is the GATT server ⇒ **mdoc central client** mode only |
+| `0x01` | Central only | the reader connects out ⇒ **mdoc peripheral server** mode only |
+| `0x02` | both, **Peripheral** preferred | either mode; the reader would rather be the peripheral ⇒ it prefers **mdoc central client** |
+| `0x03` | both, **Central** preferred | either mode; it prefers **mdoc peripheral server** |
+
+The two "both" values are not a curiosity — §8.3.3.1.1.1 says an mdoc or reader indicates whether it
+supports "the Central role, the Peripheral role **or both**", and real readers use them. Reading LE Role
+as a boolean is therefore wrong twice over: it loses the "either" answer, and it mispairs the UUID with
+the mode, because §8.3.3.1.1.2 defines a UUID in the **Request** as the mdoc-central-client address and
+one in the **Select** as the mdoc-peripheral-server address. An mdoc that answers "both" has to be dialled
+on the *reader's* UUID, not the one in its own Select. `MdocNfcEngagement` models all four values
+(`NfcBleCarrier.supportsPeripheral` / `supportsCentral`), and `parseHandover(select, request)` resolves
+the pair for the reader.
+
+On the holder side, `NfcHandoverRequest.selectCarrier()` is the policy: walk the reader's carriers in the
+order it listed them, honour the LE Role preference bit where a carrier supports both, and take **mdoc
+central client mode** where the reader expresses no preference — §8.3.3.1.1.1 recommends it, Google
+Wallet always picks it, and it keeps the wallet from broadcasting a service UUID of its own. Everything
+in the SDK and demo defaults to that mode: the reader advertises, the wallet only scans.
+
+```kotlin
+// Holder: choose from what the reader actually offered (§8.2.2.1), then present over that transport.
+val choice = MdocNfcEngagement.parseHandoverRequest(hr)?.selectCarrier()
+val transport = if (choice?.peripheralServerMode == false && choice.serviceUuid != null) {
+    BleGattClientTransport(context, Ble.bytesToUuid(choice.serviceUuid), Ble.CENTRAL_CLIENT)  // dial the reader
+} else {
+    gattServer                                                                                // advertise our own
+}
+wallet.proximity.present(transport, nfc = true, handoverRequestNdef = hr)
+```
+
+The reader's own Request is built by `MdocNfcEngagement.buildHandoverRequest`. It sends **one** BLE
+carrier at LE Role `0x02` — the shape §8.2.2.1 describes, an alternative carrier being a *transmission
+technology* rather than a BLE role. `alsoOfferMdocPeripheralServer` emits the alternative encoding, one
+record per mode with central client first, for a peer that needs it.
+
+#### Device-verified
+
+The wire behaviour above is verified phone-to-phone, both roles, against the **Multipaz** test app and
+**Google Wallet** — the full matrix (QR + both handover kinds × both BLE modes, 15 rows) and its dated
+results live in [`demo/PROXIMITY-MATRIX.md`](https://github.com/openwallet-foundation-labs/axle/blob/main/demo/PROXIMITY-MATRIX.md).
+The negotiated-handover findings worth knowing before you integrate:
+
+| Partner | Its role | What it does with our Request |
+| --- | --- | --- |
+| **Google Wallet** | holder | reads the LE Role preference bit; takes **mdoc central client** mode |
+| **Multipaz** | holder | ignores the preference bit; answers **mdoc peripheral server** (`0x02` and `0x03` both measured). Carrier *order* it does follow |
+| **Multipaz** | reader | offers one carrier at LE Role `0x03` — it would rather be the Central, so our holder answers peripheral server |
+
+Both outcomes complete: a holder that declines the preferred mode simply takes the other one, which is
+why the policy is a preference and not a requirement. The demo logs both negotiated messages verbatim
+while presenting, and `tools/ndef-dump.py` decodes them into carriers, LE Roles, and UUIDs — the only
+way to see what a peer actually offered.
 
 ## Reading another wallet (reader side)
 

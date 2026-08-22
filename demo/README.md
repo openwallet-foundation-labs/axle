@@ -52,10 +52,22 @@ Toolchain: AGP 9.2.1, Gradle 9.5, `compileSdk` 36, `minSdk` 29.
 
 ## Proximity (ISO 18013-5)
 
-The SDK's proximity engine (engagement, ECDH session, DeviceRequest → DeviceResponse, reader
-authentication) is complete and unit-tested. Presenting to an in-person reader additionally needs a
-**BLE `ProximityTransport`** adapter (a GATT peripheral) — that is device-only integration and is not
-included here. See the developer docs for a BLE transport guide.
+The demo drives the full in-person stack in **both** roles — Home → **Proximity** presents as the mdoc,
+Home → **Reader** reads one. Engagement is QR or NFC (static or negotiated handover, chosen in Settings),
+and the BLE transports live in `android/proximity` (`BleGattServerTransport` / `BleGattClientTransport`),
+so the SDK's `ProximityTransport` port is wired end to end rather than left to the integrator.
+
+NFC defaults to **negotiated** handover, where the reader offers its BLE carriers and the wallet selects one
+(`NfcHandoverRequest.selectCarrier`) instead of imposing a role. Absent a stated preference that lands on
+**mdoc central client mode** — the reader advertises, the wallet only scans — which is what §8.3.3.1.1.1
+recommends and what Google Wallet picks. Both roles buzz on the tap (`Haptics`), since the tap is over in
+milliseconds while the handover and BLE connection run for seconds after it.
+
+Proximity is the one part of the stack unit tests cannot prove — the failures live in what a *peer* puts
+on the wire. Before tagging a release, or after touching `kotlin/proximity`, `android/proximity`, or
+`ProximityScreens.kt`, run the device matrix in **[PROXIMITY-MATRIX.md](PROXIMITY-MATRIX.md)** (both roles,
+both BLE modes, QR + both handover kinds, against Multipaz and Google Wallet). `tools/ndef-dump.py`
+decodes the handover messages the demo logs while presenting.
 
 ## Development notes
 

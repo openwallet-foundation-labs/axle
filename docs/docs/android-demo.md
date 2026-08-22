@@ -80,8 +80,21 @@ val docs = wallet.reader.read(clientTransport, engagement, requested)
 
 For NFC the holder arms the HCE with an `NfcEngagementProcessor` (static, or a negotiated `hr → hs`
 selector); the reader drives `NfcReader.readHandover(...)` which auto-detects static vs the TNEP
-negotiated dance. See `demo/.../ui/ProximityScreens.kt` for the full lifecycle, and the
-[Proximity guide](./guides/proximity).
+negotiated dance. In the negotiated case the holder picks its BLE role out of what the reader offered
+(`NfcHandoverRequest.selectCarrier()`) instead of imposing one — see
+[who picks the BLE mode](./guides/proximity#who-picks-the-ble-mode).
+
+Both roles take an optional tap callback — `readHandover(activity) { … }` and
+`NfcEngagementService.onEngaged` — which fire the instant the tag is taken, before any APDU. The demo
+vibrates from them: a tap is over in milliseconds while the handover plus the BLE connection run for
+seconds after it, so without that confirmation people pull the phones apart mid-exchange.
+
+The demo defaults to NFC **negotiated** handover and, for QR, the **Central** Bluetooth role — both
+landing on *mdoc central client mode*, where the reader advertises and the wallet only scans. Settings
+switches either. See `demo/.../ui/ProximityScreens.kt` for the full lifecycle, the
+[Proximity guide](./guides/proximity), and
+[`demo/PROXIMITY-MATRIX.md`](https://github.com/openwallet-foundation-labs/axle/blob/main/demo/PROXIMITY-MATRIX.md)
+for the device test matrix you should re-run after touching any of it.
 
 ## Digital Credentials API
 

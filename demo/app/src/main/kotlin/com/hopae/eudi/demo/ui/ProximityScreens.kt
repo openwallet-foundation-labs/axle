@@ -216,6 +216,8 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
         val negotiated = mode == 3
         // NFC: win the HCE routing conflict while presenting (other wallets register the same NDEF AID).
         if (nfc) (context as? android.app.Activity)?.let { NfcEngagementService.requestForeground(it) }
+        // Confirm the tap by touch: it is over in milliseconds, while handover + BLE run for seconds after.
+        if (nfc) NfcEngagementService.onEngaged = { Haptics.tap(context) }
         val uuid = UUID.randomUUID()
         val uuidBytes = Ble.uuidToBytes(uuid)
         val scope = CoroutineScope(Dispatchers.Main)
@@ -224,11 +226,15 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
         val server = if (central) null else BleGattServerTransport(context, uuid, Ble.PERIPHERAL_SERVER, if (nfc) emptyList() else listOf(DeviceEngagement.bleRetrievalMethod(peripheralServerUuid = uuidBytes)), logger = LogWalletLogger())
         val client = if (central) BleGattClientTransport(context, uuid, Ble.CENTRAL_CLIENT, listOf(DeviceEngagement.bleRetrievalMethod(centralClientUuid = uuidBytes)), logger = LogWalletLogger()) else null
         val transport: ProximityTransport = server ?: client!!
+        // The GATT client we actually drive when the mdoc is the BLE central: picked up front in QR central
+        // client mode, or created mid-handover if a reader's Handover Request offers only that mode.
+        var activeClient: BleGattClientTransport? = client
         // Shared teardown — used on a start() failure and on normal dispose.
         val cleanup = {
             NfcEngagementService.processor = null
+            NfcEngagementService.onEngaged = null
             if (nfc) (context as? android.app.Activity)?.let { NfcEngagementService.releaseForeground(it) }
-            scope.cancel(); server?.stop(); client?.stop()
+            scope.cancel(); server?.stop(); activeClient?.stop()
         }
         // Starting the GATT server can throw if Bluetooth flips off between the check and here — catch it
         // instead of letting it crash the app from this DisposableEffect body (runs on the main thread).
@@ -248,7 +254,7 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
                 when (st) {
                     is ProximityState.EngagementReady -> {
                         // Central client mode: arm Ident verification now that the engagement (EDeviceKey) exists.
-                        client?.armIdent(DeviceEngagement.eDeviceKeyBytes(st.deviceEngagement))
+                        activeClient?.armIdent(DeviceEngagement.eDeviceKeyBytes(st.deviceEngagement))
                         val ndef = st.handoverNdef
                         when {
                             ndef == null -> { qr = encodeQr("mdoc:" + b64(st.deviceEngagement)); status = "Waiting for a reader — show this QR" }
@@ -277,11 +283,33 @@ fun ProximityHolderDialog(wallet: Wallet, onClose: () -> Unit) {
             // only then do we start presenting (binding [Hs, Hr]) and hand the Handover Select back over NFC.
             NfcEngagementService.processor = NfcEngagementProcessor(
                 negotiatedHandoverSelect = { hr ->
-                    val s = wallet.proximity.present(transport, nfc = true, handoverRequestNdef = hr)
+                    // Interop diagnostics: both negotiated messages go to the debug log verbatim — which carriers
+                    // a reader offers is the thing that decides this exchange, and it is invisible otherwise.
+                    LogStore.log("NFC Hr(${hr.size}B) " + hr.joinToString("") { "%02x".format(it) })
+                    // §8.2.2.1: our Handover Select may name only a carrier the reader actually offered, and
+                    // the reader says which it prefers by list order and by the LE Role bit — selectCarrier
+                    // follows both. Taking mdoc central client means dropping the pre-warmed GATT server and
+                    // dialling the reader instead; mdoc peripheral server keeps it and names our own UUID.
+                    val choice = MdocNfcEngagement.parseHandoverRequest(hr)?.selectCarrier()
+                    val readerUuid = choice?.serviceUuid
+                    val t: ProximityTransport = if (choice != null && !choice.peripheralServerMode && readerUuid != null) {
+                        server?.stop()
+                        val dialled = Ble.bytesToUuid(readerUuid)
+                        LogStore.log("NFC negotiated: taking mdoc central client mode — connecting to $dialled")
+                        BleGattClientTransport(context, dialled, Ble.CENTRAL_CLIENT, logger = LogWalletLogger()).also {
+                            activeClient = it
+                            scope.launch { runCatching { it.connect() } }
+                        }
+                    } else {
+                        transport
+                    }
+                    val s = wallet.proximity.present(t, nfc = true, handoverRequestNdef = hr)
                     scope.launch { runCatching { driveSession(s) } }
                     val ready = s.state.first { it is ProximityState.EngagementReady || it is ProximityState.Failed }
                     if (ready is ProximityState.Failed) throw ready.error
-                    (ready as ProximityState.EngagementReady).handoverNdef ?: error("no Handover Select produced")
+                    val hs = (ready as ProximityState.EngagementReady).handoverNdef ?: error("no Handover Select produced")
+                    LogStore.log("NFC Hs(${hs.size}B) " + hs.joinToString("") { "%02x".format(it) })
+                    hs
                 },
             )
             status = "Tap your phone to the reader (negotiated)"
@@ -619,7 +647,7 @@ fun ProximityReaderScreen(wallet: Wallet) {
         nfcWaiting = true
         nfcJob = scope.launch {
             try {
-                val handover = NfcReader.readHandover(context as Activity)
+                val handover = NfcReader.readHandover(context as Activity) { Haptics.tap(context) }
                 nfcWaiting = false // tap received — the NFC handover is done, the rest is BLE
                 // Both messages: a negotiated Select that takes the carrier we offered names no UUID of its own.
                 val eng = MdocNfcEngagement.parseHandover(handover.handoverSelect, handover.handoverRequest)

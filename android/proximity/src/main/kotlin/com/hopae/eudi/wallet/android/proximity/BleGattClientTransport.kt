@@ -17,6 +17,7 @@ import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
 import com.hopae.eudi.wallet.proximity.DeviceEngagement
+import com.hopae.eudi.wallet.spi.NfcCarrier
 import com.hopae.eudi.wallet.spi.ProximityTransport
 import com.hopae.eudi.wallet.spi.WalletLogger
 import kotlinx.coroutines.CancellationException
@@ -55,6 +56,14 @@ class BleGattClientTransport(
     private val logger: WalletLogger? = null,
 ) : ProximityTransport {
     override fun retrievalMethods(): List<ByteArray> = advertisedMethods
+
+    /**
+     * The carrier a holder using this transport puts in its NFC Handover Select. [serviceUuid] is the reader's
+     * here — mdoc central client mode dials the UUID the reader offered in its Handover Request (§8.3.3.1.1.2) —
+     * and the LE Role goes out as Central, saying the mdoc is the one connecting.
+     */
+    override fun nfcCarrier(): NfcCarrier =
+        NfcCarrier(Ble.uuidToBytes(serviceUuid), peripheralServerMode = uuids.state == Ble.PERIPHERAL_SERVER.state)
 
     /**
      * ISO 18013-5 §8.3.3.1.1.4: the raw `EDeviceKeyBytes` used to verify the reader's Ident characteristic.

@@ -29,8 +29,12 @@ class NfcEngagementService : HostApduService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
 
+    /** Whether [onEngaged] has already fired for the tap in progress; reset when the NFC link drops. */
+    private val engaged = java.util.concurrent.atomic.AtomicBoolean(false)
+
     override fun processCommandApdu(apdu: ByteArray, extras: Bundle?): ByteArray? {
         val active = processor ?: return SW_NOT_FOUND
+        if (engaged.compareAndSet(false, true)) runCatching { onEngaged?.invoke() } // first APDU of this tap
         scope.launch {
             val response = try {
                 mutex.withLock { active.processCommand(apdu) }
@@ -43,6 +47,7 @@ class NfcEngagementService : HostApduService() {
     }
 
     override fun onDeactivated(reason: Int) {
+        engaged.set(false)
         processor?.reset()
     }
 
@@ -58,6 +63,14 @@ class NfcEngagementService : HostApduService() {
          */
         @Volatile
         var processor: NfcEngagementProcessor? = null
+
+        /**
+         * Called once per tap, on the first command APDU the reader sends — the hook a host uses to confirm the
+         * tap to the user (haptics, a sound) while the handover and BLE connection still have seconds to run.
+         * Runs on an NFC binder thread, so post to wherever it needs to land. Set and cleared with [processor].
+         */
+        @Volatile
+        var onEngaged: (() -> Unit)? = null
 
         /**
          * Routes NFC (the shared NDEF Type-4 AID) to *this* service while [activity] is in the foreground,

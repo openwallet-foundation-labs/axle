@@ -88,7 +88,8 @@ fun SettingsScreen(onOpenDebug: () -> Unit) {
                 ) { nfcNegotiated = it == 1; ProximityPrefs.setNfcNegotiated(context, nfcNegotiated) }
             }
             Text(
-                "Peripheral + Static work with the widest range of readers. Change these only if a reader needs it.",
+                "Defaults put the reader on the air and this wallet on scan duty (mdoc central client mode). " +
+                    "Change these only if a reader needs it.",
                 style = MaterialTheme.typography.bodySmall, color = c.inkMuted,
             )
         }

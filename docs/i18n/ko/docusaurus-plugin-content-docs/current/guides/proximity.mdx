@@ -274,7 +274,7 @@ final class BleProximityTransport: ProximityTransport {
 </TabItem>
 </Tabs>
 
-### NFC static handover
+### NFC handover
 
 `present(transport, nfc = true)`이면 `EngagementReady.handoverNdef`는 ISO 18013-5 §8.3.3.1.2 **Handover
 Select** NDEF 메시지(`Hs` 레코드 + `DeviceEngagement` 레코드 + BLE carrier 레코드)이며, SDK가 transport의
@@ -282,6 +282,73 @@ Select** NDEF 메시지(`Hs` 레코드 + `DeviceEngagement` 레코드 + BLE carr
 읽고 인게이지먼트 + BLE UUID를 추출하며, 세션은 QR과 똑같이 BLE로 이어집니다. 전체 Handover Select 메시지가
 SessionTranscript에 해시되어 양쪽이 같은 키를 도출합니다. SDK는 `MdocNfcEngagement`(빌드/파싱)와 `Ndef`를
 제공하고, 데모가 HCE 서비스 + NFC 리더를 제공합니다.
+
+여기까지가 **static handover** — mdoc이 내놓은 Select를 리더가 그대로 가져가는 방식입니다. §8.2.2.1은
+**negotiated handover**도 정의합니다. mdoc이 **TNEP**으로 Connection Handover 서비스를 광고하면, 리더가
+자기가 지원하는 캐리어를 담은 **Handover Request**를 쓰고, mdoc이 그중 **정확히 하나**를 골라 Select로
+답합니다. 그 Request 바이트를 `present(transport, nfc = true, handoverRequestNdef = hr)`로 넘기면 SDK가
+SessionTranscript에 `[Hs, Hr]`을 바인딩합니다(static은 `[Hs, null]`). 홀더 측 APDU 상태머신은
+`NfcEngagementProcessor` 하나가 두 방식을 모두 처리하며 플랫폼 타입에 의존하지 않아, 플랫폼 계층은 얇은
+HCE 브리지로 끝납니다.
+
+#### BLE 모드는 누가 정하나
+
+negotiated handover에서는 **리더가 제안하고 mdoc이 고릅니다**. 어느 쪽도 일방적으로 정하지 못합니다. 각 BLE
+캐리어 레코드는 Bluetooth **LE Role**(`0x1C`)을 싣는데, 이 값은 언제나 **보내는 쪽 자신의 역할**입니다. ISO
+모드 이름은 mdoc 기준으로 붙어 있어서, 리더가 보낼 때는 뒤집혀 읽힙니다:
+
+| LE Role | 보내는 쪽의 진술 | Handover **Request**에서 (보낸 쪽 = 리더) |
+| --- | --- | --- |
+| `0x00` | Peripheral만 | 리더가 GATT 서버 ⇒ **mdoc central client** 모드만 |
+| `0x01` | Central만 | 리더가 접속하는 쪽 ⇒ **mdoc peripheral server** 모드만 |
+| `0x02` | 둘 다, **Peripheral** 선호 | 어느 쪽이든 가능; 리더가 peripheral을 하고 싶다 ⇒ **mdoc central client** 선호 |
+| `0x03` | 둘 다, **Central** 선호 | 어느 쪽이든 가능; **mdoc peripheral server** 선호 |
+
+"둘 다" 두 값은 예외적인 케이스가 아닙니다 — §8.3.3.1.1.1이 mdoc과 리더는 "Central 역할, Peripheral 역할,
+**또는 둘 다**"를 지원한다고 표시한다고 규정하고, 실제 리더들이 그 값을 씁니다. 그래서 LE Role을 boolean으로
+읽으면 두 가지를 동시에 놓칩니다. "둘 다"라는 답을 표현하지 못하고, **UUID와 모드의 짝이 어긋납니다**.
+§8.3.3.1.1.2가 **Request**의 UUID를 mdoc-central-client 주소로, **Select**의 UUID를 mdoc-peripheral-server
+주소로 못박기 때문에, "둘 다"라고 답한 mdoc은 자기 Select의 UUID가 아니라 **리더의 UUID**로 연결해야 합니다.
+`MdocNfcEngagement`는 네 값을 모두 모델링하고(`NfcBleCarrier.supportsPeripheral` / `supportsCentral`),
+`parseHandover(select, request)`가 리더 측에서 그 짝을 풀어줍니다.
+
+홀더 측 정책은 `NfcHandoverRequest.selectCarrier()`입니다. 리더가 나열한 **순서대로** 훑고, "둘 다" 캐리어면
+LE Role 선호 비트를 존중하며, 선호 표시가 없으면 **mdoc central client 모드**를 택합니다 — §8.3.3.1.1.1이
+권고하고, Google Wallet이 항상 그걸 고르며, 지갑이 자기 서비스 UUID를 방송하지 않아도 되기 때문입니다. SDK와
+데모의 기본값이 전부 이 모드입니다: **리더가 광고하고, 지갑은 스캔만 합니다.**
+
+```kotlin
+// 홀더: 리더가 실제로 제안한 것 중에서 고르고(§8.2.2.1), 그 transport로 제시한다.
+val choice = MdocNfcEngagement.parseHandoverRequest(hr)?.selectCarrier()
+val transport = if (choice?.peripheralServerMode == false && choice.serviceUuid != null) {
+    BleGattClientTransport(context, Ble.bytesToUuid(choice.serviceUuid), Ble.CENTRAL_CLIENT)  // 리더에 접속
+} else {
+    gattServer                                                                                // 우리가 광고
+}
+wallet.proximity.present(transport, nfc = true, handoverRequestNdef = hr)
+```
+
+리더 자신의 Request는 `MdocNfcEngagement.buildHandoverRequest`가 만듭니다. BLE 캐리어 **하나**를 LE Role
+`0x02`로 보냅니다 — §8.2.2.1이 서술하는 형태로, alternative carrier의 단위는 BLE 역할이 아니라 *전송 기술*
+입니다. 한 모드당 레코드 하나씩 보내는 대체 인코딩이 필요한 상대를 위해 `alsoOfferMdocPeripheralServer`가
+남아 있습니다.
+
+#### 실기기 검증
+
+위 동작은 **Multipaz** 테스트앱과 **Google Wallet**을 상대로 양쪽 역할 모두 폰-대-폰으로 검증했습니다. 전체
+매트릭스(QR + 두 handover 방식 × 두 BLE 모드, 15행)와 날짜별 결과는
+[`demo/PROXIMITY-MATRIX.md`](https://github.com/openwallet-foundation-labs/axle/blob/main/demo/PROXIMITY-MATRIX.md)에
+있습니다. 연동 전에 알아둘 negotiated handover 관련 사실:
+
+| 상대 | 그쪽 역할 | 우리 Request에 대한 반응 |
+| --- | --- | --- |
+| **Google Wallet** | 홀더 | LE Role 선호 비트를 읽고 **mdoc central client** 모드를 택함 |
+| **Multipaz** | 홀더 | 선호 비트를 무시하고 **mdoc peripheral server**로 답함(`0x02`·`0x03` 둘 다 측정). 캐리어 *순서*는 따름 |
+| **Multipaz** | 리더 | LE Role `0x03` 캐리어 하나를 제안 — 자기가 Central을 원하므로 우리 홀더는 peripheral server로 답함 |
+
+둘 다 정상 완료됩니다. 선호 모드를 거절한 홀더는 그냥 다른 모드를 택할 뿐이고, 그래서 이건 요구사항이 아니라
+선호입니다. 데모는 제시 중 negotiated 메시지 두 개를 원문 그대로 로그에 남기고, `tools/ndef-dump.py`가 그걸
+캐리어·LE Role·UUID로 디코딩합니다 — 상대가 실제로 무엇을 제안했는지 볼 수 있는 유일한 방법입니다.
 
 ## 다른 월렛 읽기 (리더 측)
 

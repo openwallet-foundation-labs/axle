@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -55,14 +56,34 @@ internal fun PresentDone(title: String, subtitle: String, buttonLabel: String = 
     Spacer(Modifier.height(28.dp)); PrimaryButton(buttonLabel, onDone)
 }
 
+/**
+ * The shared failure block. [message] is the line a User reads; [detail] is the underlying technical reason
+ * (an SDK exception message), rendered smaller in its own card — this is an interop demo, so the reason a
+ * verifier was rejected has to be visible on the device, not only in the Debug log.
+ */
 @Composable
-internal fun PresentFailed(title: String, message: String, buttonLabel: String = "Close", onClose: () -> Unit) {
+internal fun PresentFailed(
+    title: String,
+    message: String,
+    buttonLabel: String = "Close",
+    detail: String? = null,
+    onClose: () -> Unit,
+) {
     val c = WalletTheme.colors
     Box(Modifier.size(84.dp).clip(RoundedCornerShape(99.dp)).background(c.dangerBg), contentAlignment = Alignment.Center) {
         Text("!", style = MaterialTheme.typography.titleLarge, color = c.danger)
     }
     Spacer(Modifier.height(20.dp)); Text(title, style = MaterialTheme.typography.titleMedium, color = c.ink)
     Spacer(Modifier.height(8.dp)); Text(message, style = MaterialTheme.typography.bodyMedium, color = c.inkMuted, textAlign = TextAlign.Center)
+    if (!detail.isNullOrBlank() && detail != message) {
+        Spacer(Modifier.height(16.dp))
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.dangerBg).padding(14.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = c.danger, textAlign = TextAlign.Center)
+        }
+    }
     Spacer(Modifier.height(28.dp)); PrimaryButton(buttonLabel, onClose)
 }
 

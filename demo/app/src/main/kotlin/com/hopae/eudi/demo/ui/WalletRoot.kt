@@ -59,12 +59,14 @@ import com.hopae.eudi.demo.LogStore
 import com.hopae.eudi.demo.PendingAuth
 import com.hopae.eudi.demo.PortraitCaptureActivity
 import com.hopae.eudi.demo.security.AppLock
+import com.hopae.eudi.demo.ui.components.absorbTouches
 import com.hopae.eudi.demo.ui.screens.ActivityScreen
 import com.hopae.eudi.demo.ui.screens.DebugScreen
 import com.hopae.eudi.demo.ui.screens.DocumentDetailScreen
 import com.hopae.eudi.demo.ui.screens.DocumentsScreen
 import com.hopae.eudi.demo.ui.screens.HomeScreen
 import com.hopae.eudi.demo.ui.screens.IssueScreen
+import com.hopae.eudi.demo.ui.screens.PresentFailed
 import com.hopae.eudi.demo.ui.screens.PresentScreen
 import com.hopae.eudi.demo.ui.screens.SettingsScreen
 import com.hopae.eudi.demo.ui.screens.TransactionDetailScreen
@@ -105,6 +107,7 @@ fun WalletRoot(wallet: Wallet) {
     var txDetail by remember { mutableStateOf<TransactionLogEntry?>(null) }
     var showProximity by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<String?>(null) }
+    var failure by remember { mutableStateOf<LinkFailure?>(null) }
 
     // Standard bottom-nav switch: single instance per tab, saving/restoring each tab's state. Both the bottom
     // bar and the "See all" links go through this so the back stack stays consistent (tapping Home after a
@@ -128,6 +131,15 @@ fun WalletRoot(wallet: Wallet) {
         }.onFailure { LogStore.log("❌ open browser: ${it.message}") }
     }
 
+    // A link that never reaches IssueScreen/PresentScreen fails here, before any flow UI exists. Those screens
+    // own their own Failed step; this stage used to only write to the debug log, so a rejected offer/request
+    // just dropped the User back on Home with no explanation. Everything that ends the resolve unsuccessfully
+    // now raises [failure] as well as logging.
+    fun fail(title: String, message: String, detail: String?) {
+        LogStore.log("❌ $title: ${detail ?: message}")
+        failure = LinkFailure(title, message, detail)
+    }
+
     // Unified inbound scan router (holder side): route by the scanned/opened URI's scheme.
     fun handleUri(uri: String, source: String) {
         val scheme = uri.substringBefore("://", "").lowercase()
@@ -136,7 +148,7 @@ fun WalletRoot(wallet: Wallet) {
             in OFFER_SCHEMES -> scope.launch {
                 busy = "Resolving offer…"
                 runCatching { issuing = wallet.issuance.resolveOffer(uri) }
-                    .onFailure { LogStore.log("❌ resolveOffer: ${it.message}") }
+                    .onFailure { fail("Couldn't read the offer", OFFER_HINT, it.message) }
                 busy = null
             }
             in VP_SCHEMES -> scope.launch {
@@ -145,13 +157,17 @@ fun WalletRoot(wallet: Wallet) {
                     val session = wallet.presentation.start(uri)
                     when (val r = session.state.first { it is PresentationState.RequestResolved || it is PresentationState.Failed }) {
                         is PresentationState.RequestResolved -> consent = PendingConsent(session, r.request)
-                        is PresentationState.Failed -> LogStore.log("❌ ${r.error.message}")
+                        is PresentationState.Failed -> fail("Couldn't read the request", REQUEST_HINT, r.error.message)
                         else -> {}
                     }
-                }.onFailure { LogStore.log("❌ presentation: ${it.message}") }
+                }.onFailure { fail("Couldn't read the request", REQUEST_HINT, it.message) }
                 busy = null
             }
-            else -> LogStore.log("⚠️ Unrecognized scheme '$scheme' (expected an offer or presentation link)")
+            else -> fail(
+                "Unsupported link",
+                "This QR code isn't an issuer offer or a verifier request.",
+                "Scheme '$scheme' is not one this wallet handles.",
+            )
         }
     }
 
@@ -245,7 +261,34 @@ fun WalletRoot(wallet: Wallet) {
     }
     if (showProximity) ProximityHolderDialog(wallet) { showProximity = false }
 
+    failure?.let { f ->
+        BackHandler { failure = null }
+        LinkFailureOverlay(f) { failure = null }
+    }
+
     busy?.let { message -> BusyOverlay(message) }
+}
+
+/** A link (offer or presentation request) the wallet refused before any flow screen could open. */
+private data class LinkFailure(val title: String, val message: String, val detail: String?)
+
+private const val OFFER_HINT =
+    "The issuer's credential offer couldn't be resolved. It may have expired, or already been used."
+private const val REQUEST_HINT =
+    "The verifier's request was rejected. It may have expired, or it may not follow OpenID4VP 1.0."
+
+@Composable
+private fun LinkFailureOverlay(failure: LinkFailure, onClose: () -> Unit) {
+    val c = WalletTheme.colors
+    Box(Modifier.fillMaxSize().background(c.screen).absorbTouches()) {
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            PresentFailed(failure.title, failure.message, detail = failure.detail, onClose = onClose)
+        }
+    }
 }
 
 @Composable

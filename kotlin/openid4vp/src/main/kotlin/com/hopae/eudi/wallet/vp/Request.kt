@@ -112,6 +112,8 @@ class AuthorizationRequestResolver(
         if (uriMethod != "get" && uriMethod != "post") {
             throw VpException.InvalidRequest("invalid_request_uri_method: '$uriMethod' is neither get nor post")
         }
+        val signed = params["request_uri"] != null || params["request"] != null
+        if (signed) requireSignableClientIdPrefix(scheme)
         val (claims, verifier) = when {
             params["request_uri"] != null -> {
                 val walletNonce = if (uriMethod == "post") rng?.let { Base64Url.encode(it.nextBytes(16)) } else null
@@ -155,13 +157,22 @@ class AuthorizationRequestResolver(
         val allowed = setOf("direct_post", "direct_post.jwt", "dc_api", "dc_api.jwt")
         if (responseMode !in allowed) throw VpException.Unsupported("response_mode '$responseMode'")
         val txData = (claims["transaction_data"] as? JsonValue.Arr)?.items?.mapNotNull { (it as? JsonValue.Str)?.value }
+
+        // §5.9.3: under the `redirect_uri` prefix the Client Identifier *is* the endpoint the response goes to.
+        var responseUri = claims.str("response_uri")
+        var redirectUri = claims.str("redirect_uri")
+        if (scheme == REDIRECT_URI) {
+            val target = redirectUriPrefixTarget(claims, clientId, responseMode)
+            if (usesResponseUri(responseMode)) responseUri = target else redirectUri = target
+        }
+
         return ResolvedRequest(
             clientId = clientId,
             nonce = nonce,
             state = claims.str("state"),
             responseMode = responseMode,
-            responseUri = claims.str("response_uri"),
-            redirectUri = claims.str("redirect_uri"),
+            responseUri = responseUri,
+            redirectUri = redirectUri,
             dcqlQuery = DcqlQuery.parse(dcqlObj),
             clientMetadata = claims["client_metadata"] as? JsonValue.Obj,
             transactionData = txData,
@@ -182,6 +193,7 @@ class AuthorizationRequestResolver(
             ?: throw VpException.InvalidRequest("signed DC API request has no client_id")
         // OpenID4VP 1.0: the scheme is the client_id prefix (no separate client_id_scheme parameter).
         val scheme = clientIdScheme(clientId)
+        requireSignableClientIdPrefix(scheme) // §5.9.3 — this request is signed by construction
         val verifier = trust?.verifyRequestObject(jws, clientId, scheme)
             ?: VerifierInfo(clientId, scheme, jws.x5c, null, trusted = false)
         return claims to verifier
@@ -280,9 +292,50 @@ class AuthorizationRequestResolver(
         return resp.body.decodeToString().trim()
     }
 
-    /** OpenID4VP 1.0: the client_id scheme is its prefix (e.g. `x509_san_dns:…`), or `redirect_uri` if unprefixed. */
-    private fun clientIdScheme(clientId: String): String =
-        if (clientId.contains(":")) clientId.substringBefore(":") else "redirect_uri"
+    /**
+     * OpenID4VP 1.0 §5.9.2: the Client Identifier Prefix is the part before the first `:` — but only when that
+     * part is a prefix §5.9.3 defines. "If a `:` character is not present in the Client Identifier, the Wallet
+     * MUST treat the Client Identifier as referencing a pre-registered client", and pre-registered identifiers
+     * "MUST NOT contain a `:` character preceded immediately by a supported Client Identifier Prefix value" —
+     * so an unrecognised head is not a prefix at all. Without the whitelist a bare Redirect URI client_id
+     * (`https://rp.example/cb`) would parse as the non-existent prefix `https`.
+     */
+    private fun clientIdScheme(clientId: String): String {
+        val head = clientId.substringBefore(':', missingDelimiterValue = "")
+        return if (head in CLIENT_ID_PREFIXES) head else PRE_REGISTERED
+    }
+
+    /**
+     * §5.9.3: "Requests using the `redirect_uri` Client Identifier Prefix cannot be signed because there is no
+     * method for the Wallet to obtain a trusted key for verification." A JWS under this prefix carries no
+     * verifiable key, so accepting one would let an attacker dress an unauthenticated request as a signed
+     * (and, to the User, "verified") one. The prefix and JAR are mutually exclusive — reject before fetching.
+     */
+    private fun requireSignableClientIdPrefix(scheme: String) {
+        if (scheme == REDIRECT_URI) {
+            throw VpException.InvalidRequest("the '$REDIRECT_URI' client_id prefix cannot be used with a signed request")
+        }
+    }
+
+    /** §5.9.3: `direct_post` (and its `.jwt` variant) posts to `response_uri`; every other mode uses `redirect_uri`. */
+    private fun usesResponseUri(responseMode: String): Boolean = responseMode.startsWith("direct_post")
+
+    /**
+     * §5.9.3: under the `redirect_uri` prefix "the original Client Identifier part (without the prefix
+     * `redirect_uri:`) is the Verifier's Redirect URI (or Response URI when Response Mode `direct_post` is
+     * used)". Nothing else authenticates such a Verifier — the identifier *is* the endpoint — so a request
+     * naming one Verifier while delivering the presentation to another endpoint is rejected. The Verifier
+     * "MAY omit" the parameter, in which case the Client Identifier supplies it.
+     */
+    private fun redirectUriPrefixTarget(claims: JsonValue.Obj, clientId: String, responseMode: String): String {
+        val expected = clientId.substringAfter("$REDIRECT_URI:", clientId)
+        val param = if (usesResponseUri(responseMode)) "response_uri" else "redirect_uri"
+        val declared = claims.str(param) ?: return expected
+        if (declared != expected) {
+            throw VpException.InvalidRequest("$param '$declared' does not match the client_id '$clientId'")
+        }
+        return declared
+    }
 
     private fun parseQuery(uri: String): Map<String, String> {
         val query = uri.substringAfter('?', "")
@@ -297,6 +350,22 @@ class AuthorizationRequestResolver(
     private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
 
     private companion object {
+        /** §5.9.2: an unprefixed (or unrecognised-prefix) Client Identifier references a pre-registered client. */
+        const val PRE_REGISTERED = "pre-registered"
+
+        /** §5.9.3: the Client Identifier is the Verifier's Redirect URI (Response URI under `direct_post`). */
+        const val REDIRECT_URI = "redirect_uri"
+
+        /** The Client Identifier Prefixes OpenID4VP 1.0 §5.9.3 defines. Everything else is [PRE_REGISTERED]. */
+        val CLIENT_ID_PREFIXES: Set<String> = setOf(
+            REDIRECT_URI,
+            "openid_federation",
+            "decentralized_identifier",
+            "verifier_attestation",
+            "x509_san_dns",
+            "x509_hash",
+        )
+
         /** Wallet capabilities advertised to the verifier for `request_uri_method=post`. */
         val WALLET_METADATA: String = JsonValue.Obj(
             listOf(

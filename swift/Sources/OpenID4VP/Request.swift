@@ -145,6 +145,7 @@ public struct AuthorizationRequestResolver {
         guard uriMethod == "get" || uriMethod == "post" else {
             throw VpError.invalidRequest("invalid_request_uri_method: '\(uriMethod)' is neither get nor post")
         }
+        if params["request_uri"] != nil || params["request"] != nil { try requireSignableClientIdPrefix(scheme) }
         if let requestUriParam = params["request_uri"] {
             let walletNonce = uriMethod == "post" ? rng.map { Base64Url.encode($0.nextBytes(16)) } : nil
             let jwt = try await fetchRequestObject(requestUriParam, method: uriMethod, walletNonce: walletNonce)
@@ -201,9 +202,18 @@ public struct AuthorizationRequestResolver {
             txData = items.compactMap { if case let .str(s) = $0 { return s } else { return nil } }
         }
         func str(_ n: String) -> String? { if case let .str(s)? = claims[n] { return s }; return nil }
+
+        // §5.9.3: under the `redirect_uri` prefix the Client Identifier *is* the endpoint the response goes to.
+        var responseUri = str("response_uri")
+        var redirectUri = str("redirect_uri")
+        if scheme == redirectUriPrefix {
+            let target = try redirectUriPrefixTarget(claims, clientId, responseMode)
+            if usesResponseUri(responseMode) { responseUri = target } else { redirectUri = target }
+        }
+
         return ResolvedRequest(
             clientId: clientId, nonce: nonce, state: str("state"),
-            responseMode: responseMode, responseUri: str("response_uri"), redirectUri: str("redirect_uri"),
+            responseMode: responseMode, responseUri: responseUri, redirectUri: redirectUri,
             dcqlQuery: try DcqlQuery.parse(dcqlObj), clientMetadata: claims["client_metadata"],
             transactionData: txData, verifier: verifier, origin: origin
         )
@@ -235,6 +245,7 @@ public struct AuthorizationRequestResolver {
         }
         // OpenID4VP 1.0: the scheme is the client_id prefix (no separate client_id_scheme parameter).
         let scheme = clientIdScheme(clientId)
+        try requireSignableClientIdPrefix(scheme) // §5.9.3 — this request is signed by construction
         let verifier: VerifierInfo
         if let trust {
             verifier = try await trust.verifyRequestObject(jws, clientId: clientId, scheme: scheme)
@@ -329,9 +340,46 @@ public struct AuthorizationRequestResolver {
         return s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
     }
 
-    /// OpenID4VP 1.0: the client_id scheme is its prefix (e.g. `x509_san_dns:…`), or `redirect_uri` if unprefixed.
+    /// OpenID4VP 1.0 §5.9.2: the Client Identifier Prefix is the part before the first `:` — but only when that
+    /// part is a prefix §5.9.3 defines. "If a `:` character is not present in the Client Identifier, the Wallet
+    /// MUST treat the Client Identifier as referencing a pre-registered client", and pre-registered identifiers
+    /// "MUST NOT contain a `:` character preceded immediately by a supported Client Identifier Prefix value" —
+    /// so an unrecognised head is not a prefix at all. Without the whitelist a bare Redirect URI client_id
+    /// (`https://rp.example/cb`) would parse as the non-existent prefix `https`.
     private func clientIdScheme(_ clientId: String) -> String {
-        clientId.contains(":") ? String(clientId.split(separator: ":")[0]) : "redirect_uri"
+        guard let head = clientId.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).first,
+              clientIdPrefixes.contains(String(head))
+        else { return preRegisteredPrefix }
+        return String(head)
+    }
+
+    /// §5.9.3: "Requests using the `redirect_uri` Client Identifier Prefix cannot be signed because there is no
+    /// method for the Wallet to obtain a trusted key for verification." A JWS under this prefix carries no
+    /// verifiable key, so accepting one would let an attacker dress an unauthenticated request as a signed
+    /// (and, to the User, "verified") one. The prefix and JAR are mutually exclusive — reject before fetching.
+    private func requireSignableClientIdPrefix(_ scheme: String) throws {
+        if scheme == redirectUriPrefix {
+            throw VpError.invalidRequest("the '\(redirectUriPrefix)' client_id prefix cannot be used with a signed request")
+        }
+    }
+
+    /// §5.9.3: `direct_post` (and its `.jwt` variant) posts to `response_uri`; every other mode uses `redirect_uri`.
+    private func usesResponseUri(_ responseMode: String) -> Bool { responseMode.hasPrefix("direct_post") }
+
+    /// §5.9.3: under the `redirect_uri` prefix "the original Client Identifier part (without the prefix
+    /// `redirect_uri:`) is the Verifier's Redirect URI (or Response URI when Response Mode `direct_post` is
+    /// used)". Nothing else authenticates such a Verifier — the identifier *is* the endpoint — so a request
+    /// naming one Verifier while delivering the presentation to another endpoint is rejected. The Verifier
+    /// "MAY omit" the parameter, in which case the Client Identifier supplies it.
+    private func redirectUriPrefixTarget(_ claims: JsonValue, _ clientId: String, _ responseMode: String) throws -> String {
+        let prefix = "\(redirectUriPrefix):"
+        let expected = clientId.hasPrefix(prefix) ? String(clientId.dropFirst(prefix.count)) : clientId
+        let param = usesResponseUri(responseMode) ? "response_uri" : "redirect_uri"
+        guard case let .str(declared)? = claims[param] else { return expected }
+        if declared != expected {
+            throw VpError.invalidRequest("\(param) '\(declared)' does not match the client_id '\(clientId)'")
+        }
+        return declared
     }
 
     private func parseQuery(_ uri: String) throws -> [String: String] {
@@ -348,6 +396,22 @@ public struct AuthorizationRequestResolver {
         return out
     }
 }
+
+/// §5.9.2: an unprefixed (or unrecognised-prefix) Client Identifier references a pre-registered client.
+private let preRegisteredPrefix = "pre-registered"
+
+/// §5.9.3: the Client Identifier is the Verifier's Redirect URI (Response URI under `direct_post`).
+private let redirectUriPrefix = "redirect_uri"
+
+/// The Client Identifier Prefixes OpenID4VP 1.0 §5.9.3 defines. Everything else is `preRegisteredPrefix`.
+private let clientIdPrefixes: Set<String> = [
+    redirectUriPrefix,
+    "openid_federation",
+    "decentralized_identifier",
+    "verifier_attestation",
+    "x509_san_dns",
+    "x509_hash",
+]
 
 /// Wallet capabilities advertised to the verifier for `request_uri_method=post`.
 private let walletMetadataJson: String = JsonValue.obj([

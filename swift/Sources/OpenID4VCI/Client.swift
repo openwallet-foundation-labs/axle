@@ -86,9 +86,10 @@ public struct Openid4VciClient {
     private let metadataPolicy: IssuerMetadataPolicy
     /// Encrypted Credential Requests/Responses (§8.2, §10). Default: only when the issuer requires it.
     private let credentialEncryption: CredentialEncryption
-    /// §8.2.1 Appendix F.3: use the `attestation` proof type — a single Key Attestation JWT with no per-key
-    /// proof of possession — instead of `jwt` proofs. Only applies when a `keyAttestation` source is configured
-    /// and the issuer's config lists `attestation` in `proof_types_supported`; otherwise `jwt` is used.
+    /// §8.2.1 Appendix F.3: prefer the `attestation` proof type — a single Key Attestation JWT with no per-key
+    /// proof of possession — over `jwt` proofs where the issuer offers both. Only a preference: an issuer whose
+    /// config lists `attestation` and *not* `jwt` gets the attestation proof either way, and one that never
+    /// lists `attestation` gets `jwt` proofs either way.
     private let preferAttestationProof: Bool
 
     public init(http: any HttpTransport, rng: any Rng, clock: @escaping () -> Int64,
@@ -424,28 +425,37 @@ public struct Openid4VciClient {
                          refreshToken: token.refreshToken, configurationId: configurationId)
     }
 
-    /// The `proofs` object (§8.2.1 / ETSI TS 119 472-3 §4.6). Three shapes, decided by whether the issuer's
-    /// config requires a Key Attestation and by `preferAttestationProof`:
+    /// The `proofs` object (§8.2.1 / ETSI TS 119 472-3 §4.6). Three shapes, decided by the proof types the
+    /// issuer's config advertises, by whether it requires a Key Attestation, and by `preferAttestationProof`:
     ///
     ///  1. **bare `jwt`** — no attestation required: one `jwt` proof per proof key (Appendix F.1, batch), each
     ///     its own proof of possession. Distinct keys, up to the issuer's `batch_size`.
-    ///  2. **`jwt` + Key Attestation** (default when attestation IS required): **exactly one** `jwt` proof —
-    ///     proof of possession by the *first* proof key — carrying the Key Attestation (whose `attested_keys`
-    ///     cover the whole batch) in its `key_attestation` header. NOT one-jwt-per-key (that N×N shape is
-    ///     rejected — ETSI CRED-REQ-4.6.1.2-01). Preferred because it still does a real PoP.
-    ///  3. **`attestation` proof** — only when `preferAttestationProof` and the issuer advertises the
-    ///     `attestation` proof type: a single Key Attestation JWT on its own, no PoP (Appendix F.3).
+    ///  2. **`jwt` + Key Attestation** (default when attestation IS required and `jwt` is on offer): **exactly
+    ///     one** `jwt` proof — proof of possession by the *first* proof key — carrying the Key Attestation
+    ///     (whose `attested_keys` cover the whole batch) in its `key_attestation` header. NOT one-jwt-per-key
+    ///     (that N×N shape is rejected — ETSI CRED-REQ-4.6.1.2-01). Preferred because it still does a real PoP.
+    ///  3. **`attestation` proof** — a single Key Attestation JWT on its own, no PoP (Appendix F.3). Used when
+    ///     the issuer advertises `attestation` and either omits `jwt` — leaving this the only shape it accepts
+    ///     — or `preferAttestationProof` is set.
+    ///
+    /// `proof_types_supported` is what the issuer will actually accept, so it decides the shape before any
+    /// preference does: sending a `jwt` proof to an issuer that offers only `attestation` earns `invalid_proof`.
     private func proofs(_ issuerMeta: CredentialIssuerMetadata, _ config: CredentialConfiguration?,
                         _ cNonce: String?, _ keys: IssuanceKeys) async throws -> JsonValue {
         let source = keys.keyAttestation ?? keyAttestation
+        let supported = config?.proofTypesSupported ?? []
+        // Shape 3 when the issuer advertises `attestation` and either leaves us no `jwt` alternative or we
+        // prefer it. An issuer advertising no proof types at all constrains nothing — keep the jwt shapes.
+        let attestationProof = supported.contains("attestation")
+            && (!supported.contains("jwt") || preferAttestationProof)
         let attestationRequired = config?.keyAttestationRequired == true
-        let wantAttestation = attestationRequired || (preferAttestationProof && source != nil)
+        let wantAttestation = attestationRequired || attestationProof || (preferAttestationProof && source != nil)
 
         if wantAttestation {
             guard let s = source else {
                 throw VciError.unsupported("issuer requires a key attestation for this credential but no attestation source is configured")
             }
-            if preferAttestationProof, config?.proofTypesSupported.contains("attestation") == true {
+            if attestationProof {
                 // Shape 3 (Appendix F.3): a single Key Attestation JWT, its attested_keys bind the Credential(s).
                 return .obj([("attestation", .arr([.str(try await s.attestation(cNonce: cNonce))]))])
             }

@@ -89,4 +89,32 @@ class AttestationProofTest {
         assertEquals(1, mock.seenProofCount, "a jwt proof was sent")
         assertNotNull(mock.seenKeyAttestation, "the attestation rides in the jwt proof header instead")
     }
+
+    @Test
+    fun usesAttestationProofWhenTheIssuerOffersNoJwtProofType() = runBlocking {
+        // geneva2026.mdoc.online advertises `attestation` alone. The wallet does not prefer it, but a jwt proof
+        // would be refused with invalid_proof — what the issuer accepts decides the shape, not the preference.
+        val area = SoftwareSecureArea()
+        val issuerKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val mock = MockIssuer(area, issuerKey, now).apply {
+            supportsAttestationProof = true
+            supportsJwtProof = false
+            requiresKeyAttestation = true
+        }
+        val proof = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val dpop = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val attKey = area.createKey(KeySpec(secureArea = area.id, algorithm = SigningAlgorithm.ES256))
+        val client = Openid4VciClient(
+            mock, rng(), clock = { now },
+            keyAttestation = attestationSource(area, attKey, listOf(proof)),
+            // preferAttestationProof stays false — the issuer's metadata is what forces the shape.
+        )
+
+        val offer = CredentialOffer.parse(mock.credentialOfferJson)
+        val response = client.issueWithPreAuthorizedCode(offer, "eu.europa.ec.eudi.pid.1", keys(area, proof, dpop), txCode = "1234")
+
+        assertEquals(1, response.credentials.size, "one credential per attested key")
+        assertNotNull(mock.seenAttestationProof, "the attestation proof type was used")
+        assertNull(mock.seenKeyAttestation, "no jwt proof was sent")
+    }
 }

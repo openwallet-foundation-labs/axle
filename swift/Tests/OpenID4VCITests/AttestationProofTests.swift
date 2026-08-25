@@ -83,4 +83,30 @@ final class AttestationProofTests: XCTestCase {
         XCTAssertEqual(1, seenProofCount, "a jwt proof was sent")
         XCTAssertNotNil(seenKa, "the attestation rides in the jwt proof header instead")
     }
+
+    func testUsesAttestationProofWhenTheIssuerOffersNoJwtProofType() async throws {
+        // geneva2026.mdoc.online advertises `attestation` alone. The wallet does not prefer it, but a jwt proof
+        // would be refused with invalid_proof — what the issuer accepts decides the shape, not the preference.
+        let area = SoftwareSecureArea()
+        let issuerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let mock = MockIssuer(area: area, issuerKey: issuerKey, now: now)
+        await mock.setSupportsAttestationProof(true)
+        await mock.setSupportsJwtProof(false)
+        await mock.setRequiresKeyAttestation(true)
+        let proof = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let dpop = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let attKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let source = TestAttestationSource(area: area, attKey: attKey.handle, attestedKeys: [proof.publicKey], now: now)
+        // preferAttestationProof is left at its default — the issuer's metadata is what forces the shape.
+        let client = Openid4VciClient(http: mock, rng: TestRng(), clock: { self.now }, keyAttestation: source)
+
+        let offer = try CredentialOffer.parse(mock.credentialOfferJson)
+        let response = try await client.issueWithPreAuthorizedCode(offer: offer, configurationId: "eu.europa.ec.eudi.pid.1", keys: makeKeys(area, proof, dpop), txCode: "1234")
+
+        XCTAssertEqual(1, response.credentials.count, "one credential per attested key")
+        let seenAtt = await mock.seenAttestationProof
+        let seenKa = await mock.seenKeyAttestation
+        XCTAssertNotNil(seenAtt, "the attestation proof type was used")
+        XCTAssertNil(seenKa, "no jwt proof was sent")
+    }
 }

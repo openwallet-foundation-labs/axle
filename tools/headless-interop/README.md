@@ -63,3 +63,23 @@ nothing but the EUDI deployment.
 
 None of this holds for an issuer that actually validates key attestations. One that does will reject a
 self-signed attestation, and a harness pointed at it needs a real Wallet Provider.
+
+## Which CA the presentation runners trust
+
+The two `run-vp*` runners check that the verifier's signed request chains to an anchor before presenting
+anything, so they break whenever the EUDI deployment reissues a certificate.
+
+`verifier.eudiw.dev` signs its request objects with a `Web Verifier (PROD)` certificate that was reissued
+under **`PID Issuer CA 02` (EU)** on 2026-08-14; before that the runners only trusted **`PID Issuer CA -
+UT 02`**, and presentation failed on `verifier request must chain to the EUDI IACA` with `trusted=false`.
+The PID that verifier asks for is still issued under the UT CA, so the two are not interchangeable —
+`LiveTrustE2eTest` trusts both for reader trust, the way a wallet carrying the EUDI trust list would.
+
+Both anchors are checked in at `kotlin/trust/src/test/resources/pid_issuer_ca_{eu,ut}_02.der`. If a run
+starts failing there again, pull the request object's `x5c` and look at its issuer:
+
+```sh
+node drive.js verifier /tmp/req.txt
+# then fetch the request_uri from that URL and decode the JWT header's x5c[0]
+openssl x509 -inform DER -in leaf.der -noout -subject -issuer -dates
+```

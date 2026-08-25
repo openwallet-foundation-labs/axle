@@ -5,6 +5,8 @@ import com.hopae.eudi.wallet.cbor.cose.EcCurve
 import com.hopae.eudi.wallet.cbor.cose.EcPublicKey
 import com.hopae.eudi.wallet.sdjwt.Base64Url
 import com.hopae.eudi.wallet.sdjwt.JsonValue
+import com.hopae.eudi.wallet.sdjwt.JwkEc
+import com.hopae.eudi.wallet.sdjwt.Jws
 import com.hopae.eudi.wallet.sdjwt.JwsSigner
 import com.hopae.eudi.wallet.sdjwt.JwtTimeValidator
 import com.hopae.eudi.wallet.sdjwt.JwtVcMetadataKeyResolver
@@ -13,6 +15,10 @@ import com.hopae.eudi.wallet.sdjwt.SdJwtVcVerifier
 import com.hopae.eudi.wallet.spi.Rng
 import com.hopae.eudi.wallet.spi.SigningAlgorithm
 import kotlinx.coroutines.runBlocking
+import org.bouncycastle.asn1.x500.X500Name
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
+import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import java.io.File
 import java.math.BigInteger
@@ -26,6 +32,7 @@ import java.security.spec.ECGenParameterSpec
 import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Instant
 import java.util.Base64
+import java.util.Date
 import kotlin.test.Test
 
 /**
@@ -55,6 +62,62 @@ class LiveIssuanceTest {
         clock = { System.currentTimeMillis() / 1000 },
         clientId = "wallet-dev",
     )
+
+    /**
+     * A Key Attestation this harness signs itself (OpenID4VCI Appendix D), over exactly [attestedKeys] and
+     * bound to the c_nonce.
+     *
+     * Every issuer.eudiw.dev config declares `key_attestations_required`, so the client will not send a
+     * proof without an attestation source — HAIP §4.5.1 makes that declaration binding on the Wallet. The
+     * issuer itself does not enforce it (a bare `jwt` proof is issued a PID just the same, and so is an
+     * attestation asserting a level below the one it asks for), so nothing here has to be real. It only has
+     * to be well-formed: an attestation with no `x5c` at all draws a 500 from the issuer rather than a
+     * clean rejection, so the JWT carries a self-signed certificate for the key that signed it.
+     *
+     * Deliberately self-contained. The demo wallet gets this from its Wallet Provider, and the harness
+     * could call the same endpoint, but then an outage there would fail a run that is meant to be testing
+     * the issuer.
+     */
+    private fun selfSignedKeyAttestation(attestedKeys: List<EcPublicKey>) = KeyAttestationSource { cNonce ->
+        val kp = KeyPairGenerator.getInstance("EC")
+            .apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        val nowMs = System.currentTimeMillis()
+        val name = X500Name("CN=Axle live-interop harness")
+        val cert = JcaX509CertificateConverter().getCertificate(
+            JcaX509v3CertificateBuilder(
+                name, BigInteger.valueOf(nowMs), Date(nowMs - 60_000), Date(nowMs + 3_600_000), name, kp.public,
+            ).build(JcaContentSignerBuilder("SHA256withECDSA").build(kp.private))
+        )
+        val signer = object : JwsSigner {
+            override val algorithm = SigningAlgorithm.ES256
+            override suspend fun sign(signingInput: ByteArray): ByteArray =
+                Signature.getInstance("SHA256withECDSA").run {
+                    initSign(kp.private)
+                    update(signingInput)
+                    Der.derSignatureToRaw(sign(), 32)
+                }
+        }
+        val header = JsonValue.Obj(
+            listOf(
+                "typ" to JsonValue.Str("keyattestation+jwt"),
+                "alg" to JsonValue.Str("ES256"),
+                "x5c" to JsonValue.Arr(listOf(JsonValue.Str(Base64.getEncoder().encodeToString(cert.encoded)))),
+            )
+        )
+        val seconds = nowMs / 1000
+        val claims = JsonValue.Obj(
+            buildList {
+                add("iss" to JsonValue.Str("https://example.org/live-interop"))
+                add("iat" to JsonValue.NumInt(seconds))
+                add("exp" to JsonValue.NumInt(seconds + 300))
+                cNonce?.let { add("nonce" to JsonValue.Str(it)) }
+                add("attested_keys" to JsonValue.Arr(attestedKeys.map { JwkEc.toJson(it) }))
+                add("key_storage" to JsonValue.Arr(listOf(JsonValue.Str("iso_18045_moderate"))))
+                add("user_authentication" to JsonValue.Arr(listOf(JsonValue.Str("iso_18045_moderate"))))
+            }
+        )
+        Jws.sign(header, claims.serialize().encodeToByteArray(), signer).compact()
+    }
 
     @Test
     fun step1_prepare() = runBlocking {
@@ -113,7 +176,10 @@ class LiveIssuanceTest {
 
         val proof = LocalEcKey.generate()
         val dpop = LocalEcKey.generate()
-        val keys = IssuanceKeys(proof.signer(), proof.publicKey, dpop.signer(), dpop.publicKey)
+        val keys = IssuanceKeys(
+            proof.signer(), proof.publicKey, dpop.signer(), dpop.publicKey,
+            keyAttestation = selfSignedKeyAttestation(listOf(proof.publicKey)),
+        )
 
         // EUDI_ENCRYPT=1 exercises OpenID4VCI §8.2/§10: the Credential Request goes out as a JWE and the
         // Credential Response comes back as application/jwt. issuer.eudiw.dev advertises both.
@@ -165,7 +231,10 @@ class LiveIssuanceTest {
         val useIssuer = (state["credentialIssuer"] as? JsonValue.Str)?.value ?: issuer
         val useConfig = (state["configurationId"] as? JsonValue.Str)?.value ?: configId
 
-        val keys = IssuanceKeys(proof.signer(), proof.publicKey, dpop.signer(), dpop.publicKey)
+        val keys = IssuanceKeys(
+            proof.signer(), proof.publicKey, dpop.signer(), dpop.publicKey,
+            keyAttestation = selfSignedKeyAttestation(listOf(proof.publicKey)),
+        )
 
         val client = Openid4VciClient(
             transport, secureRng(), clock = { System.currentTimeMillis() / 1000 }, clientId = "wallet-dev",

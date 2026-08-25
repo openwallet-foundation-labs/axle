@@ -17,6 +17,8 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(project(":testkit"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    // LiveIssuanceTest self-signs the certificate it puts in its Key Attestation's x5c (live interop only)
+    testImplementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
 }
 
 kotlin {

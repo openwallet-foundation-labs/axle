@@ -112,6 +112,12 @@ public struct ResolvedRequest {
 /// The JOSE `typ` every OpenID4VP Request Object must carry (§5, RFC 9101).
 public let requestObjectTyp = "oauth-authz-req+jwt"
 
+// The Digital Credentials API exchange protocol identifiers this specification defines (Appendix A.1):
+// `openid4vp-v<version>-<request-type>`. Multi-signed is named so the wallet can refuse it explicitly.
+let dcApiUnsigned = "openid4vp-v1-unsigned"
+let dcApiSigned = "openid4vp-v1-signed"
+let dcApiMultiSigned = "openid4vp-v1-multisigned"
+
 /// Resolves an OpenID4VP authorization request (OpenID4VP §5): parses the request URI and
 /// follows JAR (`request_uri`/`request`).
 ///
@@ -163,28 +169,81 @@ public struct AuthorizationRequestResolver {
     /// Resolves an OpenID4VP request delivered over the W3C Digital Credentials API. The request
     /// object (unsigned JSON or a signed JWS) has no `response_uri`; `origin` is supplied by the
     /// platform and binds the presentation. Uses `dc_api` / `dc_api.jwt` response modes.
-    public func resolveDcApi(_ requestObject: String, origin: String) async throws -> ResolvedRequest {
+    ///
+    /// `protocolId` is the exchange protocol identifier the platform delivered the request under
+    /// (Appendix A.1, e.g. `openid4vp-v1-signed`). Pass it whenever the platform names one: it is checked
+    /// against the shape of `requestObject`, so a request announced as signed cannot be processed as an
+    /// unsigned one. Callers with no identifier to hand pass nil and the shape decides alone.
+    public func resolveDcApi(_ requestObject: String, origin: String, protocolId: String? = nil) async throws -> ResolvedRequest {
         // OpenID4VP DC API / 18013-7 C.5: the platform Origin binds the presentation (and, unsigned, is the
         // verifier's identity). A blank origin binds nothing and must be rejected before it is used.
         guard !origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VpError.invalidRequest("DC API origin must not be blank") }
         let trimmed = requestObject.trimmingCharacters(in: .whitespacesAndNewlines)
+        var envelope: JsonValue?
+        if trimmed.hasPrefix("{") {
+            let parsed = try JsonValue.parse(trimmed)
+            guard case .obj = parsed else { throw VpError.invalidRequest("DC API request must be JSON") }
+            envelope = parsed
+        }
+        try rejectMultiSigned(protocolId, envelope)
+        // OpenID4VP 1.0 signed DC API: data is {"request": "<JWS>"} (JAR); the claims live in the JWS. A bare
+        // JWS with no JSON envelope is accepted too — verifiers send the request object both ways.
+        var signedRequest: String?
+        if let envelope {
+            if case let .str(request)? = envelope["request"] { signedRequest = request }
+        } else {
+            signedRequest = trimmed
+        }
+        try requireProtocolMatchesShape(protocolId, signed: signedRequest != nil)
         let claims: JsonValue
         let verifier: VerifierInfo
-        if trimmed.hasPrefix("{") {
-            let envelope = try JsonValue.parse(trimmed)
-            if case let .str(signedRequest)? = envelope["request"] {
-                // OpenID4VP 1.0 signed DC API: data is {"request": "<JWS>"} (JAR); the claims live in the JWS.
-                (claims, verifier) = try await verifySignedDcApi(signedRequest, origin)
-            } else {
-                claims = envelope
-                // Unsigned (Appendix A.3.1): the Origin *is* the verifier's identity. The wallet MUST ignore
-                // any `client_id` and any `expected_origins` such a request carries.
-                verifier = VerifierInfo(clientId: origin, clientIdScheme: "origin", certificateChainDer: nil, commonName: nil, trusted: false)
-            }
+        if let signedRequest {
+            (claims, verifier) = try await verifySignedDcApi(signedRequest, origin)
         } else {
-            (claims, verifier) = try await verifySignedDcApi(trimmed, origin) // bare JWS
+            claims = envelope!
+            // Unsigned (Appendix A.3.1): the Origin *is* the verifier's identity. The wallet MUST ignore
+            // any `client_id` and any `expected_origins` such a request carries.
+            verifier = VerifierInfo(clientId: origin, clientIdScheme: "origin", certificateChainDer: nil, commonName: nil, trusted: false)
         }
         return try build(claims, verifier.clientId, verifier.clientIdScheme, verifier, origin: origin)
+    }
+
+    /// Appendix A.3.2.2 multi-signed requests (JWS JSON Serialization) carry the request parameters in a
+    /// base64url `payload` signed once per Client Identifier, so one request can authenticate under several
+    /// trust frameworks. The SDK does not implement them; they are recognised — by protocol identifier and by
+    /// the `{payload, signatures}` shape — so the wallet refuses them by name. Parsing one as an unsigned
+    /// request would otherwise fail much later with a misleading "missing nonce".
+    private func rejectMultiSigned(_ protocolId: String?, _ envelope: JsonValue?) throws {
+        let multiSigned = protocolId == dcApiMultiSigned
+            || isJwsJsonSerialization(envelope) || isJwsJsonSerialization(envelope?["request"])
+        if multiSigned {
+            throw VpError.unsupported("multi-signed DC API requests (\(dcApiMultiSigned)) are not supported")
+        }
+    }
+
+    private func isJwsJsonSerialization(_ value: JsonValue?) -> Bool {
+        guard let value, case .obj = value else { return false }
+        guard case .str(_)? = value["payload"], case .arr(_)? = value["signatures"] else { return false }
+        return true
+    }
+
+    /// The exchange protocol identifier names the request type (Appendix A.1) and the `data` shape must agree
+    /// with it: `openid4vp-v1-signed` carries a JWS, `openid4vp-v1-unsigned` carries the request parameters
+    /// themselves. Without this check, a request announced as signed whose data holds no JWS would resolve as
+    /// an unsigned request — silently dropping both the signature and the `expected_origins` replay check,
+    /// and presenting the caller Origin as the verifier. Identifiers this specification does not define leave
+    /// the shape as the only signal.
+    private func requireProtocolMatchesShape(_ protocolId: String?, signed: Bool) throws {
+        let expectSigned: Bool
+        switch protocolId {
+        case dcApiSigned: expectSigned = true
+        case dcApiUnsigned: expectSigned = false
+        default: return
+        }
+        if expectSigned != signed {
+            let actual = signed ? "a signed request (JWS)" : "an unsigned request"
+            throw VpError.invalidRequest("DC API protocol '\(protocolId ?? "")' does not match the request: data is \(actual)")
+        }
     }
 
     private func build(_ claims: JsonValue, _ clientId: String, _ scheme: String, _ verifier: VerifierInfo, origin: String? = nil) throws -> ResolvedRequest {

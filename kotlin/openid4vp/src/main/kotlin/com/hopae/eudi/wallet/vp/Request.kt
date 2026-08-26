@@ -87,6 +87,12 @@ class ResolvedRequest(
 /** The JOSE `typ` every OpenID4VP Request Object must carry (§5, RFC 9101). */
 const val REQUEST_OBJECT_TYP: String = "oauth-authz-req+jwt"
 
+// The Digital Credentials API exchange protocol identifiers this specification defines (Appendix A.1):
+// `openid4vp-v<version>-<request-type>`. Multi-signed is named so the wallet can refuse it explicitly.
+private const val DC_API_UNSIGNED = "openid4vp-v1-unsigned"
+private const val DC_API_SIGNED = "openid4vp-v1-signed"
+private const val DC_API_MULTISIGNED = "openid4vp-v1-multisigned"
+
 /**
  * Resolves an OpenID4VP authorization request (OpenID4VP §5): parses the request URI and
  * follows JAR (`request_uri`/`request`). Signed request objects are verified through the
@@ -129,24 +135,71 @@ class AuthorizationRequestResolver(
      * Resolves an OpenID4VP request delivered over the W3C Digital Credentials API. The request
      * object (unsigned JSON or a signed JWS) has no `response_uri`; [origin] is supplied by the
      * platform and binds the presentation. Uses `dc_api` / `dc_api.jwt` response modes.
+     *
+     * [protocolId] is the exchange protocol identifier the platform delivered the request under
+     * (Appendix A.1, e.g. `openid4vp-v1-signed`). Pass it whenever the platform names one: it is checked
+     * against the shape of [requestObject], so a request announced as signed cannot be processed as an
+     * unsigned one. Callers with no identifier to hand pass null and the shape decides alone.
      */
-    suspend fun resolveDcApi(requestObject: String, origin: String): ResolvedRequest {
+    suspend fun resolveDcApi(requestObject: String, origin: String, protocolId: String? = null): ResolvedRequest {
         // OpenID4VP DC API / 18013-7 C.5: the platform Origin binds the presentation (and, unsigned, is the
         // verifier's identity). A blank origin binds nothing and must be rejected before it is used.
         if (origin.isBlank()) throw VpException.InvalidRequest("DC API origin must not be blank")
         val trimmed = requestObject.trim()
-        val (claims, verifier) = if (trimmed.startsWith("{")) {
-            val c = JsonValue.parse(trimmed) as? JsonValue.Obj ?: throw VpException.InvalidRequest("DC API request must be JSON")
-            val signedRequest = c.str("request")
-            // OpenID4VP 1.0 signed DC API: data is {"request": "<JWS>"} (JAR); the claims live in the JWS.
-            if (signedRequest != null) verifySignedDcApi(signedRequest, origin)
+        val envelope = if (trimmed.startsWith("{")) {
+            JsonValue.parse(trimmed) as? JsonValue.Obj ?: throw VpException.InvalidRequest("DC API request must be JSON")
+        } else null
+        rejectMultiSigned(protocolId, envelope)
+        // OpenID4VP 1.0 signed DC API: data is {"request": "<JWS>"} (JAR); the claims live in the JWS. A bare
+        // JWS with no JSON envelope is accepted too — verifiers send the request object both ways.
+        val signedRequest = if (envelope != null) envelope.str("request") else trimmed
+        requireProtocolMatchesShape(protocolId, signed = signedRequest != null)
+        val (claims, verifier) = if (signedRequest != null) {
+            verifySignedDcApi(signedRequest, origin)
+        } else {
             // Unsigned (Appendix A.3.1): the Origin *is* the verifier's identity. The wallet MUST ignore
             // any `client_id` and any `expected_origins` such a request carries.
-            else c to VerifierInfo(origin, "origin", null, null, trusted = false)
-        } else {
-            verifySignedDcApi(trimmed, origin) // bare JWS
+            envelope!! to VerifierInfo(origin, "origin", null, null, trusted = false)
         }
         return build(claims, verifier.clientId, verifier.clientIdScheme, verifier, origin)
+    }
+
+    /**
+     * Appendix A.3.2.2 multi-signed requests (JWS JSON Serialization) carry the request parameters in a
+     * base64url `payload` signed once per Client Identifier, so one request can authenticate under several
+     * trust frameworks. The SDK does not implement them; they are recognised — by protocol identifier and by
+     * the `{payload, signatures}` shape — so the wallet refuses them by name. Parsing one as an unsigned
+     * request would otherwise fail much later with a misleading "missing nonce".
+     */
+    private fun rejectMultiSigned(protocolId: String?, envelope: JsonValue.Obj?) {
+        val multiSigned = protocolId == DC_API_MULTISIGNED ||
+            isJwsJsonSerialization(envelope) || isJwsJsonSerialization(envelope?.get("request") as? JsonValue.Obj)
+        if (multiSigned) {
+            throw VpException.Unsupported("multi-signed DC API requests ($DC_API_MULTISIGNED) are not supported")
+        }
+    }
+
+    private fun isJwsJsonSerialization(o: JsonValue.Obj?): Boolean =
+        o != null && o["payload"] is JsonValue.Str && o["signatures"] is JsonValue.Arr
+
+    /**
+     * The exchange protocol identifier names the request type (Appendix A.1) and the `data` shape must agree
+     * with it: `openid4vp-v1-signed` carries a JWS, `openid4vp-v1-unsigned` carries the request parameters
+     * themselves. Without this check, a request announced as signed whose data holds no JWS would resolve as
+     * an unsigned request — silently dropping both the signature and the `expected_origins` replay check,
+     * and presenting the caller Origin as the verifier. Identifiers this specification does not define leave
+     * the shape as the only signal.
+     */
+    private fun requireProtocolMatchesShape(protocolId: String?, signed: Boolean) {
+        val expectSigned = when (protocolId) {
+            DC_API_SIGNED -> true
+            DC_API_UNSIGNED -> false
+            else -> return
+        }
+        if (expectSigned != signed) {
+            val actual = if (signed) "a signed request (JWS)" else "an unsigned request"
+            throw VpException.InvalidRequest("DC API protocol '$protocolId' does not match the request: data is $actual")
+        }
     }
 
     private fun build(claims: JsonValue.Obj, clientId: String, scheme: String, verifier: VerifierInfo, origin: String? = null): ResolvedRequest {

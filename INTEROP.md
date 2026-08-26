@@ -272,9 +272,14 @@ verifier: client_id=x509_hash:LTHlBmrN… scheme=x509_hash trusted=true cn=EUDI 
 *** PRESENTED TO TRUSTED VERIFIER ***
 ```
 
-The demo logs the request shape (`GetCredentialActivity.logRequestShape`) so a rejection can be told
-apart from a verifier that simply omits the parameter. Beware that the demo's `extractOpenId4Vp`
-prefers `openid4vp-v1-unsigned`: a verifier offering both protocols never exercises the signed path.
+The demo logs the protocols offered and the origin it resolved (`GetCredentialActivity`) so a rejection
+can be told apart from a verifier that simply omits the parameter. Beware that the demo prefers `openid4vp-v1-unsigned` when matching: a
+verifier offering both protocols never exercises the signed path.
+
+The protocol identifier the platform delivers is passed to `startDcApi` and checked against the request
+shape, so a request announced as `openid4vp-v1-signed` whose `data` carries no JWS is rejected rather
+than quietly downgraded to an unsigned one (which would skip `expected_origins` altogether).
+`openid4vp-v1-multisigned` (Appendix A.3.2.2) is neither declared at registration nor accepted.
 
 ## Proximity (ISO 18013-5) — device-to-device interop with Multipaz
 

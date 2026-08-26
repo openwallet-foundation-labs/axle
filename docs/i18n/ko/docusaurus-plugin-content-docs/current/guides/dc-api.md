@@ -57,8 +57,10 @@ implementation("com.google.android.gms:play-services-identity-credentials:16.0.0
 
 ```kotlin
 object DcApiRegistrar {
+    // 지갑이 실제로 응답할 수 있는 것만 선언합니다. `openid4vp-v1-multisigned`가 빠진 이유는
+    // 아래 "multi-signed 요청은 지원하지 않습니다" 참고.
     private val PROTOCOLS = listOf(
-        "openid4vp-v1-signed", "openid4vp-v1-unsigned", "openid4vp-v1-multisigned", "org-iso-mdoc", "openid4vp",
+        "openid4vp-v1-signed", "openid4vp-v1-unsigned", "org-iso-mdoc",
     )
 
     suspend fun register(context: Context, wallet: Wallet) {
@@ -141,14 +143,19 @@ override fun onCreate(savedInstanceState: Bundle?) {
         return
     }
 
-    // openid4vp-v1-unsigned / -signed.
-    val openid4vp = extractOpenId4Vp(option.requestJson) ?: return failAndFinish("no openid4vp request")
+    // openid4vp-v1-unsigned / -signed. 매칭된 프로토콜을 같이 넘기면 SDK가 요청 모양과 대조합니다.
+    val vp = matchProtocol(option.requestJson,
+        listOf("openid4vp-v1-unsigned", "openid4vp-v1-signed")) ?: return failAndFinish("no openid4vp request")
+    val (vpProtocol, vpData) = vp
     lifecycleScope.launch {
-        val session = wallet.presentation.startDcApi(openid4vp, origin)
+        val session = wallet.presentation.startDcApi(vpData.toString(), origin, vpProtocol)
         val resolved = session.state.first { it is RequestResolved || it is Failed } as RequestResolved
         session.respond(PresentationSelection.auto(resolved.request))
         val done = session.state.first { it.isTerminal } as PresentationState.Completed
-        respond(DigitalCredential(done.dcApiResponse!!)); finish()
+        // SDK의 내부 응답({vp_token} | {response:<JWE>})을 플랫폼의 {protocol, data} 봉투로 감싸고 요청
+        // 프로토콜을 그대로 되돌려줍니다 — 최신 Chrome은 top-level `protocol`이 없는 응답을 거부합니다.
+        val content = JSONObject().put("protocol", vpProtocol).put("data", JSONObject(done.dcApiResponse!!))
+        respond(DigitalCredential(content.toString())); finish()
     }
 }
 ```
@@ -203,6 +210,33 @@ OpenID4VP Appendix A.2가 `expected_origins`로 이를 막고, SDK가 이를 강
 유효한 인증서를 가진 공격자는 자기 origin을 넣어 자기 요청에 서명할 수 있습니다. 그 `client_id`를 신뢰할지는
 트러스트 프레임워크(`readerAnchorsDer`)의 몫입니다.
 :::
+
+### 프로토콜 식별자와 요청 모양의 일치
+
+플랫폼은 데이터만 넘기는 게 아니라 exchange 프로토콜 이름(요청 봉투의 `protocol`, Appendix A.1)도 같이
+알려줍니다. 그 값을 `startDcApi(data, origin, protocolId)`로 넘기면 SDK가 둘을 대조합니다:
+
+| 선언된 프로토콜 | 허용되는 `data` |
+| --- | --- |
+| `openid4vp-v1-unsigned` | 요청 파라미터가 담긴 평문 JSON |
+| `openid4vp-v1-signed` | `{"request": "<compact JWS>"}` (bare JWS도 허용) |
+| `openid4vp-v1-multisigned` | 거부 — 미구현, 아래 참고 |
+| 없음 / 그 외 값 | 종전대로 모양만으로 판단 |
+
+식별자가 있어야 강등이 드러납니다. 없으면 모양이 유일한 단서라, signed로 광고된 요청이 평문 JSON으로 오면
+그냥 미서명 요청으로 처리되어 서명과 `expected_origins` 검사가 조용히 사라지고 호출자 origin이 verifier
+자리에 들어앉습니다. 이제 불일치는 `invalid_request`입니다.
+
+### multi-signed 요청은 지원하지 않습니다
+
+`openid4vp-v1-multisigned`(Appendix A.3.2.2)는 JWS JSON Serialization입니다: 요청 파라미터를 담은 base64url
+`payload` 하나에 Client Identifier마다 서명이 하나씩 붙어, 하나의 요청으로 여러 트러스트 프레임워크에서
+인증할 수 있습니다(`client_id`와 `verifier_info`는 각 서명의 protected 헤더에, 나머지는 공통 payload에).
+
+SDK는 이를 구현하지 않습니다. 프로토콜 식별자로도, `{payload, signatures}` 모양으로도 인식해서
+`VpException.Unsupported` / `VpError.unsupported`로 거부합니다 — 미서명 요청으로 잘못 파싱해 한참 뒤에
+"missing nonce"로 실패하지 않도록. 등록 단계에서도 **선언하지 않으므로** 애초에 이런 요청이 지갑으로
+라우팅되지 않습니다.
 
 ## 6. 테스트
 

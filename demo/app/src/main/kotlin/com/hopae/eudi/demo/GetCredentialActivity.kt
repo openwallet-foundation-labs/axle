@@ -84,16 +84,18 @@ class GetCredentialActivity : FragmentActivity() {
                 return@launch
             }
 
-            // Match the OpenID4VP request AND capture its protocol identifier — the response envelope must echo it.
+            // Match the OpenID4VP request AND capture its protocol identifier — the response envelope must echo
+            // it, and the SDK checks the request shape against it. Multi-signed (Appendix A.3.2.2) is not
+            // offered: the wallet does not implement it, so it is not registered and not matched here either.
             val vp = DcApiRequest.matchProtocol(
                 option.requestJson,
-                listOf("openid4vp-v1-unsigned", "openid4vp-v1-signed", "openid4vp-v1-multisigned"),
+                listOf("openid4vp-v1-unsigned", "openid4vp-v1-signed"),
             )
             if (vp == null) { finishError(resultData, "no openid4vp request"); return@launch }
             val (vpProtocol, vpData) = vp
 
             runCatching {
-                val session = wallet.presentation.startDcApi(vpData.toString(), origin)
+                val session = wallet.presentation.startDcApi(vpData.toString(), origin, vpProtocol)
                 val resolved = session.state.first { it is PresentationState.RequestResolved || it is PresentationState.Failed }
                 if (resolved is PresentationState.Failed) throw resolved.error
                 val presentation = (resolved as PresentationState.RequestResolved).request

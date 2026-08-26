@@ -44,9 +44,13 @@ public struct PresentationService {
     /// Digital Credentials API presentation (browser-mediated). The platform hands over the `requestObject`
     /// and the caller `origin`; no HTTP is performed — the response object is returned in
     /// `PresentationState.completed(dcApiResponse:)` for the app to pass back to the platform.
-    public func startDcApi(_ requestObject: String, origin: String) -> PresentationSession {
+    ///
+    /// `protocolId` is the exchange protocol identifier the request arrived under (`openid4vp-v1-signed` /
+    /// `openid4vp-v1-unsigned`). Pass the one the platform named: the request must match it, so a signed
+    /// request cannot be processed as an unsigned one.
+    public func startDcApi(_ requestObject: String, origin: String, protocolId: String? = nil) -> PresentationSession {
         runSession(
-            resolve: { try await catchingVp { try await vp.resolveDcApiRequest(requestObject, origin: origin) } },
+            resolve: { try await catchingVp { try await vp.resolveDcApiRequest(requestObject, origin: origin, protocolId: protocolId) } },
             submit: { resolved, matches, selection, held in
                 let response = try await catchingVp {
                     try await vp.respondDcApi(request: resolved, matches: matches, selection: toVpSelection(selection), held: held)

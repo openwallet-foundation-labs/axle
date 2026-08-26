@@ -39,8 +39,11 @@ class DcApiBranding(
  */
 object DcApiRegistrar {
     private const val MATCHER_ASSET = "identitycredentialmatcher.wasm"
+    // Only protocols the SDK can actually answer are declared. `openid4vp-v1-multisigned` (OpenID4VP
+    // Appendix A.3.2.2, JWS JSON Serialization) is deliberately absent: declaring it would route requests
+    // here that the wallet then has to refuse.
     private val PROTOCOLS = listOf(
-        "openid4vp-v1-signed", "openid4vp-v1-unsigned", "openid4vp-v1-multisigned", "org-iso-mdoc",
+        "openid4vp-v1-signed", "openid4vp-v1-unsigned", "org-iso-mdoc",
     )
 
     /**

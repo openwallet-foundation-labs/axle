@@ -40,6 +40,7 @@ public struct Openid4VpClient {
     /// The `transaction_data` types (§8.4) this wallet recognizes. When non-nil, a request carrying any other
     /// type is rejected with `invalid_transaction_data`; nil = the host vets types (structure is still validated).
     private let supportedTransactionDataTypes: Set<String>?
+    private let rng: (any Rng)?
 
     /// `rng` enables the `wallet_nonce` replay mitigation on `request_uri_method=post` (§5.10); nil = don't send one.
     public init(http: any HttpTransport, clock: @escaping () -> Int64, trust: (any RequestTrustVerifier)? = nil,
@@ -48,6 +49,7 @@ public struct Openid4VpClient {
         self.clock = clock
         self.resolver = AuthorizationRequestResolver(http: http, trust: trust, rng: rng)
         self.supportedTransactionDataTypes = supportedTransactionDataTypes
+        self.rng = rng
     }
 
     public func resolveRequest(_ requestUri: String) async throws -> ResolvedRequest {
@@ -96,7 +98,7 @@ public struct Openid4VpClient {
             }
             let jwe = try Jwe.encryptEcdhEs(
                 plaintext: [UInt8](JsonValue.obj([("vp_token", vpToken)]).serialize().utf8),
-                recipient: recipient.publicKey, enc: encValue(request), apv: apv(request), kid: recipient.kid)
+                recipient: recipient.publicKey, enc: encValue(request), apu: apu(), apv: apv(request), kid: recipient.kid)
             return .obj([("response", .str(jwe))])
         default:
             throw VpError.unsupported("respondDcApi requires a dc_api response_mode, got \(request.responseMode)")
@@ -231,7 +233,7 @@ public struct Openid4VpClient {
         if let state = request.state { entries.append(("state", .str(state))) }
         let jwe = try Jwe.encryptEcdhEs(
             plaintext: [UInt8](JsonValue.obj(entries).serialize().utf8),
-            recipient: recipient.publicKey, enc: encValue(request), apv: apv(request), kid: recipient.kid)
+            recipient: recipient.publicKey, enc: encValue(request), apu: apu(), apv: apv(request), kid: recipient.kid)
         return try await post(responseUri, "response=\(enc(jwe))")
     }
 
@@ -292,10 +294,38 @@ public struct Openid4VpClient {
     /// so there is no `apu` to send. Both are ConcatKDF inputs and part of the AEAD tag either way.
     private func apv(_ request: ResolvedRequest) -> [UInt8] { [UInt8](request.nonce.utf8) }
 
+    /// The JWE `apu` (RFC 7518 §4.6.1.2 PartyUInfo), a fresh random value per response.
+    ///
+    /// OpenID4VP 1.0 Final has no use for it: the ISO 18013-7 draft carried the `mdocGeneratedNonce` of the
+    /// B.4.4 handover here, and the handover 1.0 defines takes no such nonce, so nothing we send binds to it.
+    /// We send one anyway because Verifiers written against the draft read the header unconditionally, and a
+    /// missing `apu` crashes them — geneva2026.mdoc.online answers one with a 500 (a .NET
+    /// NullReferenceException) and accepts the identical response once the header is present.
+    ///
+    /// That is safe to do. `apu` is a ConcatKDF input the Verifier takes from the protected header it just
+    /// received, so any value decrypts; and a Verifier that does rebuild the draft handover from it would
+    /// fail to match our 1.0 SessionTranscript with or without this. Random rather than fixed, since the
+    /// draft's semantics for the field are a per-response nonce. Omitted only when no `rng` is configured.
+    private func apu() -> [UInt8]? {
+        guard let rng else { return nil }
+        return [UInt8](Base64Url.encode(rng.nextBytes(16)).utf8)
+    }
+
+    /// The content encryption algorithm for an encrypted response (§8.3): the first value of
+    /// `encrypted_response_enc_values_supported` this SDK can produce, or A128GCM when the Verifier names none.
+    ///
+    /// That parameter is the only one OpenID4VP 1.0 defines for this. Verifiers commonly also send JARM's
+    /// singular `authorization_encrypted_response_enc`, which 1.0 replaced, and it is deliberately **not**
+    /// read: honouring a parameter the target spec removed makes the choice depend on which generation of
+    /// metadata a Verifier happens to emit, and the two disagree in the wild — geneva2026.mdoc.online names
+    /// `A256GCM` there while listing `["A128GCM", "A256GCM"]` here, declaring acceptable the very value the
+    /// singular field rules out.
     private func encValue(_ request: ResolvedRequest) -> JweEnc {
-        if case let .arr(items)? = request.clientMetadata?["encrypted_response_enc_values_supported"],
-           case let .str(id)? = items.first {
-            return JweEnc.from(id) ?? .a128gcm
+        // Skip values we cannot produce rather than failing on a list whose head we don't implement.
+        if case let .arr(items)? = request.clientMetadata?["encrypted_response_enc_values_supported"] {
+            for case let .str(id) in items {
+                if let enc = JweEnc.from(id) { return enc }
+            }
         }
         return .a128gcm
     }

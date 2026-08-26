@@ -273,7 +273,8 @@ verifier: client_id=x509_hash:LTHlBmrN… scheme=x509_hash trusted=true cn=EUDI 
 ```
 
 The demo logs the protocols offered and the origin it resolved (`GetCredentialActivity`) so a rejection
-can be told apart from a verifier that simply omits the parameter. Beware that the demo prefers `openid4vp-v1-unsigned` when matching: a
+can be told apart from a verifier that simply omits the parameter, and it now shows the reason on-device
+instead of finishing silently. Beware that the demo prefers `openid4vp-v1-unsigned` when matching: a
 verifier offering both protocols never exercises the signed path.
 
 The protocol identifier the platform delivers is passed to `startDcApi` and checked against the request

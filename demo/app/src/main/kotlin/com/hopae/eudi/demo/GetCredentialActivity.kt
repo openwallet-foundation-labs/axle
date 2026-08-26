@@ -37,7 +37,7 @@ class GetCredentialActivity : FragmentActivity() {
 
         val request = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
         val option = request?.credentialOptions?.filterIsInstance<GetDigitalCredentialOption>()?.firstOrNull()
-        if (request == null || option == null) { finishError(resultData, "no digital credential request"); return }
+        if (request == null || option == null) { failWithUi(resultData, "no digital credential request"); return }
 
         val origin = DcApiRequest.originOf(request, allowlist())
         LogStore.log("DC API request · origin=$origin · protocols=${DcApiRequest.protocolsOffered(option.requestJson)}")
@@ -75,25 +75,27 @@ class GetCredentialActivity : FragmentActivity() {
                                     DcApiResult.setResponse(resultData, DcApiResult.mdocResponseJson(proto, response))
                                     LogStore.log("✅ DC API (mdoc) response returned to caller")
                                     setResult(RESULT_OK, resultData)
-                                }.onFailure { finishExceptionData(resultData, it.message) }
-                                finish()
+                                    finish()
+                                }.onFailure { failWithUi(resultData, it.message) }
                             }
                         },
                         onDecline = { finishError(resultData, "declined by user") })
-                }.onFailure { finishError(resultData, it.message) }
+                }.onFailure { failWithUi(resultData, it.message) }
                 return@launch
             }
 
-            // Match the OpenID4VP request AND capture its protocol identifier — the response envelope must echo it.
+            // Match the OpenID4VP request AND capture its protocol identifier — the response envelope must echo
+            // it, and the SDK checks the request shape against it. Multi-signed (Appendix A.3.2.2) is not
+            // offered: the wallet does not implement it, so it is not registered and not matched here either.
             val vp = DcApiRequest.matchProtocol(
                 option.requestJson,
-                listOf("openid4vp-v1-unsigned", "openid4vp-v1-signed", "openid4vp-v1-multisigned"),
+                listOf("openid4vp-v1-unsigned", "openid4vp-v1-signed"),
             )
-            if (vp == null) { finishError(resultData, "no openid4vp request"); return@launch }
+            if (vp == null) { failWithUi(resultData, "no openid4vp request"); return@launch }
             val (vpProtocol, vpData) = vp
 
             runCatching {
-                val session = wallet.presentation.startDcApi(vpData.toString(), origin)
+                val session = wallet.presentation.startDcApi(vpData.toString(), origin, vpProtocol)
                 val resolved = session.state.first { it is PresentationState.RequestResolved || it is PresentationState.Failed }
                 if (resolved is PresentationState.Failed) throw resolved.error
                 val presentation = (resolved as PresentationState.RequestResolved).request
@@ -135,11 +137,11 @@ class GetCredentialActivity : FragmentActivity() {
                                     is PresentationState.Failed -> throw done.error
                                     else -> error("unexpected terminal state $done")
                                 }
-                            }.onFailure { finishError(resultData, it.message) }
+                            }.onFailure { failWithUi(resultData, it.message) }
                         }
                     },
                     onDecline = { finishError(resultData, "declined by user") })
-            }.onFailure { finishError(resultData, it.message) }
+            }.onFailure { failWithUi(resultData, it.message) }
         }
     }
 
@@ -152,8 +154,8 @@ class GetCredentialActivity : FragmentActivity() {
             DcApiResult.setResponse(resultData, DcApiResult.openId4VpResponseJson(protocol, body))
             LogStore.log("✅ DC API response returned to caller")
             setResult(RESULT_OK, resultData)
-        }.onFailure { finishExceptionData(resultData, it.message) }
-        finish()
+            finish()
+        }.onFailure { failWithUi(resultData, it.message) }
     }
 
     private fun showConsent(verifier: DcApiVerifier, items: List<ConsentItem>, onApprove: () -> Unit, onDecline: () -> Unit) {
@@ -165,11 +167,25 @@ class GetCredentialActivity : FragmentActivity() {
         assets.open("privileged_allowlist.json").bufferedReader().use { it.readText() }
     }.getOrDefault("""{"apps":[]}""")
 
-    private fun finishError(resultData: Intent, message: String?) { finishExceptionData(resultData, message); finish() }
-
-    private fun finishExceptionData(resultData: Intent, message: String?) {
+    /**
+     * A failure the User has to see. This Activity draws over the calling app, so finishing on an error
+     * without a word reads as "the tap did nothing"; the sheet names the check that refused the request and
+     * hands the error back to the caller when it is closed.
+     */
+    private fun failWithUi(resultData: Intent, message: String?) {
         LogStore.log("❌ DC API: ${message ?: "error"}")
+        setContent { WalletTheme { DcApiFailureSheet(message) { finishWithError(resultData, message) } } }
+    }
+
+    /** A User-initiated exit (a decline): they already know what happened, so return the error and go. */
+    private fun finishError(resultData: Intent, message: String?) {
+        LogStore.log("❌ DC API: ${message ?: "error"}")
+        finishWithError(resultData, message)
+    }
+
+    private fun finishWithError(resultData: Intent, message: String?) {
         DcApiResult.setError(resultData, message)
         setResult(RESULT_OK, resultData)
+        finish()
     }
 }

@@ -64,9 +64,13 @@ class Openid4VpClient(
 
     suspend fun resolveRequest(requestUri: String): ResolvedRequest = resolver.resolve(requestUri)
 
-    /** Resolves an OpenID4VP request delivered over the Digital Credentials API (with the caller [origin]). */
-    suspend fun resolveDcApiRequest(requestObject: String, origin: String): ResolvedRequest =
-        resolver.resolveDcApi(requestObject, origin)
+    /**
+     * Resolves an OpenID4VP request delivered over the Digital Credentials API (with the caller [origin]).
+     * [protocolId] is the exchange protocol the platform delivered it under (`openid4vp-v1-signed` /
+     * `openid4vp-v1-unsigned`); pass it when the platform names one and the request shape is checked against it.
+     */
+    suspend fun resolveDcApiRequest(requestObject: String, origin: String, protocolId: String? = null): ResolvedRequest =
+        resolver.resolveDcApi(requestObject, origin, protocolId)
 
     fun match(request: ResolvedRequest, held: List<PresentableCredential>): DcqlMatchResult =
         DcqlEngine.match(request.dcqlQuery, held)

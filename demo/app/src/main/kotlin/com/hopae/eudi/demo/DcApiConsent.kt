@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import com.hopae.eudi.demo.security.BiometricAuth
@@ -183,6 +184,62 @@ fun DcApiConsentSheet(
                     PrimaryButton("Share", { share() }, Modifier.weight(1.5f))
                 }
             }
+        }
+    }
+}
+
+/**
+ * A Digital Credentials API request that could not be completed, shown as the same bottom sheet as the
+ * consent. This Activity draws over the calling app, so finishing silently on an error reads to the User as
+ * if their tap did nothing — and at an interop event the check that refused a verifier has to be readable on
+ * the device rather than over adb. [detail] is the underlying SDK message; the error is handed back to the
+ * caller when the User closes the sheet.
+ */
+@Composable
+fun DcApiFailureSheet(detail: String?, onClose: () -> Unit) {
+    val c = WalletTheme.colors
+    BackHandler { onClose() }
+
+    val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    Box(Modifier.fillMaxSize()) {
+        // Scrim over the caller — tap to dismiss (returns the error).
+        Box(
+            Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClose() },
+        )
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)).background(c.screen)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {} // swallow taps
+                .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = bottomInset + 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(Modifier.size(38.dp, 4.dp).clip(RoundedCornerShape(99.dp)).background(c.cardBorderStrong))
+            Spacer(Modifier.height(20.dp))
+            Box(Modifier.size(64.dp).clip(RoundedCornerShape(99.dp)).background(c.dangerBg), contentAlignment = Alignment.Center) {
+                Text("!", style = MaterialTheme.typography.titleLarge, color = c.danger)
+            }
+            Spacer(Modifier.height(16.dp))
+            Text("Request failed", style = MaterialTheme.typography.titleMedium, color = c.ink)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Nothing was shared. The request was refused and the caller has been told.",
+                style = MaterialTheme.typography.bodyMedium, color = c.inkMuted, textAlign = TextAlign.Center,
+            )
+            if (!detail.isNullOrBlank()) {
+                Spacer(Modifier.height(16.dp))
+                Box(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.dangerBg)
+                        .heightIn(max = 220.dp).verticalScroll(rememberScrollState()).padding(14.dp),
+                ) {
+                    Text(
+                        detail, style = MaterialTheme.typography.bodySmall, color = c.danger,
+                        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            Spacer(Modifier.height(22.dp))
+            PrimaryButton("Close", onClose, Modifier.fillMaxWidth())
         }
     }
 }

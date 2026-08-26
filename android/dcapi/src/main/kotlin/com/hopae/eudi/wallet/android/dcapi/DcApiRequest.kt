@@ -33,6 +33,9 @@ object DcApiRequest {
     /**
      * The OpenID4VP request object (preferring unsigned) the SDK's `startDcApi` understands, pulled from the
      * `{"requests":[{protocol,data},…]}` envelope. Falls back to the raw JSON if it is already a flat request.
+     *
+     * Prefer [matchProtocol]: it returns the exchange protocol identifier alongside the data, and passing that
+     * to `startDcApi` lets the SDK check the request shape against what the verifier announced.
      */
     fun extractOpenId4Vp(requestJson: String): String? {
         val root = runCatching { JSONObject(requestJson) }.getOrNull() ?: return null

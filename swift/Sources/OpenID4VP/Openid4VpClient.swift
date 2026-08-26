@@ -57,8 +57,10 @@ public struct Openid4VpClient {
     }
 
     /// Resolves an OpenID4VP request delivered over the Digital Credentials API (with the caller `origin`).
-    public func resolveDcApiRequest(_ requestObject: String, origin: String) async throws -> ResolvedRequest {
-        try await resolver.resolveDcApi(requestObject, origin: origin)
+    /// `protocolId` is the exchange protocol the platform delivered it under (`openid4vp-v1-signed` /
+    /// `openid4vp-v1-unsigned`); pass it when the platform names one and the request shape is checked against it.
+    public func resolveDcApiRequest(_ requestObject: String, origin: String, protocolId: String? = nil) async throws -> ResolvedRequest {
+        try await resolver.resolveDcApi(requestObject, origin: origin, protocolId: protocolId)
     }
 
     public func match(_ request: ResolvedRequest, held: [any PresentableCredential]) -> DcqlMatchResult {

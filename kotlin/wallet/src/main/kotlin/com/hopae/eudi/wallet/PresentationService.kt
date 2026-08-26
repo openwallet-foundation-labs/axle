@@ -79,9 +79,13 @@ class PresentationService internal constructor(
      * Digital Credentials API presentation (browser-mediated). The platform hands over the [requestObject]
      * and the caller [origin]; no HTTP is performed — the response object is returned in
      * [PresentationState.Completed.dcApiResponse] for the app to pass back to the platform.
+     *
+     * [protocolId] is the exchange protocol identifier the request arrived under (`openid4vp-v1-signed` /
+     * `openid4vp-v1-unsigned`). Pass the one the platform named: the request must match it, so a signed
+     * request cannot be processed as an unsigned one.
      */
-    fun startDcApi(requestObject: String, origin: String): PresentationSession = runSession(
-        resolve = { catchingVp { vp.resolveDcApiRequest(requestObject, origin) } },
+    fun startDcApi(requestObject: String, origin: String, protocolId: String? = null): PresentationSession = runSession(
+        resolve = { catchingVp { vp.resolveDcApiRequest(requestObject, origin, protocolId) } },
         submit = { resolved, matches, selection, held ->
             PresentationState.Completed(
                 redirectUri = null,

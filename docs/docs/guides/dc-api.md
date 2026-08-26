@@ -67,8 +67,10 @@ register it under both credential types. Re-register whenever credentials change
 
 ```kotlin
 object DcApiRegistrar {
+    // Declare only what the wallet can answer. `openid4vp-v1-multisigned` is deliberately absent —
+    // see "Multi-signed requests" below.
     private val PROTOCOLS = listOf(
-        "openid4vp-v1-signed", "openid4vp-v1-unsigned", "openid4vp-v1-multisigned", "org-iso-mdoc", "openid4vp",
+        "openid4vp-v1-signed", "openid4vp-v1-unsigned", "org-iso-mdoc",
     )
 
     suspend fun register(context: Context, wallet: Wallet) {
@@ -151,12 +153,13 @@ override fun onCreate(savedInstanceState: Bundle?) {
         return
     }
 
-    // openid4vp-v1-unsigned / -signed / -multisigned. Capture the matched protocol — the response envelope must echo it.
+    // openid4vp-v1-unsigned / -signed. Capture the matched protocol — the response envelope must echo it,
+    // and the SDK checks the request shape against it.
     val vp = matchProtocol(option.requestJson,
-        listOf("openid4vp-v1-unsigned", "openid4vp-v1-signed", "openid4vp-v1-multisigned")) ?: return failAndFinish("no openid4vp request")
+        listOf("openid4vp-v1-unsigned", "openid4vp-v1-signed")) ?: return failAndFinish("no openid4vp request")
     val (vpProtocol, vpData) = vp
     lifecycleScope.launch {
-        val session = wallet.presentation.startDcApi(vpData.toString(), origin)
+        val session = wallet.presentation.startDcApi(vpData.toString(), origin, vpProtocol)
         val resolved = session.state.first { it is RequestResolved || it is Failed } as RequestResolved
         session.respond(PresentationSelection.auto(resolved.request))
         val done = session.state.first { it.isTerminal } as PresentationState.Completed
@@ -222,6 +225,36 @@ and `expected_origins` sits inside the signature-protected payload. A mismatch r
 owns those origins — an attacker with a valid certificate can sign their own request listing their own
 origin. Whether to trust that `client_id` is the trust framework's job (`readerAnchorsDer`).
 :::
+
+### Protocol identifier vs. request shape
+
+The platform names the exchange protocol (`protocol` in the request envelope, Appendix A.1) as well as
+handing over the data. Pass it along — `startDcApi(data, origin, protocolId)` — and the SDK checks the two
+against each other:
+
+| Declared protocol | Accepted `data` |
+| --- | --- |
+| `openid4vp-v1-unsigned` | the request parameters as plain JSON |
+| `openid4vp-v1-signed` | `{"request": "<compact JWS>"}` (a bare JWS is accepted too) |
+| `openid4vp-v1-multisigned` | refused — not implemented, see below |
+| omitted / any other value | the shape decides alone, as before |
+
+The identifier is what makes a downgrade visible. Without it the shape is the only signal, so a request
+announced as signed but delivered as plain JSON resolves as an unsigned one — dropping the signature and the
+`expected_origins` check in silence, with the caller Origin standing in as the verifier. A mismatch now
+raises `invalid_request`.
+
+### Multi-signed requests are not supported
+
+`openid4vp-v1-multisigned` (Appendix A.3.2.2) is JWS JSON Serialization: one base64url `payload` holding the
+request parameters, and one signature per Client Identifier, so a verifier can authenticate under several
+trust frameworks in a single request (`client_id` and `verifier_info` live in each signature's protected
+header, everything else in the shared payload).
+
+The SDK does not implement it. It is recognised — by protocol identifier and by the `{payload, signatures}`
+shape — and refused as `VpException.Unsupported` / `VpError.unsupported`, rather than misparsed as an
+unsigned request and failing later with a misleading "missing nonce". It is also deliberately **not**
+declared at registration, so the platform does not route such a request to the wallet to begin with.
 
 ## 6. Test
 

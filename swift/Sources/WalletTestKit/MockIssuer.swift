@@ -39,6 +39,10 @@ public actor MockIssuer: HttpTransport {
     /// When true, the config advertises the `attestation` proof type (§8.2.1 Appendix F.3) in its metadata.
     private var supportsAttestationProof = false
     public func setSupportsAttestationProof(_ enabled: Bool) { supportsAttestationProof = enabled }
+    /// When false, the config omits the `jwt` proof type — modelling an issuer (e.g. geneva2026.mdoc.online)
+    /// that accepts only the `attestation` proof. A `jwt` proof then gets `invalid_proof`, as the real one does.
+    private var supportsJwtProof = true
+    public func setSupportsJwtProof(_ enabled: Bool) { supportsJwtProof = enabled }
     private var requiresKeyAttestation = false
     public func setRequiresKeyAttestation(_ enabled: Bool) { requiresKeyAttestation = enabled }
     /// The `attestation`-proof Key Attestation JWT the last Credential Request carried (§8.2.1.3), if any.
@@ -293,6 +297,16 @@ public actor MockIssuer: HttpTransport {
             return try respond(#"{"credentials":[\#(creds.joined(separator: ","))],"notification_id":"n-1"}"#, responseEncEarly)
         }
 
+        // A proof type this config never advertised is refused — an issuer offering only `attestation` answers
+        // a `jwt` proof with invalid_proof (§8.3.1), not with a credential.
+        guard supportsJwtProof else {
+            return HttpResponse(
+                status: 400,
+                headers: [("Content-Type", "application/json")],
+                body: [UInt8](#"{"error":"invalid_proof","error_description":"Parameter \"attestation\" is missing in parameter \"proofs\""}"#.utf8)
+            )
+        }
+
         guard case let .arr(jwts)? = body["proofs"]?["jwt"], !jwts.isEmpty else {
             preconditionFailure("no proof jwt")
         }
@@ -397,7 +411,12 @@ public actor MockIssuer: HttpTransport {
     private func issuerMetadata() -> String {
         let encryption = encryptionSupported ? requestEncryptionJson() + responseEncryptionJson() : ""
         let keyAttReq = requiresKeyAttestation ? #","key_attestations_required":{"key_storage":["iso_18045_high"]}"# : ""
-        let attestation = supportsAttestationProof ? #","attestation":{"proof_signing_alg_values_supported":["ES256"]\#(keyAttReq)}"# : ""
+        // At least one of `jwt` / `attestation` — an issuer may offer the attestation proof alone.
+        func proofType(_ type: String) -> String { #""\#(type)":{"proof_signing_alg_values_supported":["ES256"]\#(keyAttReq)}"# }
+        var proofTypes: [String] = []
+        if supportsJwtProof { proofTypes.append(proofType("jwt")) }
+        if supportsAttestationProof { proofTypes.append(proofType("attestation")) }
+        let proofTypesJson = proofTypes.joined(separator: ",")
         return """
         {"credential_issuer":"\(issuer)",
          \(encryption)"credential_endpoint":"\(issuer)/credential",
@@ -409,7 +428,7 @@ public actor MockIssuer: HttpTransport {
          "credential_configurations_supported":{
            "eu.europa.ec.eudi.pid.1":{"format":"dc+sd-jwt","vct":"eu.europa.ec.eudi.pid.1",
              "display":[{"name":"Personal ID","logo":{"uri":"https://logo.example/pid.png"},"background_color":"#123456"}],
-             "proof_types_supported":{"jwt":{"proof_signing_alg_values_supported":["ES256"]\(keyAttReq)}\(attestation)}}}}
+             "proof_types_supported":{\(proofTypesJson)}}}}
         """
     }
 

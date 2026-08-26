@@ -211,6 +211,11 @@ class MockIssuer(
 
     /** When true, the config advertises the `attestation` proof type (§8.2.1 Appendix F.3) in its metadata. */
     var supportsAttestationProof: Boolean = false
+    /**
+     * When false, the config omits the `jwt` proof type — modelling an issuer (e.g. geneva2026.mdoc.online)
+     * that accepts only the `attestation` proof. A `jwt` proof then gets `invalid_proof`, as the real one does.
+     */
+    var supportsJwtProof: Boolean = true
     /** When true, the config advertises `key_attestations_required` (HAIP §4.5.1) — a bare jwt proof is refused. */
     var requiresKeyAttestation: Boolean = false
     /** The `attestation`-proof Key Attestation JWT the last Credential Request carried (§8.2.1.3), if any. */
@@ -306,6 +311,17 @@ class MockIssuer(
             return respond("""{"credentials":[$creds],"notification_id":"n-1"}""", responseEnc)
         }
 
+        // A proof type this config never advertised is refused — an issuer offering only `attestation` answers
+        // a `jwt` proof with invalid_proof (§8.3.1), not with a credential.
+        if (!supportsJwtProof) {
+            return HttpResponse(
+                400,
+                listOf("Content-Type" to "application/json"),
+                """{"error":"invalid_proof","error_description":"Parameter \"attestation\" is missing in parameter \"proofs\""}"""
+                    .encodeToByteArray(),
+            )
+        }
+
         val proofs = (proofsObj["jwt"] as JsonValue.Arr).items.map { (it as JsonValue.Str).value }
         seenProofCount = proofs.size
         seenKeyAttestation = (Jws.parse(proofs.first()).header["key_attestation"] as? JsonValue.Str)?.value
@@ -396,7 +412,7 @@ class MockIssuer(
          "credential_configurations_supported":{
            "eu.europa.ec.eudi.pid.1":{"format":"dc+sd-jwt","vct":"eu.europa.ec.eudi.pid.1",
              "display":[{"name":"Personal ID","logo":{"uri":"https://logo.example/pid.png"},"background_color":"#123456"}],
-             "proof_types_supported":{"jwt":{"proof_signing_alg_values_supported":["ES256"]${if (requiresKeyAttestation) ""","key_attestations_required":{"key_storage":["iso_18045_high"]}""" else ""}}${if (supportsAttestationProof) ""","attestation":{"proof_signing_alg_values_supported":["ES256"]${if (requiresKeyAttestation) ""","key_attestations_required":{"key_storage":["iso_18045_high"]}""" else ""}}""" else ""}}}}}
+             "proof_types_supported":{${proofTypesSupportedJson()}}}}}
     """.trimIndent()
 
     private fun asMetadata(): String = """
@@ -407,6 +423,16 @@ class MockIssuer(
          "token_endpoint_auth_methods_supported":[${clientAuthMethods.joinToString(",") { "\"$it\"" }}],
          "dpop_signing_alg_values_supported":["ES256"]}
     """.trimIndent()
+
+    /** The `proof_types_supported` entries this config advertises — at least one of `jwt` / `attestation`. */
+    private fun proofTypesSupportedJson(): String {
+        val keyAtt = if (requiresKeyAttestation) ""","key_attestations_required":{"key_storage":["iso_18045_high"]}""" else ""
+        fun entry(type: String) = """"$type":{"proof_signing_alg_values_supported":["ES256"]$keyAtt}"""
+        return buildList {
+            if (supportsJwtProof) add(entry("jwt"))
+            if (supportsAttestationProof) add(entry("attestation"))
+        }.joinToString(",")
+    }
 
     private fun jwtVcIssuerMetadata(): String {
         val jwk = JwkEc.toJson(issuerKey.publicKey).serialize()

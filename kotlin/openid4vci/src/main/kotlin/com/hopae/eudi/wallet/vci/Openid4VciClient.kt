@@ -78,10 +78,11 @@ class Openid4VciClient(
     /** Optional Key Attestation for the proof key(s), added to each key-proof header (HAIP). */
     private val keyAttestation: KeyAttestationSource? = null,
     /**
-     * §8.2.1 Appendix F.3: use the `attestation` proof type — a single Key Attestation JWT with no
-     * per-key proof of possession — instead of `jwt` proofs. Only applies when a [keyAttestation] source is
-     * configured and the issuer's config lists `attestation` in `proof_types_supported`; otherwise `jwt` is
-     * used. The attestation's `attested_keys` are the keys the Credential(s) bind to, so no key needs to sign.
+     * §8.2.1 Appendix F.3: prefer the `attestation` proof type — a single Key Attestation JWT with no
+     * per-key proof of possession — over `jwt` proofs where the issuer offers both. The attestation's
+     * `attested_keys` are the keys the Credential(s) bind to, so no key needs to sign. This is only a
+     * preference: an issuer whose config lists `attestation` and *not* `jwt` gets the attestation proof
+     * either way, and one that never lists `attestation` gets `jwt` proofs either way.
      */
     private val preferAttestationProof: Boolean = false,
     /** How to negotiate signed issuer metadata (OpenID4VCI §12.2.2/§12.2.3). Default: unsigned JSON. */
@@ -416,17 +417,21 @@ class Openid4VciClient(
     }
 
     /**
-     * The `proofs` object (§8.2.1 / ETSI TS 119 472-3 §4.6). Three shapes, decided by whether the issuer's
-     * config requires a Key Attestation and by [preferAttestationProof]:
+     * The `proofs` object (§8.2.1 / ETSI TS 119 472-3 §4.6). Three shapes, decided by the proof types the
+     * issuer's config advertises, by whether it requires a Key Attestation, and by [preferAttestationProof]:
      *
      *  1. **bare `jwt`** — no attestation required: one `jwt` proof per proof key (Appendix F.1, batch), each
      *     its own proof of possession. Distinct keys, up to the issuer's `batch_size`.
-     *  2. **`jwt` + Key Attestation** (default when attestation IS required): **exactly one** `jwt` proof —
-     *     proof of possession by the *first* proof key — carrying the Key Attestation (whose `attested_keys`
-     *     cover the whole batch) in its `key_attestation` header. NOT one-jwt-per-key (that N×N shape is
-     *     rejected — ETSI CRED-REQ-4.6.1.2-01). Preferred because it still does a real PoP.
-     *  3. **`attestation` proof** — only when [preferAttestationProof] and the issuer advertises the
-     *     `attestation` proof type: a single Key Attestation JWT on its own, no PoP (Appendix F.3).
+     *  2. **`jwt` + Key Attestation** (default when attestation IS required and `jwt` is on offer): **exactly
+     *     one** `jwt` proof — proof of possession by the *first* proof key — carrying the Key Attestation
+     *     (whose `attested_keys` cover the whole batch) in its `key_attestation` header. NOT one-jwt-per-key
+     *     (that N×N shape is rejected — ETSI CRED-REQ-4.6.1.2-01). Preferred because it still does a real PoP.
+     *  3. **`attestation` proof** — a single Key Attestation JWT on its own, no PoP (Appendix F.3). Used when
+     *     the issuer advertises `attestation` and either omits `jwt` — leaving this the only shape it accepts
+     *     — or [preferAttestationProof] is set.
+     *
+     * `proof_types_supported` is what the issuer will actually accept, so it decides the shape before any
+     * preference does: sending a `jwt` proof to an issuer that offers only `attestation` earns `invalid_proof`.
      */
     private suspend fun proofs(
         issuerMeta: CredentialIssuerMetadata,
@@ -435,14 +440,19 @@ class Openid4VciClient(
         keys: IssuanceKeys,
     ): JsonValue.Obj {
         val source = keys.keyAttestation ?: keyAttestation
+        val supported = config?.proofTypesSupported ?: emptySet()
+        // Shape 3 when the issuer advertises `attestation` and either leaves us no `jwt` alternative or we
+        // prefer it. An issuer advertising no proof types at all constrains nothing — keep the jwt shapes.
+        val attestationProof = supported.contains("attestation") &&
+            (!supported.contains("jwt") || preferAttestationProof)
         val attestationRequired = config?.keyAttestationRequired == true
-        val wantAttestation = attestationRequired || (preferAttestationProof && source != null)
+        val wantAttestation = attestationRequired || attestationProof || (preferAttestationProof && source != null)
 
         if (wantAttestation) {
             val s = source ?: throw VciException.Unsupported(
                 "issuer requires a key attestation for this credential but no attestation source is configured",
             )
-            if (preferAttestationProof && config?.proofTypesSupported?.contains("attestation") == true) {
+            if (attestationProof) {
                 // Shape 3 (Appendix F.3): a single Key Attestation JWT, its attested_keys bind the Credential(s).
                 return JsonValue.Obj(listOf("attestation" to JsonValue.Arr(listOf(JsonValue.Str(s.attestation(cNonce))))))
             }

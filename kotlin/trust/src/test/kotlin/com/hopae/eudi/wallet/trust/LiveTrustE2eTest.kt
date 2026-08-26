@@ -50,10 +50,16 @@ class LiveTrustE2eTest {
 
     private fun anchor(): TrustAnchors = anchor("/pid_issuer_ca_ut_02.der")
 
-    private fun anchor(resource: String): TrustAnchors {
-        val der = javaClass.getResourceAsStream(resource)!!.readBytes()
-        return TrustAnchors(listOf(X509Support.parse(der)))
-    }
+    private fun anchor(vararg resources: String): TrustAnchors =
+        TrustAnchors(resources.map { X509Support.parse(javaClass.getResourceAsStream(it)!!.readBytes()) })
+
+    /**
+     * Reader anchors for the live verifier. `verifier.eudiw.dev` signs its request objects under
+     * `PID Issuer CA 02` (EU) — its `Web Verifier (PROD)` certificate was reissued there on 2026-08-14 —
+     * while the PID it asks for is still issued under `PID Issuer CA - UT 02`. Both are trusted here, as a
+     * wallet carrying the EUDI trust list would.
+     */
+    private fun readerAnchors(): TrustAnchors = anchor("/pid_issuer_ca_eu_02.der", "/pid_issuer_ca_ut_02.der")
 
     /**
      * Live proof of OpenID4VCI §12.2.2/§12.2.3 signed metadata: `dev.issuer-backend.eudiw.dev` serves the
@@ -125,7 +131,7 @@ class LiveTrustE2eTest {
         val held = HeldSdJwtVc("pid", SdJwt.parse(credential), holder.signer())
         val client = Openid4VpClient(
             transport, clock = { System.currentTimeMillis() / 1000 },
-            trust = X509RequestVerifier(X509ChainValidator(anchor())),
+            trust = X509RequestVerifier(X509ChainValidator(readerAnchors())),
         )
 
         val request = client.resolveRequest(requestUrl)
@@ -162,7 +168,7 @@ class LiveTrustE2eTest {
         val held = HeldMdoc("pid-mdoc", IssuerSigned.decode(Base64Url.decode(credential)), holder.coseSigner())
         val client = Openid4VpClient(
             JdkHttp(), clock = { System.currentTimeMillis() / 1000 },
-            trust = X509RequestVerifier(X509ChainValidator(anchor())),
+            trust = X509RequestVerifier(X509ChainValidator(readerAnchors())),
         )
 
         val request = client.resolveRequest(requestUrl)

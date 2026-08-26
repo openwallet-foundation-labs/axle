@@ -26,6 +26,22 @@ final class VpE2eTests: XCTestCase {
         private let encPrivD: [UInt8]
         private(set) var verifiedClaims: JsonValue?
 
+        /// The `enc` the wallet chose, read off the JWE protected header.
+        private(set) var seenJweEnc: String?
+
+        /// The `apu` the wallet sent, decoded — nil when the header was absent.
+        private(set) var seenJweApu: String?
+
+        /// The values `encrypted_response_enc_values_supported` advertises, in order.
+        var encValuesSupported: [String] = ["A256GCM"]
+        func setEncValuesSupported(_ values: [String]) { encValuesSupported = values }
+
+        /// When set, client_metadata also carries JARM's singular `authorization_encrypted_response_enc`, which
+        /// OpenID4VP 1.0 replaced. Verifiers still emit it, sometimes naming a different algorithm than the
+        /// plural list's first entry — the wallet must ignore it.
+        var authorizationEncryptedResponseEnc: String?
+        func setAuthorizationEncryptedResponseEnc(_ value: String?) { authorizationEncryptedResponseEnc = value }
+
         init(issuerPublic: EcPublicKey) {
             self.issuerPublic = issuerPublic
             let priv = P256.KeyAgreement.PrivateKey()
@@ -41,10 +57,14 @@ final class VpE2eTests: XCTestCase {
 
         func makeRequestUri(_ responseMode: String, encode: (String) -> String) -> String {
             let dcql = #"{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{"vct_values":["urn:eudi:pid:1"]},"claims":[{"path":["family_name"]},{"path":["given_name"]}]}]}"#
-            let clientMetadata = JsonValue.obj([
+            var metadata: [(String, JsonValue)] = [
                 ("jwks", .obj([("keys", .arr([encPubJwk]))])),
-                ("encrypted_response_enc_values_supported", .arr([.str("A256GCM")])),
-            ]).serialize()
+                ("encrypted_response_enc_values_supported", .arr(encValuesSupported.map { .str($0) })),
+            ]
+            if let named = authorizationEncryptedResponseEnc {
+                metadata.append(("authorization_encrypted_response_enc", .str(named)))
+            }
+            let clientMetadata = JsonValue.obj(metadata).serialize()
             return "openid4vp://?client_id=\(encode(clientId))&nonce=\(encode(nonce))&response_mode=\(responseMode)&response_uri=\(encode(responseUri))&state=xyz&dcql_query=\(encode(dcql))&client_metadata=\(encode(clientMetadata))"
         }
 
@@ -60,6 +80,11 @@ final class VpE2eTests: XCTestCase {
             }
             let vpToken: JsonValue
             if let response = form["response"] {
+                if case let .obj(hdr)? = try? JsonValue.parse(try Base64Url.decodeToString(String(response.split(separator: ".")[0]))),
+                   case let .str(e)? = JsonValue.obj(hdr)["enc"] {
+                    seenJweEnc = e
+                    if case let .str(a)? = JsonValue.obj(hdr)["apu"] { seenJweApu = try? Base64Url.decodeToString(a) }
+                }
                 let dec = try Jwe.decryptEcdhEs(response, recipient: try Ecdh.PrivateKey(curve: .p256, rawD: encPrivD))
                 let obj = try JsonValue.parse(String(bytes: dec, encoding: .utf8)!)
                 vpToken = obj["vp_token"]!
@@ -92,6 +117,74 @@ final class VpE2eTests: XCTestCase {
             b.sd("given_name", "Jongho")
             b.sd("birthdate", "1990-05-15")
         }
+    }
+
+    /// §8.3 defines `encrypted_response_enc_values_supported` and nothing else for this, so JARM's singular
+    /// `authorization_encrypted_response_enc` — which OpenID4VP 1.0 replaced — is ignored even when a Verifier
+    /// sends both and they disagree. geneva2026.mdoc.online is such a Verifier: it names A256GCM there while
+    /// listing `["A128GCM", "A256GCM"]` here, declaring acceptable the very value the singular field rules out.
+    func testIgnoresTheLegacySingularEncAndPicksFromTheSupportedList() async throws {
+        let (verifier, seen) = try await runEncFlow(supported: ["A128GCM", "A256GCM"], named: "A256GCM")
+        XCTAssertEqual("A128GCM", seen, "the 1.0 list decides, not the parameter it replaced")
+        let claims = await verifier.verifiedClaims!
+        XCTAssertEqual(JsonValue.str("Han"), claims["family_name"])
+    }
+
+    /// An encrypted response carries an `apu`. OpenID4VP 1.0 Final binds nothing to it, but Verifiers written
+    /// against the ISO 18013-7 draft — where it held the `mdocGeneratedNonce` — read the header
+    /// unconditionally: geneva2026.mdoc.online answers a response without one with a 500, and accepts the
+    /// identical response once it is present. It must be fresh per response, not a constant.
+    func testEncryptedResponseCarriesAFreshApu() async throws {
+        let area = SoftwareSecureArea()
+        let issuerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let holderKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let pid = try await issuePid(area, issuerKey, holderKey)
+        let held = try HeldSdJwtVc(credentialId: "pid-1", sdJwt: pid,
+                                   holderSigner: SecureAreaJwsSigner(area: area, key: holderKey.handle, algorithm: .es256))
+
+        var seen: [String] = []
+        for round in 1...2 {
+            let verifier = MockVerifier(issuerPublic: issuerKey.publicKey)
+            let client = Openid4VpClient(http: verifier, clock: { self.now }, rng: CountingRng(seed: UInt8(round)))
+            let uri = await verifier.makeRequestUri("direct_post.jwt", encode: enc)
+            let request = try await client.resolveRequest(uri)
+            let matches = client.match(request, held: [held])
+            _ = try await client.respond(request: request, matches: matches, selection: .auto(matches), held: [held])
+            let apu = await verifier.seenJweApu
+            seen.append(try XCTUnwrap(apu, "an encrypted response must carry an apu"))
+        }
+        XCTAssertEqual(2, Set(seen).count, "the apu is a per-response nonce, not a constant")
+    }
+
+    private struct CountingRng: Rng {
+        let seed: UInt8
+        func nextBytes(_ size: Int) -> [UInt8] { (0..<size).map { UInt8(($0 + Int(seed)) & 0xff) } }
+    }
+
+    /// With no `authorization_encrypted_response_enc`, the first value on the list is still what we use.
+    func testFallsBackToTheSupportedListWhenNoAlgorithmIsNamed() async throws {
+        let (_, seen) = try await runEncFlow(supported: ["A128GCM", "A256GCM"], named: nil)
+        XCTAssertEqual("A128GCM", seen)
+    }
+
+    private func runEncFlow(supported: [String], named: String?) async throws -> (MockVerifier, String?) {
+        let area = SoftwareSecureArea()
+        let issuerKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let holderKey = try await area.createKey(spec: KeySpec(secureArea: area.id, algorithm: .es256))
+        let pid = try await issuePid(area, issuerKey, holderKey)
+        let held = try HeldSdJwtVc(credentialId: "pid-1", sdJwt: pid,
+                                   holderSigner: SecureAreaJwsSigner(area: area, key: holderKey.handle, algorithm: .es256))
+
+        let verifier = MockVerifier(issuerPublic: issuerKey.publicKey)
+        await verifier.setEncValuesSupported(supported)
+        await verifier.setAuthorizationEncryptedResponseEnc(named)
+        let client = Openid4VpClient(http: verifier, clock: { self.now })
+
+        let uri = await verifier.makeRequestUri("direct_post.jwt", encode: enc)
+        let request = try await client.resolveRequest(uri)
+        let matches = client.match(request, held: [held])
+        _ = try await client.respond(request: request, matches: matches, selection: .auto(matches), held: [held])
+        return (verifier, await verifier.seenJweEnc)
     }
 
     private func runFlow(_ responseMode: String) async throws {

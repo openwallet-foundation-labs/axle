@@ -7,7 +7,7 @@
   "loteType": "http://uri.etsi.org/19602/LoTEType/EUAttestationProvidersList",
   "schemeName": "Hopae EUDI Sandbox — List of Attestation (QEAA) Providers",
   "loteVersionIdentifier": "1",
-  "loteSequenceNumber": 2,
+  "loteSequenceNumber": 3,
   "entities": [
     {
       "teName": "Hopae S.A.",
@@ -74,6 +74,21 @@
           "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/EAA/Issuance/PhotoID/mirrored-iaca",
           "serviceName": "ID Pass root — Apple Issuing Authority ECC Root CA - G1 · valid to 2045-04-24",
           "certFile": "config/certs/mdl-iaca/apple-idpass.pem"
+        }
+      ]
+    },
+    {
+      "teName": "Aptitude",
+      "teAddress": {
+        "postal": {
+          "country": "CH"
+        }
+      },
+      "services": [
+        {
+          "serviceTypeIdentifier": "https://trusted-list.vercel.app/svctype/Test/Issuance/sandbox-only",
+          "serviceName": "Test IACA — IACA Certificate Default Issuer Geneva 2026 · valid to 2046-06-11",
+          "certFile": "config/certs/sandbox-test/geneva-2026-test-iaca.pem"
         }
       ]
     },

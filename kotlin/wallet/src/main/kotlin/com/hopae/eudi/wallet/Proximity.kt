@@ -62,8 +62,21 @@ class DcApiMdocRequest internal constructor(
 /** The user's choice of which stored credential answers each requested doctype. */
 class ProximitySelection(val chosen: Map<String, CredentialId>) {
     companion object {
-        fun auto(request: ProximityRequest): ProximitySelection =
-            ProximitySelection(request.documents.mapNotNull { doc -> doc.candidates.firstOrNull()?.let { doc.docType to it } }.toMap())
+        fun auto(request: ProximityRequest): ProximitySelection = preferring(request.documents, emptyList())
+
+        /**
+         * [auto], except that a choice the User has already made wins over "the first candidate" — see
+         * [PresentationSelection.preferring]. Takes the documents rather than a request so it serves both the
+         * proximity flow ([ProximityRequest]) and the `org-iso-mdoc` DC API flow ([DcApiMdocRequest]), where
+         * the OS selector has already resolved the pick before the wallet is started.
+         */
+        fun preferring(documents: List<RequestedDocumentView>, preferred: Collection<CredentialId>): ProximitySelection =
+            ProximitySelection(
+                documents.mapNotNull { doc ->
+                    val pick = doc.candidates.firstOrNull { it in preferred } ?: doc.candidates.firstOrNull()
+                    pick?.let { doc.docType to it }
+                }.toMap(),
+            )
     }
 }
 

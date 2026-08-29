@@ -153,8 +153,18 @@ class ProximityService internal constructor(
      * ISO/IEC 18013-7:2025 Annex C `org-iso-mdoc` Digital Credentials API: builds the mdoc DeviceResponse for
      * [deviceRequestBase64], HPKE-encrypts it to the verifier's `recipientPublicKey` (from [encryptionInfoBase64]),
      * and returns the base64url of `["dcapi", {enc, cipherText}]`. No transport — the platform mediates.
+     *
+     * [preferred] are the credentials the User picked in the OS selector, when the platform named any: they win
+     * over "the first stored mdoc of this doctype" wherever it can answer a requested document. Leaving it
+     * null answers with the first match, which silently substitutes a different credential than the one the
+     * selector showed whenever the wallet holds more than one mdoc of that doctype.
      */
-    suspend fun respondDcApiMdoc(deviceRequestBase64: String, encryptionInfoBase64: String, origin: String): String {
+    suspend fun respondDcApiMdoc(
+        deviceRequestBase64: String,
+        encryptionInfoBase64: String,
+        origin: String,
+        preferred: Collection<CredentialId> = emptyList(),
+    ): String {
         val deviceRequest = catchingProximity { DeviceRequest.decode(Base64Url.decode(deviceRequestBase64)) }
         val encInfo = CborDecoder.decode(Base64Url.decode(encryptionInfoBase64)) as? Cbor.Array
             ?: throw WalletError.Proximity.SessionFailed("malformed EncryptionInfo")
@@ -167,10 +177,14 @@ class ProximityService internal constructor(
         val recipientKey = CoseKey.decode(recipientKeyCbor)
 
         val transcript = MdocSessionTranscript.dcApiIsoMdoc(encryptionInfoBase64, origin)
-        val chosen = deviceRequest.docRequests.mapNotNull { dr -> findMdocs(dr.docType).firstOrNull()?.let { dr.docType to it } }.toMap()
+        val documents = deviceRequest.docRequests.map { dr ->
+            RequestedDocumentView(dr.docType, dr.requested.mapValues { (_, elems) -> elems.map { it.identifier } }, findMdocs(dr.docType))
+        }
+        val selection = ProximitySelection.preferring(documents, preferred)
+        val chosen = selection.chosen
         if (chosen.isEmpty()) throw WalletError.Proximity.NoMatchingCredential("no stored mdoc for the DC API request")
 
-        val deviceResponse = buildDeviceResponse(deviceRequest, transcript, ProximitySelection(chosen))
+        val deviceResponse = buildDeviceResponse(deviceRequest, transcript, selection)
         val sealed = Hpke.sealBaseP256(recipientKey, CborEncoder.encode(transcript), ByteArray(0), deviceResponse)
         val envelope = Cbor.Array(
             listOf(

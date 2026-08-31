@@ -99,12 +99,33 @@ class PresentationCandidate(
 class PresentationSelection(val chosen: Map<String, List<CredentialId>>) {
     companion object {
         /** Auto-pick: all candidates for a `multiple` query, else the first candidate, for every required query. */
-        fun auto(request: PresentationRequest): PresentationSelection =
+        fun auto(request: PresentationRequest): PresentationSelection = preferring(request, emptyList())
+
+        /**
+         * [auto], except that a choice the User has already made wins over "the first candidate".
+         *
+         * Under the Digital Credentials API the OS selector resolves the choice *before* the wallet is
+         * started, so by the time a request reaches [auto] the User may already have picked among several
+         * matching credentials — and answering with a different one than the selector showed is a silent
+         * substitution the User cannot see. [preferred] pins those credentials wherever they are candidates;
+         * queries none of them answer, and an empty [preferred], fall back to [auto]'s first-candidate rule.
+         *
+         * It is a collection because the platform hands over a *set*: one element per credential of the
+         * combination the User chose, so a request spanning several queries pins each of them.
+         *
+         * A `multiple: true` query (§6.1) still takes every candidate: the verifier asked for all of them,
+         * so there is nothing to disambiguate.
+         */
+        fun preferring(request: PresentationRequest, preferred: Collection<CredentialId>): PresentationSelection =
+            preferring(request.queries, preferred)
+
+        /** The rule itself, over the queries alone — [PresentationRequest] cannot be built outside the SDK. */
+        internal fun preferring(queries: List<QueryPresentation>, preferred: Collection<CredentialId>): PresentationSelection =
             PresentationSelection(
-                request.queries.filter { it.required && it.candidates.isNotEmpty() }
+                queries.filter { it.required && it.candidates.isNotEmpty() }
                     .associate { q ->
                         q.queryId to if (q.multiple) q.candidates.map { it.credentialId }
-                        else listOf(q.candidates.first().credentialId)
+                        else listOf(q.candidates.firstOrNull { it.credentialId in preferred }?.credentialId ?: q.candidates.first().credentialId)
                     },
             )
     }

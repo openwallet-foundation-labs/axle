@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-15T08:35:11.017Z",
+  "generatedAt": "2026-08-29T09:33:52.278Z",
   "lists": [
     {
       "slug": "wallet-providers",
@@ -7,8 +7,8 @@
       "standard": "ETSI TS 119 602 · Annex E",
       "description": "Trusted wallet solution providers. Wallet-unit attestations (WUAs) chain to the certificate on this list.",
       "sequenceNumber": 1,
-      "issued": "2026-08-15T08:35:11.017Z",
-      "nextUpdate": "2027-02-15T08:35:11.017Z",
+      "issued": "2026-08-29T09:33:52.278Z",
+      "nextUpdate": "2027-03-01T09:33:52.278Z",
       "entities": [
         {
           "name": "Hopae S.A.",
@@ -41,8 +41,8 @@
       "standard": "ETSI TS 119 602 · EUDI ARF (PID Providers)",
       "description": "Providers of Person Identification Data (PID). Issued PIDs — SD-JWT VC and mdoc — chain to the certificate on this list.",
       "sequenceNumber": 2,
-      "issued": "2026-08-15T08:35:11.017Z",
-      "nextUpdate": "2027-02-15T08:35:11.017Z",
+      "issued": "2026-08-29T09:33:52.278Z",
+      "nextUpdate": "2027-03-01T09:33:52.278Z",
       "entities": [
         {
           "name": "Hopae S.A.",
@@ -124,9 +124,9 @@
       "title": "Attestation Issuers",
       "standard": "ETSI TS 119 602 · EUDI ARF ((Q)EAA Providers)",
       "description": "Providers of (Qualified) Electronic Attestations of Attributes. The mDL (ISO/IEC 18013-5) issued here chains to the certificate on this list. Also carries mirrored real-world mDL issuing authority roots (IACAs), republished for sandbox interop and not certified by the scheme.",
-      "sequenceNumber": 2,
-      "issued": "2026-08-15T08:35:11.017Z",
-      "nextUpdate": "2027-02-15T08:35:11.017Z",
+      "sequenceNumber": 3,
+      "issued": "2026-08-29T09:33:52.278Z",
+      "nextUpdate": "2027-03-01T09:33:52.278Z",
       "entities": [
         {
           "name": "Hopae S.A.",
@@ -161,6 +161,15 @@
             {
               "name": "ID Pass root — Apple Issuing Authority ECC Root CA - G1 · valid to 2045-04-24",
               "type": "https://trusted-list.vercel.app/svctype/EAA/Issuance/PhotoID/mirrored-iaca"
+            }
+          ]
+        },
+        {
+          "name": "Aptitude",
+          "services": [
+            {
+              "name": "Test IACA — IACA Certificate Default Issuer Geneva 2026 · valid to 2046-06-11",
+              "type": "https://trusted-list.vercel.app/svctype/Test/Issuance/sandbox-only"
             }
           ]
         },
@@ -427,8 +436,8 @@
       "standard": "ETSI TS 119 602 · EUDI ARF (Registration)",
       "description": "Registrar of relying parties. Relying-party access certificates chain to the Registrar CA on this list.",
       "sequenceNumber": 1,
-      "issued": "2026-08-15T08:35:11.017Z",
-      "nextUpdate": "2027-02-15T08:35:11.017Z",
+      "issued": "2026-08-29T09:33:52.278Z",
+      "nextUpdate": "2027-03-01T09:33:52.278Z",
       "entities": [
         {
           "name": "Hopae Registrar",

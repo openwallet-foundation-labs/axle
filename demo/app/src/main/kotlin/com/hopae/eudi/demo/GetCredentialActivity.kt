@@ -20,6 +20,7 @@ import com.hopae.eudi.wallet.PresentationSelection
 import com.hopae.eudi.wallet.PresentationState
 import com.hopae.eudi.wallet.android.dcapi.DcApiRequest
 import com.hopae.eudi.wallet.android.dcapi.DcApiResult
+import com.hopae.eudi.wallet.spi.CredentialId
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -40,7 +41,10 @@ class GetCredentialActivity : FragmentActivity() {
         if (request == null || option == null) { failWithUi(resultData, "no digital credential request"); return }
 
         val origin = DcApiRequest.originOf(request, allowlist())
-        LogStore.log("DC API request · origin=$origin · protocols=${DcApiRequest.protocolsOffered(option.requestJson)}")
+        // Which entry the User tapped in the OS selector. The consent screen and the response must both follow
+        // it: the selector is where the choice is made, and this Activity never re-asks.
+        val selected = DcApiRequest.selectedCredentialIds(intent).map { CredentialId(it) }
+        LogStore.log("DC API request · origin=$origin · protocols=${DcApiRequest.protocolsOffered(option.requestJson)} · selected=${selected.joinToString().ifEmpty { "none" }}")
 
         // The wallet assembles asynchronously (trust anchors from the trusted lists on first launch).
         lifecycleScope.launch {
@@ -57,7 +61,8 @@ class GetCredentialActivity : FragmentActivity() {
                     val resolved = wallet.proximity.resolveDcApiMdoc(deviceReq, encInfo, origin)
                     val creds = runCatching { wallet.credentials.list().associateBy { it.id.value } }.getOrDefault(emptyMap())
                     val items = resolved.documents.map { doc ->
-                        val cred = doc.candidates.firstOrNull()?.let { creds[it.value] }
+                        val pick = doc.candidates.firstOrNull { it in selected } ?: doc.candidates.firstOrNull()
+                        val cred = pick?.let { creds[it.value] }
                         val byId = (cred?.lifecycle as? Lifecycle.Issued)?.claims.orEmpty().associateBy { it.path.lastOrNull() }
                         val rows = doc.requestedElements.values.flatten().map { id ->
                             val v = byId[id]?.value?.display()
@@ -71,7 +76,7 @@ class GetCredentialActivity : FragmentActivity() {
                         onApprove = {
                             lifecycleScope.launch {
                                 runCatching {
-                                    val response = wallet.proximity.respondDcApiMdoc(deviceReq, encInfo, origin)
+                                    val response = wallet.proximity.respondDcApiMdoc(deviceReq, encInfo, origin, selected)
                                     DcApiResult.setResponse(resultData, DcApiResult.mdocResponseJson(proto, response))
                                     LogStore.log("✅ DC API (mdoc) response returned to caller")
                                     setResult(RESULT_OK, resultData)
@@ -102,7 +107,7 @@ class GetCredentialActivity : FragmentActivity() {
                 LogStore.log("DC API verifier=${presentation.verifier.clientId} · satisfiable=${presentation.satisfiable}")
                 val creds = runCatching { wallet.credentials.list().associateBy { it.id.value } }.getOrDefault(emptyMap())
                 val items = presentation.queries.map { q ->
-                    val cand = q.candidates.firstOrNull()
+                    val cand = q.candidates.firstOrNull { it.credentialId in selected } ?: q.candidates.firstOrNull()
                     val cred = cand?.let { creds[it.credentialId.value] }
                     val disc = cand?.disclosedPaths?.toSet().orEmpty()
                     val rows = (cred?.lifecycle as? Lifecycle.Issued)?.claims.orEmpty()
@@ -131,7 +136,7 @@ class GetCredentialActivity : FragmentActivity() {
                     onApprove = {
                         lifecycleScope.launch {
                             runCatching {
-                                session.respond(PresentationSelection.auto(presentation))
+                                session.respond(PresentationSelection.preferring(presentation, selected))
                                 when (val done = session.state.first { it.isTerminal }) {
                                     is PresentationState.Completed -> returnDcApiResponse(resultData, vpProtocol, done.dcApiResponse)
                                     is PresentationState.Failed -> throw done.error

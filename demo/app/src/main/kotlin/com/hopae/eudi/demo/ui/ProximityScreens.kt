@@ -605,6 +605,7 @@ fun ProximityReaderScreen(wallet: Wallet) {
                 }
                 status = "Requesting documents…"
                 val docs = wallet.reader.read(transport, engagement, readerRequest(kinds))
+                logReaderResults(docs)
                 results = docs
                 status = if (docs.isEmpty()) "No documents returned" else "✅ Read ${docs.size} document(s)"
                 LogStore.log("Reader read ${docs.size} document(s) over BLE")
@@ -671,6 +672,7 @@ fun ProximityReaderScreen(wallet: Wallet) {
                 }
                 status = "Requesting documents…"
                 val docs = wallet.reader.read(transport, eng.deviceEngagement, readerRequest(kinds), handoverNdef = handover.handoverSelect, handoverRequestNdef = handover.handoverRequest)
+                logReaderResults(docs)
                 results = docs
                 status = if (docs.isEmpty()) "No documents returned" else "✅ Read ${docs.size} document(s)"
                 LogStore.log("Reader read ${docs.size} document(s) over NFC+BLE")
@@ -761,6 +763,14 @@ private fun DocKindChip(kind: ReaderDocKind, selected: Boolean, onClick: () -> U
     }
 }
 
+/** Records each read document's verdict — the reason for an unverified one is the whole point of reading it. */
+private fun logReaderResults(docs: List<VerifiedDocument>) {
+    docs.forEach { d ->
+        if (d.deviceAuthenticated) LogStore.log("Reader: ${d.docType} verified")
+        else LogStore.log("Reader: ${d.docType} UNVERIFIED — ${d.verificationError ?: "no reason given"}")
+    }
+}
+
 @Composable
 private fun ReaderResultCard(doc: VerifiedDocument) {
     val c = WalletTheme.colors
@@ -771,6 +781,16 @@ private fun ReaderResultCard(doc: VerifiedDocument) {
                 Text(doc.docType, style = MaterialTheme.typography.bodySmall, color = c.inkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             TrustBadge(doc.deviceAuthenticated, trustedText = "Verified", untrustedText = "Unverified")
+        }
+        // §9.3.1 failures are forgery signals and a missing trust anchor is not — the badge cannot tell them
+        // apart, so the reason the SDK carried here is shown rather than dropped.
+        doc.verificationError?.takeIf { !doc.deviceAuthenticated }?.let { reason ->
+            Text(
+                reason,
+                style = MaterialTheme.typography.bodySmall,
+                color = c.danger,
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            )
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
         val flat = doc.elements.flatMap { (_, els) -> els.entries }

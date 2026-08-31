@@ -53,6 +53,9 @@ class BleGattServerTransport(
     private var device: BluetoothDevice? = null
     private var mtu = 23
 
+    /** Last CCCD value each peer wrote, keyed by [cccdKey]; Android does not track these for a local GATT server. */
+    private val cccd = mutableMapOf<String, ByteArray>()
+
     private val incoming = Channel<ByteArray>(Channel.UNLIMITED)
     private val assembling = ByteArrayOutputStream()
     private var notifySent: CompletableDeferred<Boolean>? = null
@@ -145,10 +148,13 @@ class BleGattServerTransport(
         }
     }
 
+    private fun cccdKey(device: BluetoothDevice, descriptor: BluetoothGattDescriptor) =
+        "${device.address}/${descriptor.characteristic.uuid}"
+
     private fun char(uuid: UUID, properties: Int): BluetoothGattCharacteristic {
         val c = BluetoothGattCharacteristic(uuid, properties, BluetoothGattCharacteristic.PERMISSION_WRITE or BluetoothGattCharacteristic.PERMISSION_READ)
         if (properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) {
-            c.addDescriptor(BluetoothGattDescriptor(Ble.CCCD, BluetoothGattDescriptor.PERMISSION_WRITE))
+            c.addDescriptor(BluetoothGattDescriptor(Ble.CCCD, BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
         }
         return c
     }
@@ -200,7 +206,25 @@ class BleGattServerTransport(
             device: BluetoothDevice, requestId: Int, descriptor: BluetoothGattDescriptor,
             preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray,
         ) {
+            if (descriptor.uuid == Ble.CCCD) cccd[cccdKey(device, descriptor)] = value.copyOf()
             if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+        }
+
+        /**
+         * Android's GATT server keeps no state for app-registered descriptors, so a CCCD read is answered here or
+         * not at all. §8.3.3.1.1.4 requires State and Server2Client to carry one, and a peer may read it before
+         * subscribing — report notifications disabled (0x0000) until it writes.
+         */
+        override fun onDescriptorReadRequest(
+            device: BluetoothDevice, requestId: Int, offset: Int, descriptor: BluetoothGattDescriptor,
+        ) {
+            if (descriptor.uuid != Ble.CCCD) {
+                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_READ_NOT_PERMITTED, 0, null)
+                return
+            }
+            val value = cccd[cccdKey(device, descriptor)] ?: BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
+            val slice = if (offset < value.size) value.copyOfRange(offset, value.size) else ByteArray(0)
+            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, slice)
         }
 
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {

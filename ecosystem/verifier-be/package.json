@@ -21,7 +21,7 @@
     "@nestjs/terminus": "^11.0.0",
     "@peculiar/webcrypto": "^1.7.1",
     "@peculiar/x509": "^2.0.0",
-    "@sd-jwt/core": "^0.17.0",
+    "@sd-jwt/core": "^0.20.0",
     "@sd-jwt/crypto-nodejs": "^0.17.0",
     "@sd-jwt/decode": "^0.17.0",
     "@sd-jwt/sd-jwt-vc": "^0.17.0",
